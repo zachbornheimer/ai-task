@@ -71,7 +71,9 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
 - Leases default to 30 minutes (5m..4h); every authenticated command
   renews them. The token is never stored on disk; hosts inject it as
   `AT_SESSION`.
-- `--archive` needs `--reason`.
+- `--archive` needs `--reason`; `--withdraw-submission` (with `--planner`)
+  withdraws a cohort member's pending submission so its contract can
+  change.
 - JSON output is compact by default (`--pretty` indents).
 - Completion re-checks prerequisites, contract revision, regression policy,
   and the run's own evidence in the finalising transaction.

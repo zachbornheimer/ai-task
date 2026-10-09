@@ -22,7 +22,7 @@ func init() {
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --regression-json, --integration, --target-branch, --max-attempts", runProject)
 	register("add", "plan a task or group: at add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]*", runAdd)
-	register("update", "change a plan item: at update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts]", runUpdate)
+	register("update", "change a plan item: at update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: at show REF [--full]", runShow)
 	register("list", "list the plan: at list [ready|blocked|all|archived]", runList)
 	register("status", "project summary: counts, claimable, active, done, stalled", runStatus)
@@ -336,6 +336,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	archive := c.fs.Bool("archive", false, "archive (soft-delete) the task or group; needs --reason")
 	reason := c.fs.String("reason", "", "why the item is archived (recorded; required with --archive)")
 	reset := c.fs.Bool("reset-attempts", false, "clear failure bookkeeping so the task can be claimed again")
+	withdraw := c.fs.Bool("withdraw-submission", false, "withdraw a cohort member's submission that awaits its peers so its contract can change (with --planner)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -354,7 +355,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
 	} else {
-		u := plan.UpdateTask{Target: target, ResetAttempts: *reset}
+		u := plan.UpdateTask{Target: target, ResetAttempts: *reset, WithdrawSubmission: *withdraw}
 		if *title != "" {
 			u.Title = title
 		}

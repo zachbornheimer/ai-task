@@ -209,7 +209,7 @@ func (e *Engine) reconcileIntents(ctx context.Context) error {
 				}
 				if !byJob[cur.JobID] {
 					byJob[cur.JobID] = true
-					return tx.SetJobStatus(cur.JobID, "error", cur.CandidateRevision, "verifier died before promoting; job will be retried", now)
+					return tx.SetJobStatus(cur.JobID, "interrupted", cur.CandidateRevision, "verifier died before promoting; job will be retried", now)
 				}
 				return nil
 			}

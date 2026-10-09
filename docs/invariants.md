@@ -70,6 +70,17 @@ claimed, verifying, and submissions whose cohort can be verified.
   and status agree), retried by an explicit claim, cleared by a planner
   reset; `list ready`, `status` and `claim` agree throughout.
   (`TestUnusableWorktreeDoesNotBlockTheQueue`)
+- A consumed cohort submission token is acknowledged idempotently and
+  gains no authority; a submission awaiting its peers pins the member's
+  contract until an explicit planner withdrawal; a late conflict sends
+  back only the member it concerns; a shared regression failure charges
+  nobody; a promotion that cannot land backs off (bounded, cooling, not a
+  stall) and completes once the cause is gone.
+  (`TestCohortSubmissionIsAcknowledgedIdempotently`,
+  `TestSubmittedCohortContractIsPinned`,
+  `TestCohortLateConflictBlamesOnlyThatMember`,
+  `TestCohortRegressionFailureChargesNobody`,
+  `TestCohortPromotionBackoffIsBounded`)
 - An idempotency key is bound to the request's content digest; a replay
   under a stable key compares blockers as well; a change set that changes
   nothing does not bump the plan revision.

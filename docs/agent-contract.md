@@ -173,7 +173,19 @@ For a cohort member, step 2 records the submission and ends the claim;
 when every peer has submitted, a verifier job assembles one candidate,
 runs every member's task checks and the regression suite on it, promotes,
 and completes all members atomically. The consumed token is not a cohort
-credential.
+credential, but `verify complete` with it again is an idempotent
+acknowledgement: the stored submission and the member's current status,
+no new run, no new authority. A submission waiting for its peers pins the
+member's contract: changing it needs `at update <ref> --planner
+--withdraw-submission` (the member becomes claimable, nothing is counted,
+and it must resubmit under the new contract). Blame is precise: a
+member whose own checks fail goes back alone; a late conflict on one
+member (new prerequisite, archive) sends only that member back while its
+peers keep their submissions; a shared regression failure sends every
+member back with the evidence but charges nobody; a promotion that cannot
+land (environment) keeps every submission, records the cause as
+`last_error`, and retries with a growing backoff (30s doubling to 30m)
+that `status` reports as cooling, never as a stall.
 
 A failed `verify complete` returns `VERIFICATION_FAILED` with the evidence
 in `error.details`; the claim stays live for repair and the task's failure

@@ -22,7 +22,7 @@ type Job struct {
 	ID             int64
 	ProjectID      project.ID
 	Cohort         string
-	Status         string // running | passed | failed | error
+	Status         string // running | passed | failed | error (environment) | interrupted (verifier died)
 	Members        []JobMember
 	OwnerDigest    string
 	LeaseExpiresAt time.Time
@@ -109,6 +109,24 @@ func (t *Tx) FinishJob(id int64, ownerDigest, status, candidate, summary string,
 		return fault.New(fault.CodeSessionSuperseded, "verification job %d is no longer owned by this verifier", id)
 	}
 	return nil
+}
+
+// RecentJobs lists a cohort's newest jobs, newest first.
+func (t *Tx) RecentJobs(pid project.ID, cohort string, limit int) ([]Job, error) {
+	rows, err := t.tx.QueryContext(t.ctx, jobSelect+` WHERE project_id = ? AND cohort = ? ORDER BY id DESC LIMIT ?`, pid, cohort, limit)
+	if err != nil {
+		return nil, wrapInternal(err, "list cohort jobs")
+	}
+	defer rows.Close()
+	var out []Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, wrapInternal(err, "scan job")
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
 }
 
 // JobsForProject lists jobs, newest first.

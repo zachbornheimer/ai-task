@@ -104,10 +104,16 @@ intent per member, promotes under the same lock, and completes all
 members in one transaction; the same recovery applies (a dead verifier's
 job lease expires, Git decides, members complete or return to pending for
 the next verifier). Failing member checks send
-that member back for repair while passing peers keep waiting; a failing
-regression sends every member back. A verifier that dies leaves a job
-whose lease expires; `Claim(wait)` in any worker reconciles and retries it,
-so no hidden command is needed.
+that member back for repair (one counted failure) while passing peers keep
+waiting; a failing regression sends every member back with the evidence
+and charges nobody; a late conflict on one member sends only that member
+back; a promotion that cannot land keeps every submission and retries
+with a capped exponential backoff. A verifier that dies leaves a job whose
+lease expires (`interrupted`, not an error: no backoff); `Claim(wait)` in
+any worker reconciles and retries it, so no hidden command is needed. A
+submitted member's contract is pinned until the planner withdraws the
+submission (`--planner --withdraw-submission`). A consumed token's
+`verify complete` is an idempotent acknowledgement.
 
 Cohorts are not hard edges and must not be used where A truly cannot be
 implemented before B; that is a design problem a cohort cannot fix. Prefer

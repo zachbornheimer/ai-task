@@ -149,6 +149,13 @@ func (e *Engine) claimCohortJob(ctx context.Context, pid project.ID) (cohortJob,
 			} else if running != nil {
 				continue
 			}
+			// Environment failures (a promotion that cannot land) back off
+			// instead of re-running the whole verification in a loop.
+			if next, _, err := cohortBackoff(tx, pid, cohort); err != nil {
+				return err
+			} else if next.After(now) {
+				continue
+			}
 			var jm []sqlite.JobMember
 			for _, m := range members {
 				jm = append(jm, sqlite.JobMember{TaskID: m.Task.ID, SubmissionID: m.Submission.ID, Revision: m.Submission.Revision})
@@ -173,6 +180,46 @@ func (e *Engine) claimCohortJob(ctx context.Context, pid project.ID) (cohortJob,
 	})
 	return job, found, err
 }
+
+// Cohort retry backoff after a job that ended in an environment error:
+// 30s, 1m, 2m, ... capped at 30m, counted over consecutive error jobs.
+const (
+	cohortBackoffBase = 30 * time.Second
+	cohortBackoffCap  = 30 * time.Minute
+)
+
+// cohortBackoff returns when the cohort may be retried and how many
+// consecutive environment errors precede it (zero when none).
+func cohortBackoff(tx *sqlite.Tx, pid project.ID, cohort string) (time.Time, int, error) {
+	jobs, err := tx.RecentJobs(pid, cohort, 16)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	n := 0
+	for _, j := range jobs {
+		if j.Status != "error" || j.FinishedAt == nil {
+			break
+		}
+		n++
+	}
+	if n == 0 {
+		return time.Time{}, 0, nil
+	}
+	d := cohortBackoffBase << uint(n-1)
+	if n > 12 || d > cohortBackoffCap {
+		d = cohortBackoffCap
+	}
+	return jobs[0].FinishedAt.Add(d), n, nil
+}
+
+// cohortMemberConflict says which member's re-check refused finalisation.
+type cohortMemberConflict struct {
+	member task.ID
+	err    error
+}
+
+func (c cohortMemberConflict) Error() string { return c.err.Error() }
+func (c cohortMemberConflict) Unwrap() error { return c.err }
 
 // executeCohortJob assembles one candidate from every member revision,
 // runs each member's task checks and the regression checks fresh on it,
@@ -255,7 +302,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 		if err != nil {
 			cand.Cleanup()
 			if fault.CodeOf(err) != fault.CodeInternal {
-				_ = finishAll(sqlite.RunFailed, "cohort finalisation refused: "+err.Error(), false)
+				_ = e.finishConflict(ctx, job, fence, err)
 			}
 			return err
 		}
@@ -263,7 +310,10 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 			cand.Cleanup()
 			return err
 		}
-		err = mgr.Promote(ctx, job.proj.TargetBranch, cand)
+		err = e.fault("cohort:promote")
+		if err == nil {
+			err = mgr.Promote(ctx, job.proj.TargetBranch, cand)
+		}
 		cand.Cleanup()
 		if err != nil {
 			for _, id := range intents {
@@ -336,7 +386,7 @@ func (e *Engine) recordCohortIntents(ctx context.Context, job cohortJob, cand wo
 		for _, m := range job.members {
 			s := cohortSpec(job, m)
 			if _, err := e.recheckForCompletion(tx, s, candidate); err != nil {
-				return err
+				return cohortMemberConflict{member: m.rec.Task.ID, err: err}
 			}
 			if err := tx.FinishRun(m.runID, sqlite.RunPassed, "cohort verified on candidate "+short(candidate), now); err != nil {
 				return err
@@ -360,6 +410,41 @@ func (e *Engine) recordCohortIntents(ctx context.Context, job cohortJob, cand wo
 	return ids, err
 }
 
+// finishConflict ends a job whose finalisation was refused. When one
+// member's re-check failed (late prerequisite, contract change, archive,
+// resubmission), only that member goes back; its peers keep their
+// submissions and wait for it. Nothing is counted against anyone.
+func (e *Engine) finishConflict(ctx context.Context, job cohortJob, fence func(*sqlite.Tx) error, cause error) error {
+	now := e.now()
+	var mc cohortMemberConflict
+	culprit := task.ID("")
+	if errors.As(cause, &mc) {
+		culprit = mc.member
+	}
+	return e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if err := fence(tx); err != nil {
+			return err
+		}
+		for _, m := range job.members {
+			id := m.rec.Task.ID
+			switch {
+			case culprit == "" || id == culprit:
+				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "cohort finalisation refused: "+fault.MessageOf(cause), now); err != nil {
+					return err
+				}
+				if err := tx.SetLastError(id, 0, "PLAN_CONFLICT: "+fault.MessageOf(cause), now); err != nil {
+					return err
+				}
+			default:
+				if err := tx.FinishRun(m.runID, sqlite.RunPending, "waiting for cohort peer "+string(culprit)+" to be repaired", now); err != nil {
+					return err
+				}
+			}
+		}
+		return tx.FinishJob(job.id, job.owner.Digest(), "failed", "", "cohort finalisation refused: "+fault.MessageOf(cause), now)
+	})
+}
+
 // finalizeCohortDirect completes a cohort that needs no promotion in one
 // fenced transaction with the same re-checks.
 func (e *Engine) finalizeCohortDirect(ctx context.Context, job cohortJob, candidate string, fence func(*sqlite.Tx) error, finishAll func(sqlite.RunStatus, string, bool) error) error {
@@ -370,7 +455,7 @@ func (e *Engine) finalizeCohortDirect(ctx context.Context, job cohortJob, candid
 		}
 		for _, m := range job.members {
 			if _, err := e.recheckForCompletion(tx, cohortSpec(job, m), candidate); err != nil {
-				return err
+				return cohortMemberConflict{member: m.rec.Task.ID, err: err}
 			}
 		}
 		for _, m := range job.members {
@@ -388,7 +473,7 @@ func (e *Engine) finalizeCohortDirect(ctx context.Context, job cohortJob, candid
 	})
 	if err != nil {
 		if fault.CodeOf(err) != fault.CodeInternal {
-			_ = finishAll(sqlite.RunFailed, "cohort finalisation refused: "+err.Error(), false)
+			_ = e.finishConflict(ctx, job, fence, err)
 		}
 		return err
 	}
@@ -510,11 +595,13 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 		for _, m := range job.members {
 			switch {
 			case !regressionPassed:
-				// No blame can be assigned: every member is sent back.
+				// The shared suite failed on the combined candidate: which
+				// member broke it is unknown, so every member goes back for
+				// repair with the evidence, and nobody is charged a failure.
 				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "cohort regression failed on candidate "+short(candidate)+": "+regressionSummary, now); err != nil {
 					return err
 				}
-				if _, err := tx.RecordFailure(m.rec.Task.ID, m.rec.Submission.AttemptID, job.proj.RetryCooldown, now); err != nil {
+				if err := tx.SetLastError(m.rec.Task.ID, 0, "cohort regression failed on the combined candidate (no single member is to blame): "+regressionSummary, now); err != nil {
 					return err
 				}
 			case verdicts[m.runID].Summary != "":

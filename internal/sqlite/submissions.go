@@ -255,7 +255,9 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 		return 0, wrapInternal(err, "reconcile cohort runs")
 	}
 	n2, _ := res2.RowsAffected()
-	res3, err := t.tx.ExecContext(t.ctx, `UPDATE verification_jobs SET status = 'error', finished_at = ?, summary = 'verifier lease expired; job will be retried'
+	// 'interrupted' (not 'error'): a dead verifier is not a failed
+	// promotion, so it does not count toward the cohort's retry backoff.
+	res3, err := t.tx.ExecContext(t.ctx, `UPDATE verification_jobs SET status = 'interrupted', finished_at = ?, summary = 'verifier lease expired; job will be retried'
 		WHERE status = 'running' AND lease_expires_at <= ?`, ms(now), ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "reconcile jobs")

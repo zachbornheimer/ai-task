@@ -472,12 +472,41 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if claimed && contract && !a.cs.Planner {
 		return fault.New(fault.CodePlanConflict, "%s is claimed; its contract can only change with planner authority (--planner), and a running verification will fail closed", t.ID)
 	}
+	changed := false
+	// A submission waiting for its cohort peers pins the contract it will
+	// be judged under. Changing it needs an explicit withdrawal: the
+	// submission is marked withdrawn (no failure counted) and the member
+	// must resubmit under the new contract.
+	if s := rec.Submission; s != nil && (contract || edges) {
+		switch s.RunStatus() {
+		case sqlite.RunRunning:
+			return fault.New(fault.CodePlanConflict, "%s is being verified; its contract is pinned until the run ends", t.ID)
+		case sqlite.RunPending:
+			if !c.WithdrawSubmission || !a.cs.Planner {
+				return fault.New(fault.CodePlanConflict, "%s has a submission awaiting its cohort peers; its contract is pinned. To change it, withdraw the submission explicitly (planner authority: --planner --withdraw-submission); the member will have to resubmit", t.ID)
+			}
+			if s.Run != nil {
+				if err := a.tx.FinishRun(s.Run.ID, sqlite.RunFailed, "withdrawn by the planner: the contract changed before cohort verification", a.now); err != nil {
+					return err
+				}
+			} else {
+				runID, err := a.tx.InsertRun(sqlite.NewRun{TaskID: t.ID, AttemptID: s.AttemptID, SubmissionID: s.ID, Mode: verification.ModeComplete, Status: sqlite.RunFailed, Revision: s.Revision, Policy: effectivePolicy(t, a.proj), Environment: environmentFingerprint(), Summary: "withdrawn by the planner: the contract changed before cohort verification"}, a.now)
+				if err != nil {
+					return err
+				}
+				_ = runID
+			}
+			if err := a.tx.SetLastError(t.ID, 0, "submission withdrawn by the planner; resubmit under the new contract", a.now); err != nil {
+				return err
+			}
+			changed = true
+		}
+	}
 	if edges {
 		if err := a.authorizeEligibilityChange(rec); err != nil {
 			return err
 		}
 	}
-	changed := false
 	if c.Title != nil {
 		t.Description, changed = *c.Title, true
 	}

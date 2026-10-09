@@ -580,12 +580,48 @@ func (e *Engine) replayCompletion(ctx context.Context, token execution.Token) (V
 			return err
 		}
 		a := auth.Attempt
-		if a.EndedAt == nil || a.EndReason != execution.EndFinished {
+		if a.EndedAt == nil {
 			return nil
 		}
 		r, err := tx.GetRecord(a.TaskID)
 		if err != nil {
 			return err
+		}
+		if a.EndReason == execution.EndSubmitted {
+			// A cohort submission is acknowledged idempotently: the stored
+			// submission plus the member's current status, no new authority.
+			subs, err := tx.Submissions(a.TaskID)
+			if err != nil {
+				return err
+			}
+			proj, err := tx.GetProject(r.Task.ProjectID)
+			if err != nil {
+				return err
+			}
+			for _, s := range subs {
+				if s.AttemptID != a.ID {
+					continue
+				}
+				st := r.Status(e.now(), proj.MaxAttempts)
+				res = VerifyResult{TaskID: a.TaskID, Mode: verification.ModeComplete, Revision: s.Revision, SubmissionID: s.ID, Submitted: true, Replayed: true, Status: st, Completed: st == task.StatusComplete, Passed: st == task.StatusComplete}
+				if s.Run != nil {
+					res.RunID, res.Summary = s.Run.ID, s.Run.Summary
+				}
+				switch {
+				case r.CompletedAt != nil && r.CompletedSubmissionID == s.ID:
+					res.Message = "already submitted and complete; stored result returned"
+				case r.Submission != nil && r.Submission.ID != s.ID:
+					res.Message = fmt.Sprintf("already submitted (submission %d); a later attempt superseded it, current status %s", s.ID, st)
+					res.Completed, res.Passed = false, false
+				default:
+					res.Message = fmt.Sprintf("already submitted (submission %d); current status %s", s.ID, st)
+				}
+				ok = true
+			}
+			return nil
+		}
+		if a.EndReason != execution.EndFinished {
+			return nil
 		}
 		if r.CompletedAt == nil || r.CompletedSubmissionID == 0 {
 			return nil

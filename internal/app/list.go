@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -179,6 +180,8 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		}
 	}
 	runnable := map[string]bool{}
+	backoff := map[string]time.Time{}
+	var cohortsBackingOff, cohortsStuck int
 	for cohort, members := range cohortMembers {
 		ok := len(members) > 0
 		for _, m := range members {
@@ -187,6 +190,19 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 			}
 		}
 		runnable[cohort] = ok
+		if ok {
+			next, errs, err := cohortBackoff(tx, proj.ID, cohort)
+			if err != nil {
+				return s, err
+			}
+			if next.After(n) {
+				backoff[cohort] = next
+				cohortsBackingOff++
+				if proj.MaxAttempts > 0 && errs >= proj.MaxAttempts {
+					cohortsStuck++
+				}
+			}
+		}
 	}
 	var exhausted, blockedByExhausted, workspaceBlocked, unverifiable int
 	for _, r := range records {
@@ -214,7 +230,14 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 			// the owner's lease expires.
 			s.Active++
 		case st == task.StatusAwaitingVerification:
-			if r.Task.Cohort == "" || runnable[r.Task.Cohort] {
+			if next, ok := backoff[r.Task.Cohort]; ok {
+				// The cohort's promotion is backing off: self-resolving.
+				s.Cooling++
+				if s.NextEligibleAt == nil || next.Before(*s.NextEligibleAt) {
+					ne := next
+					s.NextEligibleAt = &ne
+				}
+			} else if r.Task.Cohort == "" || runnable[r.Task.Cohort] {
 				s.Active++
 			}
 		case st == task.StatusNeedsAttention:
@@ -244,6 +267,9 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		}
 		if workspaceBlocked > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have an unusable workspace; fix the worktree and `at claim <task>`, or `at update <task> --reset-attempts`", workspaceBlocked))
+		}
+		if cohortsStuck > 0 {
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort(s) keep failing to promote; see the members' last_error", cohortsStuck))
 		}
 		if unverifiable > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `at update <task> --check ...`", unverifiable))

@@ -67,6 +67,10 @@ type UpdateTask struct {
 	// ResetAttempts clears failure bookkeeping so an exhausted task can be
 	// claimed again (planner decision).
 	ResetAttempts bool
+	// WithdrawSubmission withdraws a cohort member's submission that is
+	// waiting for its peers, so its contract can change (planner
+	// decision; the member becomes claimable and must resubmit).
+	WithdrawSubmission bool
 }
 
 // ArchiveTask soft-deletes a task or group. Reason is mandatory: removing a
