@@ -146,6 +146,14 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 		case errors.Is(err, at.ErrDone):
 			return nil
 		case errors.Is(err, at.ErrStalled):
+			// A stall is a human's problem: say why, and show the plan.
+			var fe *at.Error
+			if errors.As(err, &fe) {
+				if sum, ok := fe.Details.(at.Summary); ok {
+					fmt.Fprintf(out, "worker %d: stalled: %v\n", n, sum.Reasons)
+				}
+			}
+			printPlan(ctx, eng, project, out)
 			return fmt.Errorf("worker %d: stalled, human action needed: %v", n, err)
 		case err != nil:
 			return err
@@ -268,7 +276,11 @@ func printPlan(ctx context.Context, eng *at.Store, project at.ProjectID, out *os
 		fmt.Fprintf(out, "  group %s %s (%d/%d)\n", g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
 	}
 	for _, t := range snap.Tasks {
-		fmt.Fprintf(out, "  %s %s  %s [%s]\n", t.Status.Glyph(), t.ID, t.Title, t.Status)
+		fmt.Fprintf(out, "  %s %s  %s [%s]", t.Status.Glyph(), t.ID, t.Title, t.Status)
+		if r := t.Verification.Complete; r != nil && r.Summary != "" {
+			fmt.Fprintf(out, " — %s: %s", r.Status, r.Summary)
+		}
+		fmt.Fprintln(out)
 	}
 }
 

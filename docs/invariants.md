@@ -78,6 +78,16 @@ claimed, verifying, and submissions whose cohort can be verified.
 - Concurrent promotions into a checked-out target: exactly one wins, the
   rest see a moved target and rebuild, and the checkout stays clean.
   (`workspace.TestConcurrentPromotionsIntoCheckout`)
+- The target moves only after a fenced intent transaction re-checked
+  everything completion depends on, and completion is recorded exactly
+  when the candidate reached the target: a crash at any point is resolved
+  from Git by reconciliation (complete, or claimable with no failure
+  counted); a contract change or a superseded session during verification
+  never moves the target; while an intent is open the task cannot be
+  claimed, edited, blocked or archived.
+  (`TestIntegrationIntentCrashRecovery`, `TestCohortIntentCrashRecovery`,
+  `TestPlannerEditDuringVerificationNeverMovesTarget`,
+  `TestSupersededVerifierCannotPromote`)
 
 ## Verification and completion
 

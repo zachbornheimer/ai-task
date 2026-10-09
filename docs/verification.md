@@ -57,13 +57,33 @@ after a committed completion returns the stored result and runs nothing.
    claim stays live, `VERIFICATION_FAILED` with evidence.
 5. In `promote` projects: merge the revision onto the target in a scratch
    worktree; if the merge changed content, run both suites on the merge
-   too; compare-and-swap the target (rebuild on a moved base up to three
-   times). Conflicts and dirty target checkouts fail with
-   `INTEGRATION_FAILED` and the target never moves.
-6. One transaction re-checks the session, prerequisites, the task's
-   contract revision, the project regression digest, and that stored
-   evidence proves the final revision; then marks complete and ends the
-   claim.
+   too. Conflicts fail with `INTEGRATION_FAILED` and the target never
+   moves.
+6. **Intent.** One short transaction re-checks the session, prerequisites,
+   the task's contract revision, the project regression digest, archive
+   state, submission identity, and that stored evidence proves the
+   candidate; then records an integration intent (task, attempt, run,
+   submission, contract revision, regression digest, target, base,
+   candidate). The task is now `awaiting_integration`: it cannot be
+   claimed, edited, blocked or archived until completion is recorded.
+7. **Promote.** Compare-and-swap the target under the repository's
+   promotion lock (an advisory file lock owned by the process's descriptor,
+   released by the kernel if the process dies; nothing is ever "stolen").
+   A moved target abandons the intent and rebuilds (up to three times);
+   any other failure abandons it and the target never moved.
+8. **Complete.** A second short transaction, authorised by the intent's
+   owner rather than the lease, marks complete, ends the claim and records
+   the integration.
+9. **Recovery.** A process killed between 6 and 8 leaves an open intent.
+   When its owner's lease expires, any engine reconciles from Git: if the
+   candidate is an ancestor of the target the promotion happened and the
+   task is completed (an exact retry of `verify complete` returns the
+   stored acknowledgement); otherwise the intent is abandoned, the run is
+   recorded as interrupted, and the task is claimable with no failure
+   counted. Projects without promotion complete in step 6 directly.
+
+No SQLite transaction is ever held across a Git command or a check
+process.
 
 ## Cohorts
 
@@ -71,8 +91,11 @@ Tasks sharing `--cohort C` implement independently. `verify complete` on a
 member records its submission and ends its claim. When every live member
 has submitted, a verifier job (durable, leased, owned by a fresh token)
 assembles one candidate by merging every member revision onto the target,
-runs each member's task checks and the regression suite on it, promotes,
-and completes all members in one transaction. Failing member checks send
+runs each member's task checks and the regression suite on it, pins one
+intent per member, promotes under the same lock, and completes all
+members in one transaction; the same recovery applies (a dead verifier's
+job lease expires, Git decides, members complete or return to pending for
+the next verifier). Failing member checks send
 that member back for repair while passing peers keep waiting; a failing
 regression sends every member back. A verifier that dies leaves a job
 whose lease expires; `Claim(wait)` in any worker reconciles and retries it,

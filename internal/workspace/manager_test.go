@@ -263,7 +263,11 @@ func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
 	if err != nil || !st.Clean() {
 		t.Fatalf("checkout dirty after concurrent promotion: %+v %v", st, err)
 	}
-	if _, err := os.Stat(filepath.Join(r.git(r.dir, "rev-parse", "--path-format=absolute", "--git-common-dir"), "at-promote.lock")); err == nil {
-		t.Fatal("promotion lock left behind")
+	// The lock file may remain; the lock itself is the descriptor and was
+	// released, so a new promoter takes it at once.
+	unlock, err := r.mgr.promoteLock(r.ctx)
+	if err != nil {
+		t.Fatalf("lock not released: %v", err)
 	}
+	unlock()
 }

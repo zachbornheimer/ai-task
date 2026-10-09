@@ -84,17 +84,30 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 		info.Quarantined = stale
 		// The branch is free again; attach a fresh worktree below.
 	}
-	if m.BranchExists(ctx, info.Branch) {
-		// Branch exists (a previous crash between branch creation and
-		// worktree registration, or a pruned worktree); attach to it.
-		_, _ = git(ctx, m.Repo, "worktree", "prune")
-		if _, err := gitRetry(ctx, m.Repo, "worktree", "add", info.Path, info.Branch); err != nil {
-			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "attach worktree for %s", info.Branch)
+	// Two idempotent steps instead of `worktree add -b`: under concurrent
+	// claims Git can create the branch and then fail on another
+	// worktree's half-written metadata, and a retry of `-b` would then
+	// refuse because the branch exists.
+	if !m.BranchExists(ctx, info.Branch) {
+		if _, err := gitRetry(ctx, m.Repo, "branch", info.Branch, base); err != nil && !m.BranchExists(ctx, info.Branch) {
+			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create branch %s from %s", info.Branch, base)
 		}
-		return info, nil
 	}
-	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", "-b", info.Branch, info.Path, base); err != nil {
-		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create worktree for %s from %s", info.Branch, base)
+	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", info.Path, info.Branch); err != nil {
+		// A retried add may have registered the worktree before failing.
+		if CurrentBranch(ctx, info.Path) == info.Branch {
+			return info, nil
+		}
+		// A worktree deleted outside Git leaves a stale registration that
+		// pins the branch; prune only then (an unconditional prune races
+		// with other processes' half-created worktrees).
+		if msg := err.Error(); strings.Contains(msg, "already checked out") || strings.Contains(msg, "already registered") || strings.Contains(msg, "already used by worktree") {
+			_, _ = git(ctx, m.Repo, "worktree", "prune")
+			if _, err2 := gitRetry(ctx, m.Repo, "worktree", "add", info.Path, info.Branch); err2 == nil || CurrentBranch(ctx, info.Path) == info.Branch {
+				return info, nil
+			}
+		}
+		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "attach worktree for %s", info.Branch)
 	}
 	return info, nil
 }
@@ -250,33 +263,36 @@ func (m Manager) Promote(ctx context.Context, target string, cand Candidate) err
 	return nil
 }
 
-// promoteLock takes a repository-wide lock for promotions into a checked
-// out target: a lock file in the common Git directory, created
-// exclusively, held for the few milliseconds a fast-forward takes. A lock
-// older than promoteLockStale is treated as left behind by a dead process.
+// promoteLock takes the repository-wide promotion lock: an advisory lock
+// on <git-common-dir>/at-promote.lock held by this process's file
+// descriptor. Ownership is the descriptor, so unlock can only release the
+// instance this process holds, and the kernel releases it when the holder
+// dies: there is no stale-lock detection and nothing to steal. It waits
+// (bounded by ctx) while another promoter holds it.
 func (m Manager) promoteLock(ctx context.Context) (func(), error) {
 	common, err := git(ctx, m.Repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "locate git directory")
 	}
 	path := filepath.Join(strings.TrimSpace(common), "at-promote.lock")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "open promotion lock")
+	}
 	delay := 10 * time.Millisecond
 	for {
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if err == nil {
-			fmt.Fprintf(f, "%d\n", os.Getpid())
+		locked, err := tryLockFile(f)
+		if err != nil {
 			f.Close()
-			return func() { os.Remove(path) }, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
 			return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "take promotion lock")
 		}
-		if st, err := os.Stat(path); err == nil && time.Since(st.ModTime()) > promoteLockStale {
-			os.Remove(path)
-			continue
+		if locked {
+			fmt.Fprintf(f, "%d\n", os.Getpid())
+			return func() { unlockFile(f); f.Close() }, nil
 		}
 		select {
 		case <-ctx.Done():
+			f.Close()
 			return nil, fault.Wrap(ctx.Err(), fault.CodeIntegrationFailed, "waiting for the promotion lock %s", path)
 		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
 		}
@@ -285,8 +301,6 @@ func (m Manager) promoteLock(ctx context.Context) (func(), error) {
 		}
 	}
 }
-
-const promoteLockStale = 5 * time.Minute
 
 // worktreeFor returns the path of the worktree that has branch checked
 // out, or "".

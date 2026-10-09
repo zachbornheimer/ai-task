@@ -327,9 +327,26 @@ func nonEmpty(s []string) []string {
 	return s
 }
 
+// integrating refuses any plan change to a task whose verified candidate
+// is being promoted: the intent pinned the contract and prerequisites,
+// and the target may already carry the candidate.
+func (a *applier) integrating(id task.ID) error {
+	in, err := a.tx.ActiveIntentForTask(id)
+	if err != nil {
+		return err
+	}
+	if in != nil {
+		return fault.New(fault.CodePlanConflict, "%s is being integrated (candidate %s onto %s); it cannot change until completion is recorded", id, short(in.CandidateRevision), in.TargetBranch)
+	}
+	return nil
+}
+
 // authorizeEligibilityChange guards edits that change a claimed task's
 // eligibility: the agent holding it (session token) or the planner.
 func (a *applier) authorizeEligibilityChange(target sqlite.Record) error {
+	if err := a.integrating(target.Task.ID); err != nil {
+		return err
+	}
 	att := target.Attempt
 	if att == nil || att.EndedAt != nil || !att.LeaseActive(a.now) {
 		return nil
@@ -396,6 +413,11 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) {
 		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
+	}
+	if contract || edges {
+		if err := a.integrating(t.ID); err != nil {
+			return err
+		}
 	}
 	claimed := rec.Attempt != nil && rec.Attempt.EndedAt == nil && rec.Attempt.LeaseActive(a.now)
 	if claimed && contract && !a.cs.Planner {
@@ -561,6 +583,9 @@ func (a *applier) archive(c plan.ArchiveTask) error {
 	}
 	if rec.Submission != nil && rec.Submission.RunStatus() == sqlite.RunPending {
 		return fault.New(fault.CodePlanConflict, "%s has a submission awaiting verification; it cannot be archived", t.ID)
+	}
+	if err := a.integrating(t.ID); err != nil {
+		return err
 	}
 	if err := a.tx.ArchiveTask(t.ID, strings.TrimSpace(c.Reason), a.now); err != nil {
 		return err

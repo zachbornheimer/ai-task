@@ -269,6 +269,12 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
 	}
+	if st == task.StatusAwaitingIntegration {
+		if in, err := tx.ActiveIntentForTask(t.ID); err == nil && in != nil {
+			iv := intentView(*in)
+			v.Integration = &iv
+		}
+	}
 	if !r.NextEligibleAt.IsZero() && r.NextEligibleAt.After(now) {
 		ne := r.NextEligibleAt
 		v.NextEligibleAt = &ne

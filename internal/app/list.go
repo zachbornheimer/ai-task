@@ -202,9 +202,12 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		switch {
 		case st.Claimable():
 			s.Claimable++
-		case st == task.StatusClaimed, st == task.StatusVerifying:
+		case st == task.StatusClaimed, st == task.StatusVerifying, st == task.StatusAwaitingIntegration:
+			// An open integration intent is work in flight: its owner is
+			// promoting, or reconciliation will resolve it from Git once
+			// the owner's lease expires.
 			s.Active++
-		case st == task.StatusAwaitingVerification, st == task.StatusAwaitingIntegration:
+		case st == task.StatusAwaitingVerification:
 			if r.Task.Cohort == "" || runnable[r.Task.Cohort] {
 				s.Active++
 			}

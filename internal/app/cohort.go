@@ -248,85 +248,144 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 		}
 		if job.proj.Integration != project.IntegrationPromote {
 			cand.Cleanup()
-			break
+			return e.finalizeCohortDirect(ctx, job, candidate, fence, finishAll)
+		}
+		// Durable, recoverable promotion (see integrate.go): pin one intent
+		// per member, compare-and-swap the target, then complete all members.
+		intents, err := e.recordCohortIntents(ctx, job, cand, candidate, fence)
+		if err != nil {
+			cand.Cleanup()
+			if fault.CodeOf(err) != fault.CodeInternal {
+				_ = finishAll(sqlite.RunFailed, "cohort finalisation refused: "+err.Error(), false)
+			}
+			return err
+		}
+		if err := e.fault("cohort:after-intent"); err != nil {
+			cand.Cleanup()
+			return err
 		}
 		err = mgr.Promote(ctx, job.proj.TargetBranch, cand)
 		cand.Cleanup()
-		if err == nil {
-			break
-		}
-		if errors.Is(err, workspace.ErrTargetMoved) && attempt < 2 {
-			continue
-		}
-		// Candidate is fine; promotion is not. Put members back to pending
-		// so the next verifier rebuilds the candidate.
-		now := e.now()
-		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error {
-			if err := fence(tx); err != nil {
-				return err
+		if err != nil {
+			for _, id := range intents {
+				e.abandonIntent(ctx, id, "promotion did not happen: "+err.Error())
 			}
-			for _, m := range job.members {
-				if err := tx.FinishRun(m.runID, sqlite.RunPending, "candidate passed but promotion failed: "+err.Error(), now); err != nil {
+			if errors.Is(err, workspace.ErrTargetMoved) && attempt < 2 {
+				continue
+			}
+			// Candidate is fine; promotion is not. Put members back to pending
+			// so the next verifier rebuilds the candidate.
+			now := e.now()
+			_ = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+				if err := fence(tx); err != nil {
+					return err
+				}
+				for _, m := range job.members {
+					if err := tx.FinishRun(m.runID, sqlite.RunPending, "candidate passed but promotion failed: "+err.Error(), now); err != nil {
+						return err
+					}
+				}
+				return tx.FinishJob(job.id, job.owner.Digest(), "error", candidate, err.Error(), now)
+			})
+			return err
+		}
+		if err := e.fault("cohort:after-promote"); err != nil {
+			return err
+		}
+		now := e.now()
+		err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+			for _, id := range intents {
+				in, err := tx.GetIntent(id)
+				if err != nil {
+					return err
+				}
+				if err := e.completeIntentTx(tx, in, job.owner.Digest(), "cohort verified on candidate "+short(candidate)); err != nil {
 					return err
 				}
 			}
-			return tx.FinishJob(job.id, job.owner.Digest(), "error", candidate, err.Error(), now)
+			return tx.FinishJob(job.id, job.owner.Digest(), "passed", candidate, "cohort verified", now)
 		})
-		return err
+		if err != nil {
+			// The intents stay open; reconciliation completes them from Git.
+			return fault.Wrap(err, fault.CodeInternal, "record completion of promoted cohort %q (will be reconciled)", job.cohort)
+		}
+		if err := e.fault("cohort:after-complete"); err != nil {
+			return err
+		}
+		return nil
 	}
+	return nil
+}
+
+// cohortSpec builds the intent spec of one member.
+func cohortSpec(job cohortJob, m cohortMember) intentSpec {
+	return intentSpec{proj: job.proj, taskID: m.rec.Task.ID, jobID: job.id, runID: m.runID, submission: m.submission, owner: job.owner.Digest(), contractRev: m.contractRev, regression: job.regressionD, policy: m.policy, source: m.revision}
+}
+
+// recordCohortIntents re-checks every member under the job fence and pins
+// one intent per member for the same candidate.
+func (e *Engine) recordCohortIntents(ctx context.Context, job cohortJob, cand workspace.Candidate, candidate string, fence func(*sqlite.Tx) error) ([]int64, error) {
 	now := e.now()
-	// Finalise atomically with the same rechecks as single-task completion.
+	var ids []int64
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := fence(tx); err != nil {
 			return err
 		}
-		proj, err := tx.GetProject(job.proj.ID)
-		if err != nil {
-			return err
-		}
-		if (verification.Policy{Regression: proj.Regression}).Digest() != job.regressionD {
-			return fault.New(fault.CodePlanConflict, "regression policy changed during cohort verification")
-		}
 		for _, m := range job.members {
-			r, err := tx.GetRecord(m.rec.Task.ID)
+			s := cohortSpec(job, m)
+			if _, err := e.recheckForCompletion(tx, s, candidate); err != nil {
+				return err
+			}
+			if err := tx.FinishRun(m.runID, sqlite.RunPassed, "cohort verified on candidate "+short(candidate), now); err != nil {
+				return err
+			}
+			if candidate != m.revision {
+				if err := tx.SetRunIntegratedRevision(m.runID, candidate); err != nil {
+					return err
+				}
+			}
+			id, err := tx.InsertIntent(sqlite.Intent{ProjectID: job.proj.ID, TaskID: m.rec.Task.ID, JobID: job.id, RunID: m.runID, SubmissionID: m.submission, OwnerDigest: s.owner, ContractRev: m.contractRev, RegressionDigest: job.regressionD, TargetBranch: job.proj.TargetBranch, BaseRevision: cand.Base, SourceRevision: m.revision, CandidateRevision: candidate}, now)
 			if err != nil {
 				return err
 			}
-			switch {
-			case r.UnmetRequires > 0:
-				return fault.New(fault.CodeTaskBlocked, "%s has incomplete prerequisites", r.Task.ID)
-			case r.Task.ContractRev != m.contractRev:
-				return fault.New(fault.CodePlanConflict, "%s contract changed during cohort verification", r.Task.ID)
-			case r.Task.Archived():
-				return fault.New(fault.CodePlanConflict, "%s was archived during cohort verification", r.Task.ID)
-			case r.Submission == nil || r.Submission.ID != m.submission:
-				return fault.New(fault.CodePlanConflict, "%s was resubmitted during cohort verification", r.Task.ID)
-			}
-			if v := verification.Judge(m.policy, evidence[m.runID]); !v.Passed {
-				return fault.New(fault.CodeVerificationFailed, "%s: %s", r.Task.ID, v.Summary)
+			ids = append(ids, id)
+		}
+		return nil
+	})
+	if err == nil {
+		e.notify()
+	}
+	return ids, err
+}
+
+// finalizeCohortDirect completes a cohort that needs no promotion in one
+// fenced transaction with the same re-checks.
+func (e *Engine) finalizeCohortDirect(ctx context.Context, job cohortJob, candidate string, fence func(*sqlite.Tx) error, finishAll func(sqlite.RunStatus, string, bool) error) error {
+	now := e.now()
+	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if err := fence(tx); err != nil {
+			return err
+		}
+		for _, m := range job.members {
+			if _, err := e.recheckForCompletion(tx, cohortSpec(job, m), candidate); err != nil {
+				return err
 			}
 		}
 		for _, m := range job.members {
 			if err := tx.FinishRun(m.runID, sqlite.RunPassed, "cohort verified on candidate "+short(candidate), now); err != nil {
 				return err
 			}
-			if candidate != "" && candidate != m.revision {
+			if candidate != m.revision {
 				_ = tx.SetRunIntegratedRevision(m.runID, candidate)
 			}
 			if err := tx.MarkComplete(m.rec.Task.ID, m.submission, now); err != nil {
 				return err
 			}
-			if job.proj.Integration == project.IntegrationPromote {
-				if err := tx.InsertIntegration(proj.ID, m.rec.Task.ID, job.id, proj.TargetBranch, cand.Base, m.revision, candidate, now); err != nil {
-					return err
-				}
-			}
 		}
 		return tx.FinishJob(job.id, job.owner.Digest(), "passed", candidate, "cohort verified", now)
 	})
 	if err != nil {
-		code := fault.CodeOf(err)
-		if code != fault.CodeInternal {
+		if fault.CodeOf(err) != fault.CodeInternal {
 			_ = finishAll(sqlite.RunFailed, "cohort finalisation refused: "+err.Error(), false)
 		}
 		return err
