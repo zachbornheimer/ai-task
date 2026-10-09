@@ -127,7 +127,9 @@ func gitRetry(ctx context.Context, dir string, args ...string) (string, error) {
 
 func isLockContention(err error) bool {
 	msg := err.Error()
-	for _, s := range []string{".lock", "could not lock", "Unable to create", "File exists", "unable to write", "cannot lock ref"} {
+	// "failed to read .git/worktrees/<x>/commondir" is `git worktree add`
+	// listing worktrees while another process is still creating one.
+	for _, s := range []string{".lock", "could not lock", "Unable to create", "File exists", "unable to write", "cannot lock ref", "commondir", "failed to read .git/worktrees"} {
 		if strings.Contains(msg, s) {
 			return true
 		}

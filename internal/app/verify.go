@@ -341,129 +341,128 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	if !verdict.Passed {
 		return fail(sqlite.RunFailed, fault.CodeVerificationFailed, verdict.Summary, evidence)
 	}
-	final := fr.revision
-	var cand workspace.Candidate
-	if fr.proj.Integration == project.IntegrationPromote {
-		// Guarded promotion: build the candidate on the current target,
-		// verify it when the merge changed content, then compare-and-swap
-		// the target. If the target moved meanwhile, rebuild on the new
-		// base (bounded) rather than promote stale content.
-		promoted := false
-		for attempt := 0; attempt < 3 && !promoted; attempt++ {
-			var err error
-			cand, err = mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, fmt.Sprintf("at: integrate %s (%s)", fr.rec.Task.ID, fr.rec.Task.Description))
-			if err != nil {
-				return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
-			}
-			final = fr.revision
-			if cand.Revision != fr.revision {
-				snap, snapCleanup, err := mgr.Snapshot(ctx, cand.Revision)
-				if err != nil {
-					cand.Cleanup()
-					return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
-				}
-				more, err := e.runChecks(ctx, snap, fr.policy, fr.runID, cand.Revision, fence)
-				snapCleanup()
-				if err != nil {
-					cand.Cleanup()
-					_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(fr.runID, sqlite.RunError, err.Error(), e.now()) })
-					return res, err
-				}
-				evidence = append(evidence, more...)
-				if v := verification.Judge(fr.policy, more); !v.Passed {
-					cand.Cleanup()
-					return fail(sqlite.RunFailed, fault.CodeVerificationFailed, "integrated candidate "+short(cand.Revision)+": "+v.Summary, evidence)
-				}
-				final = cand.Revision
-			}
-			err = mgr.Promote(ctx, fr.proj.TargetBranch, cand)
-			cand.Cleanup()
-			switch {
-			case err == nil:
-				promoted = true
-			case errors.Is(err, workspace.ErrTargetMoved):
-				continue
-			default:
-				return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
-			}
+	spec := intentSpec{proj: fr.proj, taskID: fr.rec.Task.ID, attemptID: fr.attempt.ID, runID: fr.runID, submission: fr.submission, owner: fr.token.Digest(), contractRev: fr.contractRev, regression: fr.regressionID, policy: fr.policy, source: fr.revision}
+	done := func(final string) (VerifyResult, error) {
+		res.Evidence, res.Passed, res.Completed = evidence, true, true
+		res.IntegratedRevision = final
+		if final == fr.revision {
+			res.IntegratedRevision = ""
 		}
-		if !promoted {
-			return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, "target branch kept moving; verify again", evidence)
-		}
-		if final != fr.revision {
-			_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.SetRunIntegratedRevision(fr.runID, final) })
-		}
+		res.Status = task.StatusComplete
+		res.Summary = verdict.Summary
+		res.Message = "task complete; claim ended"
+		return res, nil
 	}
-	// One short transaction: re-check everything the completion depends on,
-	// then record completion and end the claim atomically.
-	now := e.now()
-	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		if err := fence(tx); err != nil {
-			return err
-		}
-		r, err := tx.GetRecord(fr.rec.Task.ID)
-		if err != nil {
-			return err
-		}
-		proj, err := tx.GetProject(r.Task.ProjectID)
-		if err != nil {
-			return err
-		}
-		switch {
-		case r.UnmetRequires > 0:
-			return fault.New(fault.CodeTaskBlocked, "a prerequisite became incomplete during verification")
-		case r.Task.ContractRev != fr.contractRev:
-			return fault.New(fault.CodePlanConflict, "the task contract changed during verification; verify again")
-		case (verification.Policy{Regression: proj.Regression}).Digest() != fr.regressionID:
-			return fault.New(fault.CodePlanConflict, "the project regression policy changed during verification; verify again")
-		case r.Task.Archived():
-			return fault.New(fault.CodePlanConflict, "the task was archived during verification")
-		}
-		stored, err := tx.EvidenceForRun(fr.runID)
-		if err != nil {
-			return err
-		}
-		var onFinal []verification.Evidence
-		for _, ev := range stored {
-			if ev.Revision == final {
-				onFinal = append(onFinal, ev)
-			}
-		}
-		if v := verification.Judge(fr.policy, onFinal); !v.Passed {
-			return fault.New(fault.CodeVerificationFailed, "stored evidence does not prove revision %s: %s", short(final), v.Summary)
-		}
-		if err := tx.FinishRun(fr.runID, sqlite.RunPassed, verdict.Summary, now); err != nil {
-			return err
-		}
-		if err := tx.MarkComplete(r.Task.ID, fr.submission, now); err != nil {
-			return err
-		}
-		if err := tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now); err != nil {
-			return err
-		}
-		if fr.proj.Integration == project.IntegrationPromote {
-			if err := tx.InsertIntegration(proj.ID, r.Task.ID, 0, proj.TargetBranch, cand.Base, fr.revision, final, now); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
+	// refused maps a finalisation refusal (changed contract, lost
+	// authority, ...) to the caller's error; the target never moved.
+	refused := func(err error) (VerifyResult, error) {
 		code := fault.CodeOf(err)
 		if code == fault.CodeInternal {
 			return res, err
 		}
 		return fail(sqlite.RunFailed, code, err.Error(), evidence)
 	}
-	res.Evidence, res.Passed, res.Completed = evidence, true, true
-	res.IntegratedRevision = final
-	if final == fr.revision {
-		res.IntegratedRevision = ""
+	if err := e.fault("final:after-checks"); err != nil {
+		return res, err
 	}
-	res.Status = task.StatusComplete
-	res.Summary = verdict.Summary
-	res.Message = "task complete; claim ended"
-	return res, nil
+	if fr.proj.Integration != project.IntegrationPromote {
+		// No promotion: one transaction re-checks everything completion
+		// depends on and records it.
+		now := e.now()
+		err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+			if err := fence(tx); err != nil {
+				return err
+			}
+			if _, err := e.recheckForCompletion(tx, spec, fr.revision); err != nil {
+				return err
+			}
+			if err := tx.FinishRun(fr.runID, sqlite.RunPassed, verdict.Summary, now); err != nil {
+				return err
+			}
+			if err := tx.MarkComplete(fr.rec.Task.ID, fr.submission, now); err != nil {
+				return err
+			}
+			return tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now)
+		})
+		if err != nil {
+			return refused(err)
+		}
+		return done(fr.revision)
+	}
+	// Guarded, recoverable promotion (see integrate.go): build the
+	// candidate on the current target, verify it when the merge changed
+	// content, pin an intent, compare-and-swap the target, then record
+	// completion. A moved target rebuilds (bounded); a crash anywhere is
+	// resolved by reconciliation from the intent and Git.
+	for attempt := 0; attempt < 3; attempt++ {
+		cand, err := mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, fmt.Sprintf("at: integrate %s (%s)", fr.rec.Task.ID, fr.rec.Task.Description))
+		if err != nil {
+			return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
+		}
+		final := fr.revision
+		if cand.Revision != fr.revision {
+			snap, snapCleanup, err := mgr.Snapshot(ctx, cand.Revision)
+			if err != nil {
+				cand.Cleanup()
+				return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
+			}
+			more, err := e.runChecks(ctx, snap, fr.policy, fr.runID, cand.Revision, fence)
+			snapCleanup()
+			if err != nil {
+				cand.Cleanup()
+				_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(fr.runID, sqlite.RunError, err.Error(), e.now()) })
+				return res, err
+			}
+			evidence = append(evidence, more...)
+			if v := verification.Judge(fr.policy, more); !v.Passed {
+				cand.Cleanup()
+				return fail(sqlite.RunFailed, fault.CodeVerificationFailed, "integrated candidate "+short(cand.Revision)+": "+v.Summary, evidence)
+			}
+			final = cand.Revision
+		}
+		intentID, err := e.recordIntent(ctx, spec, cand, final, verdict.Summary, fence)
+		if err != nil {
+			cand.Cleanup()
+			return refused(err)
+		}
+		if err := e.fault("final:after-intent"); err != nil {
+			cand.Cleanup()
+			return res, err
+		}
+		err = mgr.Promote(ctx, fr.proj.TargetBranch, cand)
+		cand.Cleanup()
+		switch {
+		case err == nil:
+		case errors.Is(err, workspace.ErrTargetMoved):
+			e.abandonIntent(ctx, intentID, "target moved before promotion; rebuilding the candidate")
+			continue
+		default:
+			e.abandonIntent(ctx, intentID, "promotion failed: "+err.Error())
+			return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
+		}
+		if err := e.fault("final:after-promote"); err != nil {
+			return res, err
+		}
+		// The target carries the candidate: record completion for the intent.
+		// Authority is the intent (owned by this token), not the lease.
+		err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+			in, err := tx.GetIntent(intentID)
+			if err != nil {
+				return err
+			}
+			return e.completeIntentTx(tx, in, spec.owner, verdict.Summary)
+		})
+		if err != nil {
+			// The intent stays open; reconciliation completes it from Git.
+			return res, fault.Wrap(err, fault.CodeInternal, "record completion of promoted %s (will be reconciled)", fr.rec.Task.ID)
+		}
+		e.notify()
+		if err := e.fault("final:after-complete"); err != nil {
+			return res, err
+		}
+		return done(final)
+	}
+	return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, "target branch kept moving; verify again", evidence)
 }
 
 // replayCompletion returns the committed result when the token's attempt
