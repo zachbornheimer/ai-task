@@ -15,6 +15,20 @@ documented limitations, not silent gaps.
 | M5 corrective directive (P0-A..F, P1-A..H, Phase 3) | done on the work branch: required gates everywhere, quarantine on takeover, intents, fenced and classified failure accounting, no head-of-line blocking, one eligibility rule, payload-bound idempotency, category isolation, safe fast-forward into dirty checkouts, resilient heartbeat, progress glyphs, CLI corners, prune. See docs/invariants.md for the test behind each. |
 | M4 reference example | done: `examples/embedded_runner` with fake planner, reviewer and coding agent; its test drains a seven-task graph (including a cohort) with four workers |
 
+## Dogfooding pilot
+
+Two rounds of three Sonnet coding agents each drove `at` on a scratch Go
+project (four and five tasks, concurrent claims, every task editing the
+same dispatch site, checks kept outside the repository). Nine tasks
+completed, none incorrectly, with no double claim, no lost work and every
+refusal carrying evidence. Round one produced the wording and claim-result
+changes in `0b0075c`. Round two accidentally ran on a target branch whose
+regression suite failed; the agents still finished, and the lesson is a
+planning rule rather than an engine change: make the regression suite pass
+on the target before adding tasks, add a scaffolding task that siblings
+require when they share a dispatch site, and guard against stray build
+artifacts with a check.
+
 ## Acceptance matrix
 
 | Test | Proof |

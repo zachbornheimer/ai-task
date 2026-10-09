@@ -31,6 +31,9 @@ Rules of the road:
   branch (the claim printed it as `target_branch`; `error.details.conflicts`
   lists the files). In the worktree run `git merge <target>`, resolve,
   commit, and `verify complete` again. It is not counted against you.
+- A passing `verify complete` promotes your branch to the target. When the
+  target had moved, the engine merges for you and reports the merge as
+  `integrated_revision`; later claims start from it.
 - `at claim --wait` ends with the coded errors `DONE` (everything is
   complete) or `STALLED` (a planner is needed); both are normal exits for
   a worker loop, not failures.
