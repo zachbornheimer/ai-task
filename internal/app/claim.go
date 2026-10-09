@@ -11,6 +11,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 // Typed outcomes of a waiting Claim.
@@ -100,6 +101,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	var sess Session
 	var proj project.Project
 	var attempt execution.Attempt
+	quarantineSeq := 0
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		var r sqlite.Record
 		var err error
@@ -137,6 +139,11 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				return fault.Wrap(err, fault.CodeInternal, "candidate selection disagreed with status rules")
 			}
 		}
+		// A previous attempt that never ended (lease ran out) may still have
+		// a live process in the worktree: quarantine that worktree.
+		if prev := r.Attempt; prev != nil && prev.EndedAt == nil {
+			quarantineSeq = prev.Seq
+		}
 		attempt, err = tx.StartAttempt(r.Task.ID, r.Attempt, token.Digest(), now, now.Add(lease))
 		if err != nil {
 			return err
@@ -161,13 +168,17 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
-	// One branch and worktree per task, reused across attempts so committed
-	// and uncommitted work survives a crash. The token is returned once,
-	// to the caller only: it is never written anywhere a later process
-	// could pick it up, so a stale attempt can never borrow its
-	// successor's authority.
+	// One branch and worktree per task, reused across clean handoffs so
+	// committed and uncommitted work survives. The token is stored in the
+	// worktree's private git dir so commands run there need no AT_SESSION.
+	// When the previous attempt did not end cleanly its worktree is
+	// quarantined first, so a stale process keeps only its own expired
+	// token and can never reach this attempt's files or branch.
 	mgr := e.manager(proj)
-	info, werr := mgr.EnsureTask(ctx, string(sess.Task.ID), proj.TargetBranch)
+	info, werr := mgr.EnsureTask(ctx, string(sess.Task.ID), proj.TargetBranch, quarantineSeq)
+	if werr == nil {
+		werr = workspace.StoreToken(ctx, info.Path, string(token))
+	}
 	if werr != nil {
 		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.EndAttempt(attempt.ID, execution.EndReleased, e.now()) })
 		e.notify()
@@ -176,7 +187,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.SetWorkspace(attempt.ID, info.Path, info.Branch) }); err != nil {
 		return Session{}, err
 	}
-	sess.Workspace, sess.Branch, sess.WorkspaceDirty = info.Path, info.Branch, info.Dirty
+	sess.Workspace, sess.Branch, sess.WorkspaceDirty, sess.QuarantinedWorkspace = info.Path, info.Branch, info.Dirty, info.Quarantined
 	if sess.Task.Attempt != nil {
 		sess.Task.Attempt.Workspace, sess.Task.Attempt.Branch = info.Path, info.Branch
 	}

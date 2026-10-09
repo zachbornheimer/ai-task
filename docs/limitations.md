@@ -42,13 +42,15 @@
    Evidence is bound to the verified revision; a trivial check (`true`)
    satisfies the mandatory-check rule and is the planner's own risk.
 
-12. **Tokens are process-bound, files are not.** The token lives only in
-    the process the host gave it to, so a stale process cannot borrow a
-    successor's authority; but it can still edit the shared per-task
-    worktree. The host MUST terminate the old agent process before a new
-    attempt reuses the worktree (the claim reports `workspace_dirty`
-    when uncommitted edits are present). A lost token leaves the task
-    claimed until the lease (at most 4 hours) expires; that is accepted.
+12. **Worktree-resident tokens and stale processes.** The token in a
+    worktree's Git directory is readable by the same OS user, like the
+    database. A stale process whose attempt expired is contained by
+    quarantine: the next claim moves its worktree aside, detached, so it
+    keeps only its own expired token and its commits never reach the
+    branch. It still burns CPU and disk until the host stops it, and the
+    quarantined directories (`<path>.stale-<seq>`) are kept until pruned.
+    A lost token leaves the task claimed until the lease (at most 4
+    hours) expires; that is accepted.
 
 10. **Single host, local filesystem.** WAL-mode SQLite on a network
     filesystem is unsafe.

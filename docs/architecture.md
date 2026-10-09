@@ -84,10 +84,14 @@ Every project is a Git repository (`at init` runs `git init` and makes an
 initial commit when the directory is not one). Every task has one
 worktree on branch `at/<task-id>`, created from the target branch at the
 first claim and reused by every later attempt, so retries continue from
-the previous attempt's commits. The session token is returned once to
-the caller of `Claim` and written nowhere; the host injects it into the
-agent process (`AT_SESSION`). `at init` writes nothing into the
-repository: no hooks, no files in the tree. Final checks run in a detached snapshot of the submitted commit, never in
+the previous attempt's commits. The claim stores the session token in
+the worktree's private Git directory, so `at` commands run there need no
+`AT_SESSION`. When the previous attempt never ended cleanly, the claim
+first moves its worktree to `<path>.stale-<seq>` with HEAD detached and
+creates a fresh one on the branch: a stale process keeps only its own
+expired token and cannot reach the branch or the new files. `at init`
+writes nothing into the repository: no hooks, no files in the tree.
+Final checks run in a detached snapshot of the submitted commit, never in
 the editable worktree. Integration policy `promote` (the default) merges
 the verified revision onto the target branch in a scratch worktree,
 re-verifies the merge when it changed content, and advances the target

@@ -5,9 +5,10 @@ attempt learned, and decides completion from fresh verification, never from
 your word. It works the same from Claude Code, Codex CLI, OpenCode, Grok,
 or a shell. You need five verbs; two more for exceptions.
 
-Your host sets `AT_SESSION` (your attempt's token; it exists nowhere else)
-and `AT_OUTPUT=json`, and starts you inside the task's own Git worktree
-(branch `at/<id>`).
+Your host sets `AT_OUTPUT=json` and starts you inside the task's own Git
+worktree (branch `at/<id>`). The session token lives in that worktree, so
+`at` commands run there need no token; `AT_SESSION` is only needed from
+elsewhere.
 
 ```
 at log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first

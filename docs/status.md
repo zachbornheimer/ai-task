@@ -10,7 +10,7 @@ documented limitations, not silent gaps.
 |---|---|
 | M0 preserve/correct the engine | done: fail-closed completion, no evidence reuse, prerequisite/contract/policy recheck at finalisation, regression namespace separation, token fencing and replay, CI workflow |
 | M1 planning/import API | done: keys, groups, atomic `Apply` with optimistic revision and idempotency, typed `List`/`Show`, deterministic selector, planner authority rules, `at add/update/show/list` with the circle glyphs |
-| M2 execution/verification contract | done: `claim`/`claim renew`/`claim release`/`log`/`verify task\|regression\|complete`, per-task worktrees (`at/<id>`, reused across attempts), attempt-bound tokens (never on disk), mandatory required checks at `add` and `claim`, prerequisite learnings and last-failure evidence in the handoff, detached snapshots, finalisation transaction, stable JSON, `Claim(wait)` with `DONE`/`STALLED`/cancel, persistent failures and cooldowns |
+| M2 execution/verification contract | done: `claim`/`claim renew`/`claim release`/`log`/`verify task\|regression\|complete`, per-task worktrees (`at/<id>`, reused across attempts), worktree-resident tokens with quarantine of unended attempts' worktrees on takeover, mandatory required checks at `add` and `claim`, prerequisite learnings and last-failure evidence in the handoff, detached snapshots, finalisation transaction, stable JSON, `Claim(wait)` with `DONE`/`STALLED`/cancel, persistent failures and cooldowns |
 | M3 integration and coupled verification | done: guarded two-phase promotion with compare-and-swap and bounded retry on a moved base; durable leased cohort jobs with crash recovery; no DAG cycles for cohorts |
 | M4 reference example | done: `examples/embedded_runner` with fake planner, reviewer and coding agent; its test drains a seven-task graph (including a cohort) with four workers |
 
@@ -43,7 +43,7 @@ documented limitations, not silent gaps.
 | Integration conflict | `TestIntegrationConflictDoesNotComplete`, `workspace.TestPrepareMergeAndPromote` |
 | Idempotent completion ack | `TestFinalSuccessIsAtomicAndPromotes` (replay section) |
 | CLI rendering | `cli.TestListGolden`, `cli.TestShowGolden`, `cli.TestAckAndVerifyRendering` (`internal/cli/testdata/*.txt`), `e2e.TestAgentLoopEndToEnd` |
-| CLI security | `e2e.TestAgentLoopEndToEnd` (no tokens in read views; renew/release reject missing and stale tokens everywhere; a worktree never supplies one; a token for another task is refused in a worktree; JSON parseable) |
+| CLI security | `e2e.TestAgentLoopEndToEnd` (no tokens in read views; renew/release reject missing and stale tokens outside a worktree and need none inside it; a token for another task is refused in a worktree; JSON parseable) |
 
 ## Invariants (handoff section 2)
 

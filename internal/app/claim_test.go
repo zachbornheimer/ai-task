@@ -18,6 +18,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 func TestClaimIsDeterministicOldestFirst(t *testing.T) {
@@ -295,9 +296,16 @@ func TestHandoffCarriesPrerequisiteLearningsAndLastFailure(t *testing.T) {
 	if lf == nil || lf.Mode != string(verification.ModeComplete) || len(lf.Checks) != 1 || lf.Checks[0].CheckID != "unit-c" || !strings.Contains(lf.Checks[0].StderrTail, "boom") {
 		t.Fatalf("last failure: %+v", lf)
 	}
-	// Worktree reuse: the previous attempt's commit is still there.
+	// Clean handoff (release): the worktree is reused, not quarantined, and
+	// carries the previous attempt's commit and the new attempt's token.
 	if _, err := os.Stat(filepath.Join(sc2.Workspace, "c.txt")); err != nil {
 		t.Fatal("work not carried over")
+	}
+	if sc2.QuarantinedWorkspace != "" || workspace.LoadToken(f.ctx, sc2.Workspace) != string(sc2.Token) {
+		t.Fatalf("clean handoff: %+v", sc2)
+	}
+	if _, err := os.Stat(filepath.Join(sc2.Workspace, "at-session")); err == nil {
+		t.Fatal("token stored inside the tree")
 	}
 }
 
@@ -309,24 +317,46 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	a := f.add("a")
 	sA := f.claim(string(a))
 	f.commit(sA.Workspace, "a.txt", "from A")
-	// A freezes; its lease runs out; B takes over in the same worktree.
+	os.WriteFile(filepath.Join(sA.Workspace, "wip.txt"), []byte("uncommitted by A"), 0o644)
+	// A freezes; its lease runs out; B takes over. A's worktree is
+	// quarantined; B gets a fresh one at the task path on the same branch.
 	f.c.Advance(execution.DefaultLease + time.Minute)
 	sB := f.claim(string(a))
-	if sB.AttemptSeq != 2 || sB.Workspace != sA.Workspace || sB.Token == sA.Token {
+	stale := sA.Workspace + ".stale-1"
+	if sB.AttemptSeq != 2 || sB.Workspace != sA.Workspace || sB.Token == sA.Token || sB.QuarantinedWorkspace != stale || !sB.WorkspaceDirty {
 		t.Fatalf("takeover: %+v", sB)
 	}
-	// Nothing in the worktree or its git dir carries B's token.
-	gitdir := strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "--absolute-git-dir"))
-	for _, dir := range []string{sB.Workspace, gitdir} {
-		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
+	if b, _ := os.ReadFile(filepath.Join(sB.Workspace, "a.txt")); string(b) != "from A" {
+		t.Fatal("committed work not carried into the new worktree")
+	}
+	if _, err := os.Stat(filepath.Join(sB.Workspace, "wip.txt")); err == nil {
+		t.Fatal("uncommitted edits leaked into the new worktree")
+	}
+	if b, _ := os.ReadFile(filepath.Join(stale, "wip.txt")); string(b) != "uncommitted by A" {
+		t.Fatal("quarantine lost A's uncommitted edits")
+	}
+	// The worktree token A can see is its own; B's lives in B's git dir.
+	if workspace.LoadToken(f.ctx, stale) != string(sA.Token) || workspace.LoadToken(f.ctx, sB.Workspace) != string(sB.Token) {
+		t.Fatal("token discovery crossed the quarantine")
+	}
+	staleGitdir := strings.TrimSpace(f.git(stale, "rev-parse", "--absolute-git-dir"))
+	filepath.WalkDir(staleGitdir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
 			if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), string(sB.Token)) {
-				t.Fatalf("successor token found on disk at %s", path)
+				t.Fatalf("successor token reachable from the quarantine at %s", path)
 			}
-			return nil
-		})
+		}
+		return nil
+	})
+	// A keeps working, oblivious: its commits land on a detached HEAD and
+	// never reach the task branch or B's files.
+	tip := strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "HEAD"))
+	f.commit(stale, "late.txt", "committed by A after takeover")
+	if strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "HEAD")) != tip || strings.TrimSpace(f.git(stale, "rev-parse", "refs/heads/at/"+string(a))) != tip {
+		t.Fatal("stale attempt moved the task branch")
+	}
+	if _, err := os.Stat(filepath.Join(sB.Workspace, "late.txt")); err == nil {
+		t.Fatal("stale commit reached the new worktree")
 	}
 	// A wakes up with its own token: every action is refused.
 	_, err := f.e.Renew(f.ctx, sA.Token)

@@ -14,6 +14,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 func init() {
@@ -45,13 +46,19 @@ func (c *ctxt) bindPlanFlags(pf *planFlags) {
 	c.fs.Uint64Var(&pf.expectRev, "expect-rev", 0, "fail with PLAN_CONFLICT unless the plan revision equals this")
 	c.fs.StringVar(&pf.idempotencyKey, "idempotency-key", "", "stable operation id; a replay returns the stored result")
 	c.fs.BoolVar(&pf.planner, "planner", false, "assert planning authority for edits to claimed tasks")
-	c.fs.StringVar(&pf.session, "session", "", "session token authorising a discovered blocker (default: AT_SESSION)")
+	c.fs.StringVar(&pf.session, "session", "", "session token authorising a discovered blocker (default: AT_SESSION, or the task worktree's own token)")
 }
 
-func (c *ctxt) changeSet(pid project.ID, pf planFlags, ops ...plan.Change) plan.ChangeSet {
+// changeSet builds the ChangeSet; session authority comes from --session,
+// AT_SESSION, or the worktree the command runs in (same sources as the
+// execution verbs, so `add --blocks` works from inside the worktree).
+func (c *ctxt) changeSet(ctx context.Context, pid project.ID, pf planFlags, ops ...plan.Change) plan.ChangeSet {
 	session := pf.session
 	if session == "" {
 		session = c.env.Getenv("AT_SESSION")
+	}
+	if session == "" {
+		session = workspace.LoadToken(ctx, c.env.Cwd)
 	}
 	return plan.ChangeSet{ProjectID: pid, ExpectedPlanRev: pf.expectRev, IdempotencyKey: pf.idempotencyKey, Planner: pf.planner, Session: session, Operations: ops}
 }
@@ -272,7 +279,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := e.Apply(ctx, c.changeSet(pid, pf, op))
+	res, err := e.Apply(ctx, c.changeSet(ctx, pid, pf, op))
 	if err != nil {
 		return err
 	}
@@ -402,7 +409,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := e.Apply(ctx, c.changeSet(pid, pf, ops...))
+	res, err := e.Apply(ctx, c.changeSet(ctx, pid, pf, ops...))
 	if err != nil {
 		return err
 	}

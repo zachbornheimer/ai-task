@@ -25,10 +25,11 @@ func init() {
 }
 
 // token resolves a REQUIRED session token: a positional argument, "-" for
-// one line of stdin, --session, or AT_SESSION. The token is never read
-// from the filesystem: the host that launched this process injected it,
-// so a stale process can only ever present its own, stale, token. Human
-// read commands never print tokens.
+// one line of stdin, --session, AT_SESSION, or the token the claim stored
+// in the task worktree the command runs in (so an agent started there
+// needs no token at all). A stale process sits in a quarantined worktree
+// whose stored token is its own, expired, one. Human read commands never
+// print tokens.
 //
 // When the working directory is a task worktree the token must belong to
 // that task: a token for another task is refused before any write, so a
@@ -51,7 +52,10 @@ func (c *ctxt) token(ctx context.Context, positional []string, flag string) (exe
 		raw = c.env.Getenv("AT_SESSION")
 	}
 	if strings.TrimSpace(raw) == "" {
-		return "", usage("session token required: pass it as an argument, '-' to read stdin, --session, or set AT_SESSION (the host that started this process has it)")
+		raw = workspace.LoadToken(ctx, c.env.Cwd)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "", usage("session token required: run inside the task worktree, pass it as an argument, '-' to read stdin, --session, or set AT_SESSION")
 	}
 	tok, err := execution.ParseToken(raw)
 	if err != nil {
@@ -148,7 +152,10 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 		if s.WorkspaceDirty {
 			fmt.Fprintln(w, "Warning:   workspace has uncommitted changes from a previous attempt; review `git status` before editing")
 		}
-		fmt.Fprintf(w, "Token:     %s (export it as AT_SESSION for the agent process; it is stored nowhere else)\n", s.Token)
+		if s.QuarantinedWorkspace != "" {
+			fmt.Fprintf(w, "Previous:  attempt did not end cleanly; its worktree was quarantined at %s\n", s.QuarantinedWorkspace)
+		}
+		fmt.Fprintf(w, "Token:     %s (also stored in the worktree; `at` commands run there need no token)\n", s.Token)
 		fmt.Fprintln(w)
 		renderShow(w, s.Task, false)
 		renderHandoff(w, s.Handoff)
@@ -158,7 +165,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 	note := c.fs.String("note", "", "why the task is being released (logged)")
 	failed := c.fs.Bool("failed", false, "record a failed attempt (retry bookkeeping)")
-	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -197,7 +204,7 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.StringVar(&entry.Next, "next", "", "remaining work / next action")
 	c.fs.StringVar(&entry.Learned, "learned", "", "reusable discovery")
 	c.fs.StringVar(&entry.Note, "note", "", "warning, question, or context")
-	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -217,7 +224,7 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func runVerify(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -244,7 +251,7 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func runWhoami(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}

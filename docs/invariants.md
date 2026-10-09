@@ -62,11 +62,15 @@ claimed, verifying, and submissions whose cohort can be verified.
 - No claim without a project regression suite; no task without task
   checks; a check set cannot be emptied. (`TestEmptyChecksFailClosed`,
   `e2e.TestPlanningCommands`)
-- One worktree per task on `at/<id>`, reused by every attempt. The token
-  is returned once to the claimer and stored nowhere; after a takeover the
-  stale holder's token is refused everywhere and nothing on disk carries
-  the successor's. A token used inside another task's worktree is refused.
-  Every authenticated command renews the lease.
+- One worktree per task on `at/<id>`, reused across clean handoffs; the
+  claim stores the token in the worktree's Git directory, never in the
+  tree, and commands run there need no token. A takeover quarantines the
+  unended attempt's worktree (moved, detached) before the new attempt
+  gets a fresh one: the stale holder's token is refused everywhere, its
+  Git directory never holds the successor's token, and its later commits
+  never reach the branch or the new worktree. A token used inside another
+  task's worktree is refused. Every authenticated command renews the
+  lease.
   (`TestTakeoverLeavesStaleTokenPowerless`, `e2e.TestAgentLoopEndToEnd`,
   `e2e.TestDiscoveredBlockerFromWorktree`)
 - The handoff carries prerequisites' learnings and the newest failed

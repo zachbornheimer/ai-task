@@ -173,9 +173,13 @@ type Session struct {
 	Branch     string          `json:"branch,omitempty"`
 	// WorkspaceDirty reports uncommitted changes left by an earlier attempt
 	// in the reused worktree.
-	WorkspaceDirty bool              `json:"workspace_dirty,omitempty"`
-	Resumed        bool              `json:"resumed"`
-	Handoff        execution.Handoff `json:"handoff"`
+	WorkspaceDirty bool `json:"workspace_dirty,omitempty"`
+	// QuarantinedWorkspace is where the previous attempt's worktree was
+	// moved because that attempt never ended cleanly; its uncommitted
+	// edits (if WorkspaceDirty) are there, untouched.
+	QuarantinedWorkspace string            `json:"quarantined_workspace,omitempty"`
+	Resumed              bool              `json:"resumed"`
+	Handoff              execution.Handoff `json:"handoff"`
 }
 
 // VerifyResult reports one verification invocation.

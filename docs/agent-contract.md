@@ -112,9 +112,9 @@ never loses its claim; the host that launched the agent renews it on the
 agent's behalf (`Renew`, or `at claim renew` with the token) while the
 agent is busy. When a lease does expire the task becomes claimable again;
 the old token answers `LEASE_EXPIRED` (or `SESSION_SUPERSEDED` once a new
-attempt exists) and the holder must stop editing. The host must stop the
-old process before the next attempt reuses the worktree: a lease fences
-the database, not the files.
+attempt exists) and the holder must stop editing. The next claim
+quarantines the old worktree (see Token transport), so a holder that does
+not stop can harm nothing but its own quarantined copy.
 
 **Handoff.** The claim result carries the previous attempts' `latest_next`,
 learnings and recent log, plus `inherited` learnings recorded on the
@@ -167,23 +167,35 @@ complete. Tokens never appear in any read view.
 
 ## Token transport
 
-`claim` is the only command that prints a token, and it prints it exactly
-once, to its caller. The token is written nowhere else: not into the
-worktree, not into the repository, not into the database (only its
-digest). The host that ran `claim` injects the token into the agent
-process it launches, normally as `AT_SESSION`; a `claim` subprocess
-cannot set `AT_SESSION` in its parent shell. Sources, in order: a
-positional token, `-` (one line of stdin, so secrets stay out of process
-listings), `--session`, `AT_SESSION`. There is no filesystem fallback by
-design: after a takeover a stale process holds only its own, refused,
-token and has no way to find its successor's.
+`claim` is the only command that prints a token, and it also stores the
+token inside the task worktree's private Git directory
+(`.git/worktrees/<name>/at-session`, never in the tree, never in the
+database, which keeps only a digest). Any `at` command run with the
+worktree as its working directory finds it, planning commands included,
+so an agent started inside the worktree needs no token at all. Explicit
+sources win when present, in this order: a positional token, `-` (one
+line of stdin, so secrets stay out of process listings), `--session`,
+`AT_SESSION`, then the worktree file. A `claim` subprocess cannot set
+`AT_SESSION` in its parent shell: hosts that run the agent elsewhere
+capture the JSON and inject the token.
 
 Inside a task worktree (branch `at/<task-id>`) the token must belong to
 that task; a token for another task is refused with `INVALID_SESSION`
 before any write, so a mis-exported `AT_SESSION` cannot act on the wrong
-task. Planning commands that need session authority (`add --blocks` on
-the claimed task) read the same `AT_SESSION`. A lost token is a stuck task
-until the lease expires; that is by design.
+task.
+
+**Takeover.** A worktree whose attempt never ended (the lease ran out
+while a process may still be alive) is quarantined when the next attempt
+claims: the directory is moved to `<path>.stale-<seq>` with HEAD
+detached, and a fresh worktree on the same branch appears at the task
+path with the new token. The stale process keeps its files, its own Git
+directory and its own expired token, so it can neither act on the task
+nor reach the branch or the new attempt's files; whatever it still
+commits lands on a detached HEAD. The claim reports the quarantine as
+`quarantined_workspace` (with `workspace_dirty` when uncommitted edits
+are in there) so the new attempt or a human can salvage them. A clean
+handoff (`release`, completion) reuses the worktree without quarantine.
+A lost token is a stuck task until the lease expires; that is by design.
 
 ## The tiny agent prompt
 

@@ -59,7 +59,7 @@ func (r *repo) commit(dir, file, content string) string {
 
 func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	r := newRepo(t)
-	w1, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main")
+	w1, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,23 +67,46 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 		t.Fatal("branch")
 	}
 	// Reuse is idempotent and reports uncommitted work left behind.
-	if again, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main"); err != nil || again != w1 {
+	if again, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0); err != nil || again != w1 {
 		t.Fatalf("%+v %v", again, err)
 	}
 	os.WriteFile(filepath.Join(w1.Path, "wip.txt"), []byte("wip"), 0o644)
-	if again, _ := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main"); !again.Dirty {
+	if again, _ := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0); !again.Dirty {
 		t.Fatal("dirty worktree not reported")
 	}
 	os.Remove(filepath.Join(w1.Path, "wip.txt"))
 	rev := r.commit(w1.Path, "g.txt", "work")
 	// A pruned worktree is re-attached to the existing branch.
 	r.git(r.dir, "worktree", "remove", "--force", w1.Path)
-	w2, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main")
+	w2, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0)
 	if err != nil || r.git(w2.Path, "rev-parse", "HEAD") != rev {
 		t.Fatalf("%+v %v", w2, err)
 	}
 	if CurrentBranch(r.ctx, w2.Path) != "at/at-aaaaaa" || CurrentBranch(r.ctx, r.dir) != "main" || CurrentBranch(r.ctx, t.TempDir()) != "" {
 		t.Fatal("current branch")
+	}
+	// Tokens live in the worktree's private git dir, never in the tree.
+	if err := StoreToken(r.ctx, w2.Path, "sess-test"); err != nil {
+		t.Fatal(err)
+	}
+	if LoadToken(r.ctx, w2.Path) != "sess-test" || LoadToken(r.ctx, r.dir) != "" {
+		t.Fatal("token discovery")
+	}
+	if out := r.git(w2.Path, "status", "--porcelain"); out != "" {
+		t.Fatalf("token file leaked into the tree: %s", out)
+	}
+	// Quarantine: the old tree moves aside detached with its edits and its
+	// token; the task path gets a fresh tree on the branch.
+	os.WriteFile(filepath.Join(w2.Path, "wip.txt"), []byte("wip"), 0o644)
+	w3, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 1)
+	if err != nil || w3.Path != w2.Path || w3.Quarantined != w2.Path+".stale-1" || !w3.Dirty {
+		t.Fatalf("quarantine: %+v %v", w3, err)
+	}
+	if CurrentBranch(r.ctx, w3.Quarantined) != "" || CurrentBranch(r.ctx, w3.Path) != "at/at-aaaaaa" || LoadToken(r.ctx, w3.Quarantined) != "sess-test" || LoadToken(r.ctx, w3.Path) != "" {
+		t.Fatal("quarantined tree must be detached and keep its token; the new tree starts clean")
+	}
+	if _, err := os.Stat(filepath.Join(w3.Path, "wip.txt")); err == nil {
+		t.Fatal("wip leaked")
 	}
 	created, err := InitRepo(r.ctx, t.TempDir())
 	if err != nil || !created {
@@ -112,7 +135,7 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 
 func TestPrepareMergeAndPromote(t *testing.T) {
 	r := newRepo(t)
-	w, _ := r.mgr.EnsureTask(r.ctx, "at-bbbbbb", "main")
+	w, _ := r.mgr.EnsureTask(r.ctx, "at-bbbbbb", "main", 0)
 	rev := r.commit(w.Path, "b.txt", "b")
 	// Fast-forward candidate: main is checked out in the main worktree and
 	// clean, so promotion fast-forwards it in place.
@@ -133,7 +156,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	// Diverged: main moves on, a second attempt branch merges with a
 	// real merge commit; the candidate is verified before the target moves.
 	mainRev := r.commit(r.dir, "m.txt", "main work")
-	w2, _ := r.mgr.EnsureTask(r.ctx, "at-cccccc", rev)
+	w2, _ := r.mgr.EnsureTask(r.ctx, "at-cccccc", rev, 0)
 	rev2 := r.commit(w2.Path, "c.txt", "c")
 	cand2, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev2}, "promote c")
 	if err != nil || cand2.Base != mainRev || cand2.Revision == rev2 || cand2.Revision == mainRev {
@@ -150,7 +173,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatal("main not at merge")
 	}
 	// Conflict: two branches edit the same file.
-	w3, _ := r.mgr.EnsureTask(r.ctx, "at-dddddd", "main")
+	w3, _ := r.mgr.EnsureTask(r.ctx, "at-dddddd", "main", 0)
 	r.commit(w3.Path, "m.txt", "conflict A")
 	r.commit(r.dir, "m.txt", "conflict B")
 	rev3 := r.git(w3.Path, "rev-parse", "HEAD")
@@ -159,7 +182,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatalf("conflict: %v", err)
 	}
 	// Target moved between prepare and promote: compare-and-swap refuses.
-	w4, _ := r.mgr.EnsureTask(r.ctx, "at-eeeeee", "main")
+	w4, _ := r.mgr.EnsureTask(r.ctx, "at-eeeeee", "main", 0)
 	rev4 := r.commit(w4.Path, "e.txt", "e")
 	cand4, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev4}, "x")
 	if err != nil {
@@ -172,7 +195,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatalf("moved target: %v", err)
 	}
 	// Dirty target worktree refuses promotion.
-	w5, _ := r.mgr.EnsureTask(r.ctx, "at-ffffff", "main")
+	w5, _ := r.mgr.EnsureTask(r.ctx, "at-ffffff", "main", 0)
 	rev5 := r.commit(w5.Path, "f5.txt", "f5")
 	cand5, _ := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
 	os.WriteFile(filepath.Join(r.dir, "dirty.txt"), []byte("x"), 0o644)
@@ -204,7 +227,7 @@ func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
 	const n = 6
 	cands := make([]Candidate, n)
 	for i := 0; i < n; i++ {
-		w, err := r.mgr.EnsureTask(r.ctx, fmt.Sprintf("at-conc%02d", i), "main")
+		w, err := r.mgr.EnsureTask(r.ctx, fmt.Sprintf("at-conc%02d", i), "main", 0)
 		if err != nil {
 			t.Fatal(err)
 		}

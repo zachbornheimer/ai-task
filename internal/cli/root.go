@@ -261,7 +261,7 @@ func (c *ctxt) printHelp() {
 	for _, n := range names {
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
-	fmt.Fprintln(w, "\nEnvironment: AT_DB, AT_PROJECT, AT_OUTPUT=json, AT_SESSION (the claim token, injected by the host that started the agent)")
+	fmt.Fprintln(w, "\nEnvironment: AT_DB, AT_PROJECT, AT_OUTPUT=json, AT_SESSION (optional inside a task worktree: the token is stored there)")
 	fmt.Fprintln(w, "Agent verbs: claim, log, verify task|regression|complete, claim release|renew. Planning: add, update, show, list.")
 }
 

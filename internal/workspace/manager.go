@@ -35,8 +35,14 @@ type Manager struct {
 type Info struct {
 	Path   string
 	Branch string
-	// Dirty reports uncommitted changes left by an earlier attempt.
+	// Dirty reports uncommitted changes left by an earlier attempt (in the
+	// reused tree, or in the quarantined one).
 	Dirty bool
+	// Quarantined is the path the previous attempt's worktree was moved to
+	// because that attempt did not end cleanly and its process may still
+	// be alive. Its files are untouched; its HEAD is detached so nothing
+	// it commits reaches the task branch.
+	Quarantined string
 }
 
 // TaskBranch names the branch of a task.
@@ -44,7 +50,15 @@ func TaskBranch(taskID string) string { return "at/" + taskID }
 
 // EnsureTask creates the task's worktree on branch at/<id> from base (a
 // branch name or revision) or reuses it when it already exists.
-func (m Manager) EnsureTask(ctx context.Context, taskID string, base string) (Info, error) {
+//
+// quarantineSeq is the sequence number of a previous attempt that did not
+// end cleanly (lease expired, process possibly still alive), or 0. When
+// set and the worktree exists, the worktree is moved aside to
+// <path>.stale-<seq> with HEAD detached, and a fresh worktree on the same
+// branch takes its place at the task path. The stale process keeps its
+// files and its own Git directory (with its own, expired, token) and can
+// no longer reach the branch or the new attempt's files.
+func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, quarantineSeq int) (Info, error) {
 	info := Info{Path: filepath.Join(m.Root, taskID), Branch: TaskBranch(taskID)}
 	if err := os.MkdirAll(m.Root, 0o755); err != nil {
 		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create workspace root")
@@ -57,7 +71,18 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string) (In
 		if st, err := Inspect(ctx, info.Path); err == nil {
 			info.Dirty = !st.Clean()
 		}
-		return info, nil
+		if quarantineSeq == 0 {
+			return info, nil
+		}
+		stale := fmt.Sprintf("%s.stale-%d", info.Path, quarantineSeq)
+		if _, err := gitRetry(ctx, m.Repo, "worktree", "move", info.Path, stale); err != nil {
+			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "quarantine worktree of attempt %d", quarantineSeq)
+		}
+		if _, err := git(ctx, stale, "checkout", "-q", "--detach"); err != nil {
+			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "detach quarantined worktree %s", stale)
+		}
+		info.Quarantined = stale
+		// The branch is free again; attach a fresh worktree below.
 	}
 	if m.BranchExists(ctx, info.Branch) {
 		// Branch exists (a previous crash between branch creation and
