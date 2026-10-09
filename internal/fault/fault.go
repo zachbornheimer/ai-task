@@ -20,7 +20,10 @@ const (
 
 	// Planning failures.
 	CodePlanConflict Code = "PLAN_CONFLICT"
-	CodeDuplicateKey Code = "DUPLICATE_KEY"
+	// CodeIdempotencyConflict: an idempotency key was reused with a
+	// different request.
+	CodeIdempotencyConflict Code = "IDEMPOTENCY_CONFLICT"
+	CodeDuplicateKey        Code = "DUPLICATE_KEY"
 
 	// Dependency graph failures.
 	CodeDependencyCycle     Code = "DEPENDENCY_CYCLE"

@@ -221,3 +221,59 @@ func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sd.Token), Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), Title: strptr("renamed")}}})
 	wantCode(t, err, fault.CodePlanConflict)
 }
+
+// An idempotency key is bound to the exact request; a stable key's replay
+// compares blockers too; a change set that changes nothing is not a plan
+// revision.
+func TestIdempotencyIsBoundToThePayload(t *testing.T) {
+	f := newFixture(t)
+	base := f.add("base")
+	other := f.add("other")
+	r1, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", Operations: []plan.Change{plan.AddTask{Key: "i1", Title: "i1", TaskChecks: okChecks()}}})
+	if err != nil || r1.Changed != 1 {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	// Same key, different payload: conflict, nothing created.
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", Operations: []plan.Change{plan.AddTask{Key: "i2", Title: "i2-different", TaskChecks: okChecks()}}})
+	wantCode(t, err, fault.CodeIdempotencyConflict)
+	if _, err := f.e.Show(f.ctx, f.proj.ID, "i2", false); !fault.Is(err, fault.CodeNotFound) {
+		t.Fatal("conflicting replay created a task")
+	}
+	// Exact replay, even with a now-stale expected revision: the committed result.
+	r2, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", ExpectedPlanRev: 1, Operations: []plan.Change{plan.AddTask{Key: "i1", Title: "i1", TaskChecks: okChecks()}}})
+	if err != nil || !r2.Replayed || r2.Created["i1"] != r1.Created["i1"] {
+		t.Fatalf("%+v %v", r2, err)
+	}
+	// A stale expected revision on a NEW request is still a conflict.
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K2", ExpectedPlanRev: 1, Operations: []plan.Change{plan.AddTask{Key: "i3", Title: "i3", TaskChecks: okChecks()}}})
+	wantCode(t, err, fault.CodePlanConflict)
+	// Stable-key replay with a blocker: the first application records the
+	// edge; an identical replay is a no-op that does not bump the revision;
+	// a replay naming a different blocker is a conflicting definition.
+	before, _ := f.e.Project(f.ctx, f.proj.ID)
+	rb, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(base)}, TaskChecks: okChecks()}}})
+	if err != nil || rb.Changed != 1 || rb.PlanRev != before.PlanRev+1 {
+		t.Fatalf("%+v %v", rb, err)
+	}
+	if v := f.show(string(base)); len(v.Requires) != 1 {
+		t.Fatalf("blocker edge missing: %+v", v.Requires)
+	}
+	rb2, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(base)}, TaskChecks: okChecks()}}})
+	if err != nil || rb2.Changed != 0 || rb2.PlanRev != rb.PlanRev {
+		t.Fatalf("identical replay changed the plan: %+v %v", rb2, err)
+	}
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(other)}, TaskChecks: okChecks()}}})
+	wantCode(t, err, fault.CodeDuplicateKey)
+	if v := f.show(string(other)); len(v.Requires) != 0 {
+		t.Fatal("conflicting replay added an edge")
+	}
+	// A no-op update is not a revision either.
+	after, _ := f.e.Project(f.ctx, f.proj.ID)
+	ru, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(other)}}})
+	if err != nil || ru.Changed != 0 || ru.PlanRev != after.PlanRev {
+		t.Fatalf("no-op update bumped the revision: %+v %v", ru, err)
+	}
+	if p, _ := f.e.Project(f.ctx, f.proj.ID); p.PlanRev != after.PlanRev {
+		t.Fatal("revision moved")
+	}
+}

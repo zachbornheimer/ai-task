@@ -6,6 +6,9 @@
 package plan
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -103,6 +106,41 @@ type ChangeSet struct {
 	// a convention for the local trust model, not a security boundary.
 	Planner    bool
 	Operations []Change
+}
+
+// Digest is a content hash of the operations (kind, order and every
+// field, prerequisites and blockers included) so an idempotency key can be
+// bound to the exact request it recorded. Authority fields (Session,
+// Planner) and ExpectedPlanRev are not part of the request's content.
+func (cs ChangeSet) Digest() string {
+	type tagged struct {
+		Kind string `json:"kind"`
+		Op   Change `json:"op"`
+	}
+	ops := make([]tagged, 0, len(cs.Operations))
+	for _, op := range cs.Operations {
+		kind := ""
+		switch op.(type) {
+		case AddGroup:
+			kind = "add_group"
+		case AddTask:
+			kind = "add_task"
+		case UpdateTask:
+			kind = "update_task"
+		case ArchiveTask:
+			kind = "archive_task"
+		}
+		ops = append(ops, tagged{Kind: kind, Op: op})
+	}
+	b, err := json.Marshal(struct {
+		Project project.ID `json:"project"`
+		Ops     []tagged   `json:"ops"`
+	}{cs.ProjectID, ops})
+	if err != nil {
+		panic(err) // plain values; cannot fail
+	}
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // Validate checks each change structurally. Reference existence and graph

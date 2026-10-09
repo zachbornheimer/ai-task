@@ -28,7 +28,8 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 | `NOT_FOUND` | unknown task, key, or project |
 | `NO_PROJECT` | no project for this directory; `--project` or `at init` |
 | `PLAN_CONFLICT` | stale `--expect-rev`; edit to a completed or claimed contract; illegal archive |
-| `DUPLICATE_KEY` | key exists with a different definition |
+| `DUPLICATE_KEY` | key exists with a different definition (blockers included) |
+| `IDEMPOTENCY_CONFLICT` | the idempotency key was already used for a different change set |
 | `DEPENDENCY_CYCLE`, `SELF_DEPENDENCY`, `DUPLICATE_DEPENDENCY`, `CROSS_PROJECT_DEPENDENCY` | hard-edge rules |
 | `TASK_BLOCKED` | prerequisites incomplete (claim or complete) |
 | `ALREADY_CLAIMED` | a live lease exists; on `verify`, an open attempt owns the task |
@@ -58,7 +59,12 @@ at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 ```
 
 `REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
-plan revision; the Go `Apply` takes a whole batch. Rules:
+plan revision; the Go `Apply` takes a whole batch; a batch that changes
+nothing is not a revision. An `--idempotency-key` is bound to the exact
+request: an identical replay returns the committed result (even with a
+stale `--expect-rev`), a different request under the same key is
+`IDEMPOTENCY_CONFLICT`, and a new request with a stale `--expect-rev` is
+`PLAN_CONFLICT`. Rules:
 
 - Every task carries at least one task check (`--check`). `add` without
   one is `MISSING_VERIFICATION`; `update --check` replaces the set but

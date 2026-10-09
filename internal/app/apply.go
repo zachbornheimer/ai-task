@@ -36,10 +36,17 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 		if err != nil {
 			return err
 		}
+		digest := cs.Digest()
 		if cs.IdempotencyKey != "" {
-			if body, ok, err := tx.PlanChange(cs.ProjectID, cs.IdempotencyKey); err != nil {
+			if body, stored, ok, err := tx.PlanChange(cs.ProjectID, cs.IdempotencyKey); err != nil {
 				return err
 			} else if ok {
+				// The key is bound to the request it recorded: an exact
+				// replay gets the committed result (even with a stale
+				// ExpectedPlanRev); a different request is a conflict.
+				if stored != digest {
+					return fault.New(fault.CodeIdempotencyConflict, "idempotency key %q was already used for a different change set; use a new key", cs.IdempotencyKey)
+				}
 				if err := json.Unmarshal([]byte(body), &result); err != nil {
 					return fault.Wrap(err, fault.CodeInternal, "decode stored plan result")
 				}
@@ -47,11 +54,11 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 				return nil
 			}
 		}
-		rev, err := tx.BumpPlanRev(cs.ProjectID, cs.ExpectedPlanRev, now)
+		current, err := tx.PlanRev(cs.ProjectID, cs.ExpectedPlanRev)
 		if err != nil {
 			return err
 		}
-		a := &applier{e: e, tx: tx, cs: cs, proj: proj, now: now, refs: map[string]task.ID{}, result: plan.Result{PlanRev: rev, Created: map[string]task.ID{}}}
+		a := &applier{e: e, tx: tx, cs: cs, proj: proj, now: now, refs: map[string]task.ID{}, result: plan.Result{PlanRev: current, Created: map[string]task.ID{}}}
 		for i, op := range cs.Operations {
 			if err := a.apply(ctx, i, op); err != nil {
 				return err
@@ -60,10 +67,18 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 		if err := a.checkArchives(); err != nil {
 			return err
 		}
+		// A change set that changed nothing is not a revision.
+		if a.result.Changed > 0 {
+			rev, err := tx.BumpPlanRev(cs.ProjectID, cs.ExpectedPlanRev, now)
+			if err != nil {
+				return err
+			}
+			a.result.PlanRev = rev
+		}
 		result = a.result
 		if cs.IdempotencyKey != "" {
 			body, _ := json.Marshal(result)
-			if err := tx.RecordPlanChange(cs.ProjectID, cs.IdempotencyKey, rev, string(body), now); err != nil {
+			if err := tx.RecordPlanChange(cs.ProjectID, cs.IdempotencyKey, digest, result.PlanRev, string(body), now); err != nil {
 				return err
 			}
 		}
@@ -238,6 +253,14 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 				return err
 			}
 			if same {
+				// Blockers are part of the definition too: every requested
+				// `--blocks` must already require the existing task.
+				same, err = a.sameBlocks(existing.Task.ID, c.Blocks)
+				if err != nil {
+					return err
+				}
+			}
+			if same {
 				a.refs[c.Key] = existing.Task.ID
 				return nil
 			}
@@ -314,6 +337,32 @@ func (a *applier) sameDefinition(existing sqlite.Record, spec task.Spec, require
 	}
 	for _, r := range requires {
 		if !have[r] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// sameBlocks reports whether every requested blocker already requires the
+// existing task.
+func (a *applier) sameBlocks(existing task.ID, blocks []plan.Ref) (bool, error) {
+	if len(blocks) == 0 {
+		return true, nil
+	}
+	deps, err := a.tx.Dependents(existing)
+	if err != nil {
+		return false, err
+	}
+	have := map[task.ID]bool{}
+	for _, d := range deps {
+		have[d.Task.ID] = true
+	}
+	for _, b := range blocks {
+		rec, err := a.resolve(b)
+		if err != nil {
+			return false, err
+		}
+		if !have[rec.Task.ID] {
 			return false, nil
 		}
 	}

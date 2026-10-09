@@ -70,6 +70,10 @@ claimed, verifying, and submissions whose cohort can be verified.
   and status agree), retried by an explicit claim, cleared by a planner
   reset; `list ready`, `status` and `claim` agree throughout.
   (`TestUnusableWorktreeDoesNotBlockTheQueue`)
+- An idempotency key is bound to the request's content digest; a replay
+  under a stable key compares blockers as well; a change set that changes
+  nothing does not bump the plan revision.
+  (`TestIdempotencyIsBoundToThePayload`)
 - Failure accounting is fenced and classified: a failed proof counts once
   per current attempt; environment and authority problems are recorded as
   `last_error`, never counted; a stale attempt cannot count against its

@@ -175,17 +175,32 @@ func (t *Tx) BumpPlanRev(pid project.ID, expected uint64, now time.Time) (uint64
 }
 
 // PlanChange looks up a stored idempotent apply result.
-func (t *Tx) PlanChange(pid project.ID, key string) (string, bool, error) {
-	var body string
-	err := t.tx.QueryRowContext(t.ctx, `SELECT result_json FROM plan_changes WHERE project_id = ? AND idempotency_key = ?`, pid, key).Scan(&body)
+func (t *Tx) PlanChange(pid project.ID, key string) (body, digest string, ok bool, err error) {
+	err = t.tx.QueryRowContext(t.ctx, `SELECT result_json, request_digest FROM plan_changes WHERE project_id = ? AND idempotency_key = ?`, pid, key).Scan(&body, &digest)
 	if isNoRows(err) {
-		return "", false, nil
+		return "", "", false, nil
 	}
-	return body, err == nil, wrapInternal(err, "lookup plan change")
+	return body, digest, err == nil, wrapInternal(err, "lookup plan change")
 }
 
-// RecordPlanChange stores an apply result under its idempotency key.
-func (t *Tx) RecordPlanChange(pid project.ID, key string, rev uint64, body string, now time.Time) error {
-	_, err := t.tx.ExecContext(t.ctx, `INSERT INTO plan_changes (project_id, idempotency_key, plan_rev, result_json, applied_at) VALUES (?, ?, ?, ?, ?)`, pid, key, rev, body, ms(now))
+// RecordPlanChange stores an apply result under its idempotency key,
+// together with the digest of the request that produced it.
+func (t *Tx) RecordPlanChange(pid project.ID, key, digest string, rev uint64, body string, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `INSERT INTO plan_changes (project_id, idempotency_key, request_digest, plan_rev, result_json, applied_at) VALUES (?, ?, ?, ?, ?, ?)`, pid, key, digest, rev, body, ms(now))
 	return wrapInternal(err, "record plan change")
+}
+
+// PlanRev reads the current plan revision and checks an expectation.
+func (t *Tx) PlanRev(pid project.ID, expected uint64) (uint64, error) {
+	var current uint64
+	if err := t.tx.QueryRowContext(t.ctx, `SELECT plan_rev FROM projects WHERE id = ?`, pid).Scan(&current); err != nil {
+		if isNoRows(err) {
+			return 0, fault.New(fault.CodeNotFound, "project %s not found", pid)
+		}
+		return 0, wrapInternal(err, "read plan revision")
+	}
+	if expected != 0 && expected != current {
+		return 0, fault.New(fault.CodePlanConflict, "plan revision is %d, change set expected %d; re-read the plan and re-review", current, expected)
+	}
+	return current, nil
 }
