@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 
+	"github.com/zachbornheimer/ai-task/internal/dependency"
+
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -14,11 +16,21 @@ import (
 // Add creates a task. The returned Warnings are atomicity hints; they never
 // block creation.
 func (e *Engine) Add(ctx context.Context, spec task.Spec) (task.Task, []string, error) {
+	return e.AddWithDependencies(ctx, spec, nil, nil)
+}
+
+// AddWithDependencies creates a task together with its edges in one
+// transaction: the new task requires each of `requires`, and each of
+// `blocks` requires the new task. Every edge is validated against the DAG
+// rules (same project, no cycle); if any edge is invalid nothing is
+// created. `blocks` is how an agent records a discovered prerequisite for
+// a task that already exists, including one it is working on.
+func (e *Engine) AddWithDependencies(ctx context.Context, spec task.Spec, requires, blocks []task.ID) (task.Task, []string, error) {
 	if err := spec.Validate(); err != nil {
 		return task.Task{}, nil, err
 	}
 	now := e.now()
-	t := task.Task{ProjectID: spec.ProjectID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, CreatedAt: now, UpdatedAt: now}
+	t := task.Task{ProjectID: spec.ProjectID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Manual: spec.Manual, CreatedAt: now, UpdatedAt: now}
 	// Random IDs: regenerate on the (vanishingly unlikely) collision rather
 	// than failing. The UNIQUE constraint is the collision detector.
 	for attempt := 0; attempt < 5; attempt++ {
@@ -27,7 +39,17 @@ func (e *Engine) Add(ctx context.Context, spec task.Spec) (task.Task, []string, 
 			if _, err := tx.GetProject(spec.ProjectID); err != nil {
 				return err
 			}
-			return tx.InsertTask(t)
+			if err := tx.InsertTask(t); err != nil {
+				return err
+			}
+			var edges []dependency.Edge
+			for _, r := range requires {
+				edges = append(edges, dependency.Edge{Task: t.ID, Requires: r})
+			}
+			for _, b := range blocks {
+				edges = append(edges, dependency.Edge{Task: b, Requires: t.ID})
+			}
+			return e.insertEdges(ctx, tx, edges, now)
 		})
 		if err == nil {
 			return t, spec.Warnings(), nil

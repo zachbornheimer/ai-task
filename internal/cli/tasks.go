@@ -20,7 +20,8 @@ func init() {
 	register("init", "register the current directory (or --path) as a project", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project", runProject)
-	register("add", "add a task: tasks add \"description\" [--outcome ..] [--accept ..] [--check ..]", runAdd)
+	register("add", "add a task: tasks add \"description\" [--requires T]* [--blocks T]* [--manual] [--accept ..] [--check ..]", runAdd)
+	register("status", "project summary for drivers: counts, takeable, done, stuck", runStatus)
 	register("show", "show a task with dependencies, lease, and handoff", runShow)
 	register("list", "list tasks: --available --blocked --in-progress --interrupted --complete --all", runList)
 	register("history", "full log history of a task: tasks history <task> [--limit N] [--offset N]", runHistory)
@@ -150,17 +151,36 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.Var(&checks, "check", "required task check: \"[id:] command args...\" (repeatable)")
 	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable)")
 	policyJSON := c.fs.String("policy-json", "", "full verification policy as JSON (overrides --check)")
+	var requires, blocks stringList
+	c.fs.Var(&requires, "requires", "prerequisite task id: the new task requires it (repeatable)")
+	c.fs.Var(&blocks, "blocks", "dependent task id: it requires the new task (repeatable)")
+	manual := c.fs.Bool("manual", false, "needs a human; never claimed by automatic take")
 	if err := c.parse(args); err != nil {
 		return err
 	}
 	if len(c.args) != 1 {
 		return usage("add needs exactly one description argument")
 	}
+	var reqIDs, blockIDs []task.ID
+	for _, raw := range requires {
+		id, err := task.ParseID(raw)
+		if err != nil {
+			return err
+		}
+		reqIDs = append(reqIDs, id)
+	}
+	for _, raw := range blocks {
+		id, err := task.ParseID(raw)
+		if err != nil {
+			return err
+		}
+		blockIDs = append(blockIDs, id)
+	}
 	pid, err := c.resolveProject(ctx)
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: pid, Description: c.args[0], Outcome: *outcome, Constraints: constraints}
+	spec := task.Spec{ProjectID: pid, Description: c.args[0], Outcome: *outcome, Constraints: constraints, Manual: *manual}
 	for _, a := range accept {
 		spec.Acceptance = append(spec.Acceptance, task.AcceptanceCriterion{Description: a})
 	}
@@ -188,7 +208,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	t, warnings, err := e.Add(ctx, spec)
+	t, warnings, err := e.AddWithDependencies(ctx, spec, reqIDs, blockIDs)
 	if err != nil {
 		return err
 	}
@@ -241,6 +261,9 @@ func runShow(ctx context.Context, c *ctxt, args []string) error {
 func renderTaskView(w io.Writer, v app.TaskView) {
 	t := v.Task
 	fmt.Fprintf(w, "%s  [%s]\n", t.ID, v.Status)
+	if t.Manual {
+		fmt.Fprintln(w, "manual:      needs a human; excluded from automatic take")
+	}
 	fmt.Fprintf(w, "description: %s\n", t.Description)
 	if t.Outcome != t.Description {
 		fmt.Fprintf(w, "outcome:     %s\n", t.Outcome)
@@ -365,6 +388,38 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(list, func(w io.Writer) {
 		for _, t := range list {
 			fmt.Fprintf(w, "%s  %-22s %s\n", t.ID, t.Status, t.Description)
+		}
+	})
+}
+
+func runStatus(ctx context.Context, c *ctxt, args []string) error {
+	if err := c.parse(args); err != nil {
+		return err
+	}
+	pid, err := c.resolveProject(ctx)
+	if err != nil {
+		return err
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	s, err := e.Summary(ctx, pid)
+	if err != nil {
+		return err
+	}
+	return c.emit(s, func(w io.Writer) {
+		fmt.Fprintf(w, "project %s: %d tasks, %d open, %d takeable, %d active, %d waiting on a human\n", s.ProjectID, s.Total, s.Open, s.Takeable, s.Active, s.ManualPending)
+		for _, st := range []task.Status{task.StatusAvailable, task.StatusBlocked, task.StatusInProgress, task.StatusInterrupted, task.StatusAwaitingVerification, task.StatusVerificationFailed, task.StatusAwaitingIntegration, task.StatusComplete} {
+			if n := s.Counts[st]; n > 0 {
+				fmt.Fprintf(w, "  %-22s %d\n", st, n)
+			}
+		}
+		switch {
+		case s.Done:
+			fmt.Fprintln(w, "done: every task is complete")
+		case s.Stuck:
+			fmt.Fprintln(w, "stuck: nothing a machine can take and nothing in flight; a human must act")
 		}
 	})
 }

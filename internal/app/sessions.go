@@ -166,6 +166,38 @@ func (e *Engine) Renew(ctx context.Context, token execution.Token, lease time.Du
 	return expires, err
 }
 
+// Release gives a task back without submitting: the attempt ends with
+// reason "released", the handoff is preserved, and the task is takeable
+// again immediately (or blocked, if a prerequisite was added meanwhile).
+// An optional note is logged first so the reason survives. This is how an
+// agent that discovered a blocker hands the task to the graph instead of
+// letting its lease run out.
+func (e *Engine) Release(ctx context.Context, token execution.Token, note string) (TaskView, error) {
+	now := e.now()
+	var v TaskView
+	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		a, err := e.authorize(tx, token, now)
+		if err != nil {
+			return err
+		}
+		if entry := (execution.LogEntry{Note: note}); entry.Validate() == nil {
+			if _, err := tx.InsertLog(a.TaskID, a.ID, entry, now); err != nil {
+				return err
+			}
+		}
+		if err := tx.EndAttempt(a.ID, execution.EndReleased, now); err != nil {
+			return err
+		}
+		r, err := tx.GetRecord(a.TaskID)
+		if err != nil {
+			return err
+		}
+		v, err = e.buildView(tx, r, now)
+		return err
+	})
+	return v, err
+}
+
 // Whoami resolves a token to its task without mutating anything, so an agent
 // that lost context can learn which task its token belongs to.
 func (e *Engine) Whoami(ctx context.Context, token execution.Token) (TaskView, error) {

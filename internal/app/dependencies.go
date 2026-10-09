@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/dependency"
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -24,26 +25,31 @@ func (e *Engine) AddDependencies(ctx context.Context, edges []dependency.Edge) e
 	}
 	now := e.now()
 	return e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		for _, edge := range edges {
-			pa, err := tx.TaskProject(edge.Task)
-			if err != nil {
-				return err
-			}
-			pb := pa
-			if edge.Requires != edge.Task {
-				if pb, err = tx.TaskProject(edge.Requires); err != nil {
-					return err
-				}
-			}
-			if err := dependency.Validate(ctx, edge, pa == pb, tx); err != nil {
-				return err
-			}
-			if err := tx.InsertEdge(edge, now); err != nil {
+		return e.insertEdges(ctx, tx, edges, now)
+	})
+}
+
+// insertEdges validates and inserts edges inside an open write transaction.
+func (e *Engine) insertEdges(ctx context.Context, tx *sqlite.Tx, edges []dependency.Edge, now time.Time) error {
+	for _, edge := range edges {
+		pa, err := tx.TaskProject(edge.Task)
+		if err != nil {
+			return err
+		}
+		pb := pa
+		if edge.Requires != edge.Task {
+			if pb, err = tx.TaskProject(edge.Requires); err != nil {
 				return err
 			}
 		}
-		return nil
-	})
+		if err := dependency.Validate(ctx, edge, pa == pb, tx); err != nil {
+			return err
+		}
+		if err := tx.InsertEdge(edge, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RemoveDependency deletes "t requires r". Eligibility is derived, so no

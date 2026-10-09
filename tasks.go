@@ -80,6 +80,7 @@ type (
 	RunView          = app.RunView
 	Evidence         = verification.Evidence
 	HistoryPage      = app.HistoryPage
+	Summary          = app.Summary
 	ListFilter       = app.ListFilter
 	DependencyGraph  = dependency.Graph
 	Edge             = dependency.Edge

@@ -41,7 +41,11 @@ Dependency direction is always `tasks deps add B --requires A` = "B requires A".
 - Tasks with description, outcome, constraints, acceptance criteria, and a
   durable, digested verification policy.
 - Dependency DAG with atomic cycle/duplicate/self/cross-project rejection,
-  available/blocked listing, graph output (text, JSON, DOT, edge list).
+  edges at creation (`--requires`, `--blocks`), discovered blockers with
+  `release`, manual human-gate tasks, available/blocked listing, graph
+  output (text, JSON, DOT, edge list).
+- Machine-only execution: `take --wait`, `status` (`done`/`stuck`), and a
+  reference driver in `examples/executor.sh`.
 - Atomic `take` with leases, fencing generations, and unguessable session
   tokens stored as digests; automatic selection prefers interrupted work.
 - Append-only structured log (`done/next/learned/note`) and bounded handoff.

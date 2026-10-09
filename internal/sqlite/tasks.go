@@ -109,7 +109,7 @@ func (r Record) Status(now time.Time) task.Status { return task.Derive(r.Facts(n
 // correlated subqueries are index-backed (task_dependencies PK, tasks PK,
 // verification_runs_submission).
 const recordSelect = `
-SELECT t.id, t.project_id, t.description, t.outcome, t.constraints_json, t.policy_json,
+SELECT t.id, t.project_id, t.description, t.outcome, t.constraints_json, t.policy_json, t.manual,
        t.current_attempt_seq, t.completed_at, t.created_at, t.updated_at,
        (SELECT count(*) FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
          WHERE d.task_id = t.id AND r.completed_at IS NULL) AS unmet,
@@ -134,7 +134,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var sID, sAttempt, sAttemptSeq, sAt sql.NullInt64
 	var sRev sql.NullString
 	var run runScan
-	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Description, &r.Task.Outcome, &constraints, &policy,
+	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Description, &r.Task.Outcome, &constraints, &policy, &r.Task.Manual,
 		new(int), &completed, &created, &updated, &r.UnmetDependencies,
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sAt,
@@ -202,9 +202,9 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if err != nil {
 		return wrapInternal(err, "encode policy")
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, description, outcome, constraints_json, policy_json, policy_digest, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), ms(tk.CreatedAt), ms(tk.UpdatedAt))
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, description, outcome, constraints_json, policy_json, policy_digest, manual, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Manual, ms(tk.CreatedAt), ms(tk.UpdatedAt))
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return err // caller retries with a fresh ID
@@ -322,6 +322,7 @@ const takeableWhere = `
 // the three groups separately was measured slower (three scans).
 func (t *Tx) TakeCandidate(pid project.ID, now time.Time) (Record, bool, error) {
 	where, args := scopeWhere(pid, ScopeTakeable, now)
+	where += ` AND t.manual = 0` // human-gated work is never auto-claimed
 	// Priority mirrors task.Status.TakePriority after task.Derive: a failed
 	// run outranks an expired open attempt, so it is tested first.
 	order := ` ORDER BY CASE

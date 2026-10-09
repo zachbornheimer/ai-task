@@ -15,7 +15,8 @@ import (
 )
 
 func init() {
-	register("take", "atomically take a task: tasks take [TASK] [--lease 1h]", runTake)
+	register("take", "atomically take a task: tasks take [TASK] [--lease 1h] [--wait 10m [--poll 2s]]", runTake)
+	register("release", "give a task back without submitting: tasks release <token> [--note ..]", runRelease)
 	register("log", "record progress: tasks log <token> --done .. --next .. --learned .. --note ..", runLog)
 	register("renew-task-lease", "extend a session lease: tasks renew-task-lease <token> [--lease 1h]", runRenew)
 	register("renew", "alias of renew-task-lease", runRenew)
@@ -51,11 +52,16 @@ func (c *ctxt) token(positional []string) (execution.Token, error) {
 
 func runTake(ctx context.Context, c *ctxt, args []string) error {
 	lease := c.fs.Duration("lease", 0, "lease duration (default 1h, min 1s, max 24h)")
+	wait := c.fs.Duration("wait", 0, "keep polling until a task is takeable or this much time passes")
+	poll := c.fs.Duration("poll", 2*time.Second, "poll interval for --wait")
 	if err := c.parse(args); err != nil {
 		return err
 	}
 	if len(c.args) > 1 {
 		return usage("take accepts at most one task id")
+	}
+	if *poll <= 0 {
+		return usage("--poll must be positive")
 	}
 	req := app.TakeRequest{Lease: *lease}
 	if len(c.args) == 1 {
@@ -76,6 +82,11 @@ func runTake(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	s, err := e.Take(ctx, req)
+	deadline := time.Now().Add(*wait)
+	for err != nil && *wait > 0 && retryableTake(err) && time.Now().Before(deadline) {
+		time.Sleep(*poll)
+		s, err = e.Take(ctx, req)
+	}
 	if err != nil {
 		return err
 	}
@@ -89,6 +100,40 @@ func runTake(ctx context.Context, c *ctxt, args []string) error {
 		fmt.Fprintln(w)
 		renderTaskView(w, s.Task)
 		renderHandoff(w, s.Handoff)
+	})
+}
+
+// retryableTake reports whether a take failure can resolve by waiting:
+// nothing takeable yet, or the requested task is held, blocked, or being
+// judged. Anything else (bad id, no project, complete) is final.
+func retryableTake(err error) bool {
+	switch fault.CodeOf(err) {
+	case fault.CodeNoAvailableTask, fault.CodeTaskBlocked, fault.CodeTaskAlreadyTaken,
+		fault.CodeTaskAwaitingVerification, fault.CodeTaskAwaitingIntegration:
+		return true
+	}
+	return false
+}
+
+func runRelease(ctx context.Context, c *ctxt, args []string) error {
+	note := c.fs.String("note", "", "why the task is being released (logged)")
+	if err := c.parse(args); err != nil {
+		return err
+	}
+	tok, err := c.token(c.args)
+	if err != nil {
+		return err
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	v, err := e.Release(ctx, tok, *note)
+	if err != nil {
+		return err
+	}
+	return c.emit(v, func(w io.Writer) {
+		fmt.Fprintf(w, "released %s, now %s\n", v.Task.ID, v.Status)
 	})
 }
 

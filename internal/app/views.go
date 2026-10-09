@@ -14,6 +14,7 @@ type TaskSummary struct {
 	ID                task.ID     `json:"id"`
 	Description       string      `json:"description"`
 	Status            task.Status `json:"status"`
+	Manual            bool        `json:"manual,omitempty"`
 	UnmetDependencies int         `json:"unmet_dependencies"`
 	AttemptSeq        int         `json:"attempt,omitempty"`
 	LeaseExpiresAt    *time.Time  `json:"lease_expires_at,omitempty"`
@@ -94,7 +95,7 @@ type HistoryPage struct {
 }
 
 func summarize(r sqlite.Record, now time.Time) TaskSummary {
-	s := TaskSummary{ID: r.Task.ID, Description: r.Task.Description, Status: r.Status(now), UnmetDependencies: r.UnmetDependencies, CompletedAt: r.CompletedAt}
+	s := TaskSummary{ID: r.Task.ID, Description: r.Task.Description, Status: r.Status(now), Manual: r.Task.Manual, UnmetDependencies: r.UnmetDependencies, CompletedAt: r.CompletedAt}
 	if a := r.Attempt; a != nil && a.LeaseActive(now) {
 		s.AttemptSeq = a.Seq
 		exp := a.LeaseExpiresAt

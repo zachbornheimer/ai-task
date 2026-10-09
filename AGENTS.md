@@ -42,12 +42,32 @@ tasks init                        # once per repository (any worktree of it reso
 - `VERIFICATION_RUNNING`: a previous run died; `tasks verify <task-id> --retry`.
 - Lost context: `tasks whoami <token>` or `tasks show <task-id>`.
 
-## Dependencies
+## Dependencies and blockers
 
-`tasks deps add B --requires A` means **B requires A**. Add tasks with
-`tasks add "Reject expired access tokens" --accept "expired token -> 401"
---check "unit: go test ./auth/..."`. One task = one independently verifiable
-outcome; if you would write "and" in the outcome, make two tasks.
+`tasks deps add B --requires A` means **B requires A**. Create tasks with
+their edges: `tasks add "Reject expired access tokens" --requires <parser-task>
+--accept "expired token -> 401" --check "unit: go test ./auth/..."`.
+
+Found something that must happen first while working on task C? Record it
+and hand C back:
+
+```sh
+tasks add "Add the token clock interface" --blocks C
+tasks log --learned "..." --next "resume once the interface exists"
+tasks release          # C is blocked until the new task completes, then available with your handoff
+```
+
+Something only a human can do: `tasks add "Approve API key" --manual
+--blocks C`. Machines never auto-take it; `tasks status` reports `stuck`
+with `manual_pending` until a person finishes it.
+
+One task = one independently verifiable outcome; if you would write "and"
+in the outcome, make two tasks.
+
+## Driving a whole graph
+
+`tasks take --wait 10m` blocks until something is takeable;
+`tasks status` says `done` or `stuck`. See `examples/executor.sh`.
 
 ## Inspect
 

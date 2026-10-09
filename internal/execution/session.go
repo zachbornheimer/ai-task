@@ -70,8 +70,13 @@ const (
 	// EndFinished: the attempt submitted its implementation.
 	EndFinished EndReason = "finished"
 	// EndSuperseded: a later attempt took the task after this one's lease
-	// expired (or, in Milestone 1, after a verification failure).
+	// expired (or after a verification failure).
 	EndSuperseded EndReason = "superseded"
+	// EndReleased: the attempt gave the task back without submitting,
+	// typically because it discovered a blocker. The handoff is preserved
+	// and the task is immediately takeable again (or blocked, if a new
+	// prerequisite was added).
+	EndReleased EndReason = "released"
 )
 
 // Attempt is one execution attempt of a task. Seq is the fencing generation:

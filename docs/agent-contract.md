@@ -47,14 +47,16 @@ Warnings (never fatal) go to stderr in both modes. Exit status: `0` success,
 tasks init [--name NAME] [--path DIR] [--no-dir]      register a project (cwd by default)
 tasks projects                                        list projects
 tasks project [--name N] [--integration none|promote] [--regression-json JSON|--regression-file F]
-tasks add "description" [--outcome ..] [--constraint ..]* [--accept ..]* [--check "[id:] cmd"]* [--optional-check ..]* [--policy-json JSON]
+tasks add "description" [--requires T]* [--blocks T]* [--manual] [--outcome ..] [--constraint ..]* [--accept ..]* [--check "[id:] cmd"]* [--optional-check ..]* [--policy-json JSON]
+tasks status                                          project summary: counts, takeable, active, done, stuck
 tasks show <task>
 tasks list [--available|--takeable|--blocked|--in-progress|--interrupted|--awaiting-verification|--verification-failed|--awaiting-integration|--complete|--all|--status a,b]
 tasks deps add <task> --requires <prerequisite>       <task> requires <prerequisite>
 tasks deps remove <task> --requires <prerequisite>
 tasks deps list <task>
 tasks graph [--format text|json|dot|edges] [--around <task> --depth N]
-tasks take [<task>] [--lease 1h]                      atomic claim; prints the session token once
+tasks take [<task>] [--lease 1h] [--wait D --poll 2s] atomic claim; prints the session token once; --wait polls until takeable
+tasks release <token> [--note ..]                     give the task back without submitting (handoff kept)
 tasks log <token> [--done ..] [--next ..] [--learned ..] [--note ..]
 tasks renew-task-lease <token> [--lease 1h]           (alias: renew)
 tasks finish <token> [--no-verify]                    submit; runs the checks unless --no-verify
@@ -69,6 +71,24 @@ tasks version
 Global flags may appear before or after the command: `--db PATH`,
 `--project ID|NAME`, `--json`, `--output text|json`. Environment:
 `TASKS_DB`, `TASKS_PROJECT`, `TASKS_OUTPUT`, `TASKS_SESSION`.
+
+### Dependencies and blockers are first class
+
+- At creation: `tasks add "B" --requires A` creates B already blocked on A;
+  `tasks add "X" --blocks C` creates X and makes C require it, in one
+  transaction. An invalid edge (cycle, other project, unknown task) creates
+  nothing.
+- Discovered mid-task: the agent holding C records the prerequisite with
+  `tasks add "X" --blocks C`, logs what it learned, and runs
+  `tasks release <token>`. C becomes `blocked`; when X completes, C is
+  `available` again with its handoff. Releasing is immediate; letting the
+  lease expire is the crash path, not the normal one.
+- Human gates: `tasks add "Approve the vendor contract" --manual` is a task
+  a machine never auto-claims. It blocks its dependents like any other
+  task; a person takes it by ID and finishes it.
+- `tasks status` tells a driver whether the project is `done`, `stuck`
+  (open tasks remain, nothing a machine can take, nothing in flight) or
+  still moving (`takeable`, `active`, `manual_pending`).
 
 ### Dependency direction
 
@@ -142,6 +162,25 @@ and `verification_failed` tasks, in the order automatic `take` prefers them.
 `blocked`, `available`, `in_progress`, `interrupted`,
 `awaiting_verification`, `verification_failed`, `awaiting_integration`,
 `complete`. They are derived on every read; there is no command to set one.
+
+## Machine-only graph execution
+
+The graph can be executed with no human in the loop. One or more workers
+run:
+
+```
+while status != done and not stuck:
+    session = tasks take --wait 10m        # NO_AVAILABLE_TASK after the wait => re-check status
+    run the agent with the session as its prompt (TASKS_SESSION exported)
+    the agent logs, adds discovered prerequisites with --blocks, releases or finishes
+```
+
+Claims are serialised by the engine, so workers never share a task; the
+DAG orders them; `finish` verifies; `status` ends the loop. A reference
+driver is `examples/executor.sh`. If the agent crashes, its lease expires
+and the task is resumed with the handoff; if verification fails, the task
+is re-taken for repair; if a manual task is reached, `status` reports
+`stuck` with `manual_pending` so a person can act.
 
 ## Recommended agent loop
 

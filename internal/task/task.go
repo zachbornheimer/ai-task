@@ -45,6 +45,10 @@ type Spec struct {
 	Constraints  []string
 	Acceptance   []AcceptanceCriterion
 	Verification verification.Policy
+	// Manual marks a task that needs a human (a decision, an approval, a
+	// credential). It is excluded from automatic selection so a machine
+	// executor never claims it, and it still blocks its dependents.
+	Manual bool
 }
 
 // Task is the stored contract.
@@ -56,6 +60,7 @@ type Task struct {
 	Constraints  []string              `json:"constraints,omitempty"`
 	Acceptance   []AcceptanceCriterion `json:"acceptance,omitempty"`
 	Verification verification.Policy   `json:"verification"`
+	Manual       bool                  `json:"manual,omitempty"`
 	CreatedAt    time.Time             `json:"created_at"`
 	UpdatedAt    time.Time             `json:"updated_at"`
 }

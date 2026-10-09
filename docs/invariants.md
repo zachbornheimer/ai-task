@@ -26,6 +26,10 @@ Each invariant names the test that proves it. Tests live beside the package
   stored. (`engine.TestDependencyInvariants`)
 - A prerequisite is satisfied iff it is complete.
 
+- Edges may be created with the task (`--requires`, `--blocks`) in the
+  same transaction; an invalid edge creates nothing.
+  (`engine.TestAddWithDependenciesIsAtomic`)
+
 ## Status derivation
 
 Precedence, highest first:
@@ -65,6 +69,13 @@ claim. (`engine.TestConcurrentAutomaticTakeAssignsEachTaskOnce`)
   UPDATE. (`execution.TestLeaseDuration`)
 - A lease proves authority over *task state*, not that a process is running
   or has stopped touching files. (`docs/limitations.md`)
+
+- `release` ends an attempt without a submission; the task is takeable at
+  once (or blocked) and its handoff survives. (`engine.TestDiscoveredBlockerReleaseAndResume`)
+- Manual tasks are never claimed by automatic take; they block dependents
+  like any other task. `Summary.Stuck` is true iff open tasks remain, no
+  machine-takeable task exists and nothing is in flight.
+  (`engine.TestManualTasksGateMachinesAndSummaryReportsStuck`, `engine.TestMachineOnlyGraphExecution`)
 
 ## Log and handoff
 
