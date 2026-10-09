@@ -55,5 +55,11 @@
 10. **Single host, local filesystem.** WAL-mode SQLite on a network
     filesystem is unsafe.
 
+13. **Checks are isolated by snapshot, not sandboxed.** Each category
+    runs on its own disposable worktree with a private `TMPDIR` and no
+    session token, but a check can still reach the network, shared
+    services, the repository's other worktrees and the database file.
+    Declared check permissions are future work.
+
 11. **`at` collides with POSIX `at`.** The name is provisional; install
     under another name if the scheduler is in use.

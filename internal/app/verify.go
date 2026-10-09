@@ -150,6 +150,70 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	return res, nil
 }
 
+// runSuites runs a policy's two categories on separate, disposable
+// snapshots of one revision: task checks first, then (unless a required
+// task check failed, in which case the regression rows are recorded as
+// skipped) the regression checks on a fresh snapshot. Nothing a task check
+// leaves behind can be the reason a regression check passes.
+func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
+	var out []verification.Evidence
+	taskPolicy := verification.Policy{TaskChecks: policy.TaskChecks}
+	if len(taskPolicy.TaskChecks) > 0 {
+		dir, cleanup, err := mgr.Snapshot(ctx, revision)
+		if err != nil {
+			return nil, err
+		}
+		ev, err := e.runChecks(ctx, dir, taskPolicy, runID, revision, fence)
+		cleanup()
+		out = append(out, ev...)
+		if err != nil {
+			return out, err
+		}
+	}
+	if len(policy.Regression) == 0 {
+		return out, nil
+	}
+	requiredTaskFailed := false
+	for _, ev := range out {
+		if ev.Required && ev.Outcome != verification.OutcomePassed {
+			requiredTaskFailed = true
+		}
+	}
+	regPolicy := verification.Policy{Regression: policy.Regression}
+	if requiredTaskFailed {
+		ev, err := e.runChecksSkipping(ctx, regPolicy, runID, revision, policy.Digest(), fence)
+		return append(out, ev...), err
+	}
+	dir, cleanup, err := mgr.Snapshot(ctx, revision)
+	if err != nil {
+		return out, err
+	}
+	ev, err := e.runChecks(ctx, dir, regPolicy, runID, revision, fence)
+	cleanup()
+	return append(out, ev...), err
+}
+
+// runChecksSkipping records every check of policy as skipped (a required
+// task check failed earlier in the run).
+func (e *Engine) runChecksSkipping(ctx context.Context, policy verification.Policy, runID int64, revision, digest string, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
+	var out []verification.Evidence
+	for _, step := range verification.Plan(policy) {
+		ev := e.execStep(ctx, "", step, runID, revision, digest, true)
+		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+			if err := fence(tx); err != nil {
+				return err
+			}
+			id, err := tx.InsertEvidence(ev)
+			ev.ID = id
+			return err
+		}); err != nil {
+			return out, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
 // runChecks executes a policy's checks in dir in planner order, committing
 // each evidence row as it lands. fence is evaluated in each evidence
 // transaction; a failure (lost authority, superseded run) stops the run.
@@ -212,7 +276,8 @@ func (e *Engine) execStep(ctx context.Context, dir string, step verification.Ste
 
 // checkEnv is the environment checks run with: the parent environment
 // minus any session token, plus GOFLAGS=-count=1 so Go's own test cache
-// cannot turn a fresh run into a replay.
+// cannot turn a fresh run into a replay, and a TMPDIR private to the
+// snapshot so temporary files of one suite never reach another.
 func checkEnv(dir string) []string {
 	var env []string
 	flags := "-count=1"
@@ -223,10 +288,18 @@ func checkEnv(dir string) []string {
 		case strings.HasPrefix(kv, "GOFLAGS="):
 			flags = strings.TrimPrefix(kv, "GOFLAGS=") + " -count=1"
 			continue
+		case strings.HasPrefix(kv, "TMPDIR="):
+			continue
 		}
 		env = append(env, kv)
 	}
-	return append(env, "GOFLAGS="+flags, "AT_CHECK_DIR="+dir)
+	tmp := dir + ".tmp"
+	if dir == "" {
+		tmp = os.TempDir()
+	} else {
+		_ = os.MkdirAll(tmp, 0o700)
+	}
+	return append(env, "GOFLAGS="+flags, "AT_CHECK_DIR="+dir, "TMPDIR="+tmp)
 }
 
 // finalRun carries the state of one verify-complete invocation.
@@ -353,18 +426,17 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("%s: %s", fr.rec.Task.ID, summary), Details: res}
 	}
-	// Immutable inputs: a detached snapshot of the submitted revision.
+	// Immutable inputs: detached snapshots of the submitted revision, one
+	// per check category.
 	mgr := e.manager(fr.proj)
-	dir, cleanup, err := mgr.Snapshot(ctx, fr.revision)
-	if err != nil {
-		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
-	}
 	checkCtx := fr.checkCtx
 	if checkCtx == nil {
 		checkCtx = ctx
 	}
-	evidence, err := e.runChecks(checkCtx, dir, fr.policy, fr.runID, fr.revision, fence)
-	cleanup()
+	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence)
+	if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(evidence) == 0 {
+		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
+	}
 	if err != nil {
 		res.Evidence = evidence
 		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(fr.runID, sqlite.RunError, err.Error(), e.now()) })
@@ -434,13 +506,11 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		final := fr.revision
 		if cand.Revision != fr.revision {
-			snap, snapCleanup, err := mgr.Snapshot(ctx, cand.Revision)
-			if err != nil {
+			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence)
+			if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(more) == 0 {
 				cand.Cleanup()
 				return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
 			}
-			more, err := e.runChecks(checkCtx, snap, fr.policy, fr.runID, cand.Revision, fence)
-			snapCleanup()
 			if err != nil {
 				cand.Cleanup()
 				_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(fr.runID, sqlite.RunError, err.Error(), e.now()) })

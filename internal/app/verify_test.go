@@ -448,3 +448,35 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	f.setRegression(check("regress", "true", true))
 	f.complete(s)
 }
+
+// Check categories run on separate snapshots: a file a task check leaves
+// behind is not there for the regression suite, which therefore proves
+// the committed revision only. The session token never reaches a check.
+func TestCategoriesDoNotShareASnapshot(t *testing.T) {
+	f := newGitFixture(t)
+	f.setRegression(check("regress", "test -f artifact.txt", true))
+	a := f.apply(plan.AddTask{Key: "a", Title: "a", TaskChecks: []verification.CheckSpec{
+		check("leave", "echo made > artifact.txt && test -z \"$AT_SESSION\" && test -n \"$TMPDIR\" && test \"$TMPDIR\" != \"$AT_CHECK_DIR\"", true),
+	}}).Created["a"]
+	s := f.claim(string(a))
+	f.commit(s.Workspace, "a.txt", "a")
+	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeVerificationFailed)
+	var leave, regress verification.Outcome
+	for _, ev := range res.Evidence {
+		switch ev.CheckID {
+		case "leave":
+			leave = ev.Outcome
+		case "regress":
+			regress = ev.Outcome
+		}
+	}
+	if leave != verification.OutcomePassed || regress != verification.OutcomeFailed {
+		t.Fatalf("leave=%s regress=%s (the regression suite saw the task check's artifact)", leave, regress)
+	}
+	// Committing the artifact makes it part of the revision: both pass.
+	f.commit(s.Workspace, "artifact.txt", "committed")
+	if res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete); err != nil || !res.Completed {
+		t.Fatalf("%+v %v", res, err)
+	}
+}

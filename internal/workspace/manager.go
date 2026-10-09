@@ -159,6 +159,7 @@ func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cl
 	cleanup = func() {
 		_, _ = git(context.Background(), m.Repo, "worktree", "remove", "--force", path)
 		_ = os.RemoveAll(path)
+		_ = os.RemoveAll(path + ".tmp")
 	}
 	return path, cleanup, nil
 }
@@ -246,12 +247,23 @@ func (m Manager) Promote(ctx context.Context, target string, cand Candidate) err
 		if err != nil {
 			return err
 		}
-		if !st.Clean() {
-			return fault.New(fault.CodeIntegrationFailed, "target branch %s is checked out in %s with uncommitted changes; commit or stash them before promotion", target, wt)
-		}
 		if st.Revision != cand.Base {
 			return fault.Wrap(ErrTargetMoved, fault.CodeIntegrationFailed, "target branch %s moved from %s to %s during verification", target, short(cand.Base), short(st.Revision))
 		}
+		// A developer's checkout may carry unrelated edits and untracked
+		// files; only paths the fast-forward would touch are an obstacle,
+		// and those are never overwritten, stashed or discarded.
+		if !st.Clean() {
+			changed, err := git(ctx, m.Repo, "diff", "--name-only", cand.Base, cand.Revision)
+			if err != nil {
+				return fault.Wrap(err, fault.CodeWorkspaceUnavailable, "diff %s..%s", short(cand.Base), short(cand.Revision))
+			}
+			if clash := localClashes(st.Dirty, strings.Split(strings.TrimSpace(changed), "\n")); len(clash) > 0 {
+				return fault.New(fault.CodeIntegrationFailed, "target branch %s is checked out in %s and the promotion would touch files with local changes (%s); commit, stash or move them, then verify again", target, wt, strings.Join(clash, ", "))
+			}
+		}
+		// Git's own guard is the second net: a fast-forward never
+		// overwrites local changes or untracked files.
 		if _, err := git(ctx, wt, "merge", "--ff-only", cand.Revision); err != nil {
 			return fault.Wrap(err, fault.CodeIntegrationFailed, "fast-forward %s in %s", target, wt)
 		}
@@ -261,6 +273,33 @@ func (m Manager) Promote(ctx context.Context, target string, cand Candidate) err
 		return fault.Wrap(ErrTargetMoved, fault.CodeIntegrationFailed, "target branch %s moved during verification (%v)", target, err)
 	}
 	return nil
+}
+
+// localClashes returns the dirty paths (porcelain status lines, untracked
+// included) that a change touching `changed` paths would collide with: the
+// same file, or a dirty path inside a changed directory and vice versa.
+func localClashes(dirty []string, changed []string) []string {
+	var out []string
+	for _, line := range dirty {
+		if len(line) < 4 {
+			continue
+		}
+		p := line[3:]
+		if i := strings.LastIndex(p, " -> "); i >= 0 {
+			p = p[i+4:]
+		}
+		p = strings.TrimSuffix(strings.Trim(p, `"`), "/")
+		for _, c := range changed {
+			if c == "" {
+				continue
+			}
+			if c == p || strings.HasPrefix(c, p+"/") || strings.HasPrefix(p, c+"/") {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // promoteLock takes the repository-wide promotion lock: an advisory lock

@@ -98,6 +98,12 @@ claimed, verifying, and submissions whose cohort can be verified.
 - Concurrent promotions into a checked-out target: exactly one wins, the
   rest see a moved target and rebuild, and the checkout stays clean.
   (`workspace.TestConcurrentPromotionsIntoCheckout`)
+- A promotion into a dirty checkout proceeds when it touches none of the
+  dirty paths and refuses, changing nothing, when it would; local files
+  are never overwritten. (`workspace.TestPromoteIntoDirtyCheckoutIsSafe`)
+- Task checks and regression checks run on separate snapshots; a file a
+  task check leaves behind is not there for the regression suite; checks
+  never see `AT_SESSION`. (`TestCategoriesDoNotShareASnapshot`)
 - The target moves only after a fenced intent transaction re-checked
   everything completion depends on, and completion is recorded exactly
   when the candidate reached the target: a crash at any point is resolved

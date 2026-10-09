@@ -194,17 +194,18 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	if !fault.Is(err, fault.CodeIntegrationFailed) || !errors.Is(err, ErrTargetMoved) {
 		t.Fatalf("moved target: %v", err)
 	}
-	// Dirty target worktree refuses promotion.
+	// A target worktree with a local file where the promotion would write
+	// refuses promotion (unrelated dirt is fine: TestPromoteIntoDirtyCheckoutIsSafe).
 	w5, _ := r.mgr.EnsureTask(r.ctx, "at-ffffff", "main", 0)
 	rev5 := r.commit(w5.Path, "f5.txt", "f5")
 	cand5, _ := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
-	os.WriteFile(filepath.Join(r.dir, "dirty.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(r.dir, "f5.txt"), []byte("x"), 0o644)
 	err = r.mgr.Promote(r.ctx, "main", cand5)
 	cand5.Cleanup()
 	if !fault.Is(err, fault.CodeIntegrationFailed) {
 		t.Fatalf("dirty target: %v", err)
 	}
-	os.Remove(filepath.Join(r.dir, "dirty.txt"))
+	os.Remove(filepath.Join(r.dir, "f5.txt"))
 	// Target not checked out anywhere: ref update path.
 	r.git(r.dir, "checkout", "-q", "-b", "other")
 	cand6, _ := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
@@ -270,4 +271,56 @@ func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
 		t.Fatalf("lock not released: %v", err)
 	}
 	unlock()
+}
+
+// A developer's checkout may be dirty: a fast-forward proceeds when it
+// touches none of the dirty paths and refuses, changing nothing, when it
+// would; local files are never overwritten, stashed or discarded.
+func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
+	r := newRepo(t)
+	promote := func(id, file string) (Candidate, error) {
+		w, _ := r.mgr.EnsureTask(r.ctx, id, "main", 0)
+		rev := r.commit(w.Path, file, "from "+id)
+		cand, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev}, "x")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cand, r.mgr.Promote(r.ctx, "main", cand)
+	}
+	// Unrelated untracked file and unrelated tracked edit: promotion proceeds
+	// and both survive.
+	os.WriteFile(filepath.Join(r.dir, "notes.txt"), []byte("scratch"), 0o644)
+	os.WriteFile(filepath.Join(r.dir, "g.txt"), []byte("local edit"), 0o644) // g.txt is tracked
+	if _, err := promote("at-dirty1", "new1.txt"); err != nil {
+		t.Fatalf("safe promotion refused: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(r.dir, "notes.txt")); string(b) != "scratch" {
+		t.Fatal("untracked file lost")
+	}
+	if b, _ := os.ReadFile(filepath.Join(r.dir, "g.txt")); string(b) != "local edit" {
+		t.Fatal("local edit lost")
+	}
+	if _, err := os.Stat(filepath.Join(r.dir, "new1.txt")); err != nil {
+		t.Fatal("promotion did not land")
+	}
+	// Untracked file at a path the promotion creates: refused, untouched.
+	os.WriteFile(filepath.Join(r.dir, "new2.txt"), []byte("my draft"), 0o644)
+	before := r.git(r.dir, "rev-parse", "main")
+	if _, err := promote("at-dirty2", "new2.txt"); err == nil || !strings.Contains(err.Error(), "new2.txt") {
+		t.Fatalf("clashing untracked file not refused: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(r.dir, "new2.txt")); string(b) != "my draft" || r.git(r.dir, "rev-parse", "main") != before {
+		t.Fatal("refusal was not clean")
+	}
+	// Tracked file with local edits that the promotion modifies: refused.
+	if _, err := promote("at-dirty3", "g.txt"); err == nil || !strings.Contains(err.Error(), "g.txt") {
+		t.Fatalf("clashing local edit not refused: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(r.dir, "g.txt")); string(b) != "local edit" {
+		t.Fatal("local edit overwritten")
+	}
+	st, _ := Inspect(r.ctx, r.dir)
+	if len(st.Dirty) != 3 {
+		t.Fatalf("checkout changed by refused promotions: %v", st.Dirty)
+	}
 }

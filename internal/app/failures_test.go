@@ -53,13 +53,14 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 		t.Fatalf("second attempt's failure not counted: %d", failures(a))
 	}
 
-	// 2. The environment stopping the run (dirty target checkout) is not a
-	//    strike: it is recorded as last_error and cleared on completion.
+	// 2. The environment stopping the run (an untracked file in the target
+	//    checkout at a path the promotion would create) is not a strike: it
+	//    is recorded as last_error and cleared on completion.
 	b := f.add("b")
 	sb := f.claim(string(b))
 	f.commit(sb.Workspace, "b.txt", "b")
-	scratch := filepath.Join(f.repo, "scratch.txt")
-	os.WriteFile(scratch, []byte("untracked"), 0o644)
+	scratch := filepath.Join(f.repo, "b.txt")
+	os.WriteFile(scratch, []byte("local draft"), 0o644)
 	_, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeIntegrationFailed)
 	v := f.show(string(b))

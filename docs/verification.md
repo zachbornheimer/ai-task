@@ -50,9 +50,13 @@ after a committed completion returns the stored result and runs nothing.
    complete; require a clean worktree and take HEAD as the submission.
 2. Record the submission and a running run; renew the lease on a
    heartbeat while checks run.
-3. Check out the revision into a detached snapshot and run both suites
-   there; each evidence row commits as it finishes, fenced on the session
-   and on the run still being the newest.
+3. Run the task checks on a detached snapshot of the revision, then the
+   regression checks on a second, fresh snapshot (skipped, and recorded as
+   such, when a required task check failed): nothing a task check leaves
+   behind can be why a regression check passes. Each snapshot has a private
+   `TMPDIR`; `AT_SESSION` is never in a check's environment. Each evidence
+   row commits as it finishes, fenced on the session and on the run still
+   being the newest.
 4. Judge. On failure: run failed, failure count and cooldown recorded,
    claim stays live, `VERIFICATION_FAILED` with evidence.
 5. In `promote` projects: merge the revision onto the target in a scratch
@@ -69,6 +73,10 @@ after a committed completion returns the stored result and runs nothing.
 7. **Promote.** Compare-and-swap the target under the repository's
    promotion lock (an advisory file lock owned by the process's descriptor,
    released by the kernel if the process dies; nothing is ever "stolen").
+   When the target is checked out, its working tree may be dirty: the
+   fast-forward proceeds unless it would touch a path with local changes
+   or an untracked file, and then refuses naming the paths; local files
+   are never overwritten, stashed or discarded.
    A moved target abandons the intent and rebuilds (up to three times);
    any other failure abandons it and the target never moved.
 8. **Complete.** A second short transaction, authorised by the intent's
