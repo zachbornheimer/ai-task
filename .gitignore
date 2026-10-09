@@ -1,0 +1,8 @@
+# build outputs
+/tasks
+/ai-task
+*.test
+# local state
+*.db
+*.db-wal
+*.db-shm
