@@ -9,17 +9,18 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-const projectColumns = `id, name, root_path, integration, regression_json, created_at, updated_at`
+const projectColumns = `id, name, root_path, integration, regression_json, plan_rev, target_branch, workspace_root, max_attempts, retry_cooldown_ms, created_at, updated_at`
 
 func scanProject(sc interface{ Scan(...any) error }) (project.Project, error) {
 	var p project.Project
 	var root sql.NullString
 	var regression string
-	var created, updated int64
-	if err := sc.Scan(&p.ID, &p.Name, &root, &p.Integration, &regression, &created, &updated); err != nil {
+	var created, updated, cooldown int64
+	if err := sc.Scan(&p.ID, &p.Name, &root, &p.Integration, &regression, &p.PlanRev, &p.TargetBranch, &p.WorkspaceRoot, &p.MaxAttempts, &cooldown, &created, &updated); err != nil {
 		return p, err
 	}
 	p.RootPath = root.String
+	p.RetryCooldown = time.Duration(cooldown) * time.Millisecond
 	p.CreatedAt, p.UpdatedAt = fromMS(created), fromMS(updated)
 	pol, err := verification.Parse([]byte(regression))
 	if err != nil {
@@ -40,8 +41,8 @@ func (t *Tx) InsertProject(p project.Project) error {
 	if p.RootPath != "" {
 		root = p.RootPath
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, root, p.Integration, string(regression), ms(p.CreatedAt), ms(p.UpdatedAt))
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, root, p.Integration, string(regression), p.PlanRev, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(p.CreatedAt), ms(p.UpdatedAt))
 	if IsUniqueViolation(err) {
 		return fault.Wrap(err, fault.CodeInvalidInput, "project id or root path already registered")
 	}
@@ -139,8 +140,8 @@ func (t *Tx) UpdateProject(p project.Project, now time.Time) error {
 	if p.RootPath != "" {
 		root = p.RootPath
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, root_path = ?, integration = ?, regression_json = ?, updated_at = ? WHERE id = ?`,
-		p.Name, root, p.Integration, string(regression), ms(now), p.ID)
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, root_path = ?, integration = ?, regression_json = ?, target_branch = ?, workspace_root = ?, max_attempts = ?, retry_cooldown_ms = ?, updated_at = ? WHERE id = ?`,
+		p.Name, root, p.Integration, string(regression), p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(now), p.ID)
 	if IsUniqueViolation(err) {
 		return fault.Wrap(err, fault.CodeInvalidInput, "root path already registered to another project")
 	}
@@ -151,4 +152,40 @@ func (t *Tx) UpdateProject(p project.Project, now time.Time) error {
 		return fault.New(fault.CodeNotFound, "project %s not found", p.ID)
 	}
 	return nil
+}
+
+// BumpPlanRev advances the plan revision, checking the expected value when
+// expected is non-zero. Returns the new revision.
+func (t *Tx) BumpPlanRev(pid project.ID, expected uint64, now time.Time) (uint64, error) {
+	var current uint64
+	if err := t.tx.QueryRowContext(t.ctx, `SELECT plan_rev FROM projects WHERE id = ?`, pid).Scan(&current); err != nil {
+		if isNoRows(err) {
+			return 0, fault.New(fault.CodeNotFound, "project %s not found", pid)
+		}
+		return 0, wrapInternal(err, "read plan revision")
+	}
+	if expected != 0 && expected != current {
+		return 0, fault.New(fault.CodePlanConflict, "plan revision is %d, change set expected %d; re-read the plan and re-review", current, expected)
+	}
+	next := current + 1
+	if _, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET plan_rev = ?, updated_at = ? WHERE id = ?`, next, ms(now), pid); err != nil {
+		return 0, wrapInternal(err, "bump plan revision")
+	}
+	return next, nil
+}
+
+// PlanChange looks up a stored idempotent apply result.
+func (t *Tx) PlanChange(pid project.ID, key string) (string, bool, error) {
+	var body string
+	err := t.tx.QueryRowContext(t.ctx, `SELECT result_json FROM plan_changes WHERE project_id = ? AND idempotency_key = ?`, pid, key).Scan(&body)
+	if isNoRows(err) {
+		return "", false, nil
+	}
+	return body, err == nil, wrapInternal(err, "lookup plan change")
+}
+
+// RecordPlanChange stores an apply result under its idempotency key.
+func (t *Tx) RecordPlanChange(pid project.ID, key string, rev uint64, body string, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `INSERT INTO plan_changes (project_id, idempotency_key, plan_rev, result_json, applied_at) VALUES (?, ?, ?, ?, ?)`, pid, key, rev, body, ms(now))
+	return wrapInternal(err, "record plan change")
 }

@@ -72,9 +72,9 @@ func Main(env Env) int {
 	}
 	ctx := context.Background()
 	c := &ctxt{env: env}
-	c.g = globals{db: env.Getenv("TASKS_DB"), project: env.Getenv("TASKS_PROJECT"), output: env.Getenv("TASKS_OUTPUT")}
+	c.g = globals{db: env.Getenv("AT_DB"), project: env.Getenv("AT_PROJECT"), output: env.Getenv("AT_OUTPUT")}
 
-	top := flag.NewFlagSet("tasks", flag.ContinueOnError)
+	top := flag.NewFlagSet("at", flag.ContinueOnError)
 	top.SetOutput(io.Discard)
 	c.bindGlobals(top)
 	if err := top.Parse(env.Args); err != nil {
@@ -104,9 +104,9 @@ func Main(env Env) int {
 }
 
 func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
-	fs.StringVar(&c.g.db, "db", c.g.db, "database path (env TASKS_DB)")
-	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env TASKS_PROJECT)")
-	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env TASKS_OUTPUT=json)")
+	fs.StringVar(&c.g.db, "db", c.g.db, "database path (env AT_DB)")
+	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env AT_PROJECT)")
+	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env AT_OUTPUT=json)")
 	fs.StringVar(&c.g.output, "output", c.g.output, "output format: text|json")
 }
 
@@ -221,8 +221,10 @@ func (c *ctxt) fail(err error) int {
 		if vr, ok := details.(app.VerifyResult); ok {
 			renderEvidence(c.env.Stderr, vr.Evidence, false)
 		}
-		if sr, ok := details.(app.SubmissionResult); ok && sr.RunID != 0 {
-			fmt.Fprintf(c.env.Stderr, "run %d: %s\n", sr.RunID, sr.Summary)
+		if sum, ok := details.(app.Summary); ok {
+			for _, r := range sum.Reasons {
+				fmt.Fprintf(c.env.Stderr, "  %s\n", r)
+			}
 		}
 	}
 	return ExitError
@@ -234,15 +236,15 @@ func (c *ctxt) usageError(err error) int {
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(envelope{OK: false, Error: &errorOut{Code: fault.CodeInvalidInput, Message: "usage: " + err.Error()}})
 	} else {
-		fmt.Fprintf(c.env.Stderr, "usage error: %s\nRun `tasks help` for commands.\n", err)
+		fmt.Fprintf(c.env.Stderr, "usage error: %s\nRun `at help` for commands.\n", err)
 	}
 	return ExitUsage
 }
 
 func (c *ctxt) printHelp() {
 	w := c.env.Stderr
-	fmt.Fprintln(w, "tasks - durable task engine for coding agents")
-	fmt.Fprintln(w, "\nUsage: tasks [--db PATH] [--project ID|NAME] [--json] <command> [args]")
+	fmt.Fprintln(w, "at - agent task engine: atomic plans, leased claims, verified completion")
+	fmt.Fprintln(w, "\nUsage: at [--db PATH] [--project ID|NAME] [--json] <command> [args]")
 	fmt.Fprintln(w, "\nCommands:")
 	names := make([]string, 0, len(commands))
 	for n := range commands {
@@ -252,8 +254,8 @@ func (c *ctxt) printHelp() {
 	for _, n := range names {
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
-	fmt.Fprintln(w, "\nEnvironment: TASKS_DB, TASKS_PROJECT, TASKS_OUTPUT=json, TASKS_SESSION")
-	fmt.Fprintln(w, "Dependency direction: `tasks deps add B --requires A` means B requires A.")
+	fmt.Fprintln(w, "\nEnvironment: AT_DB, AT_PROJECT, AT_OUTPUT=json, AT_SESSION")
+	fmt.Fprintln(w, "Agent verbs: claim, log, verify task|regression|complete, claim release|renew. Planning: add, update, show, list.")
 }
 
 var commands = map[string]command{}

@@ -1,58 +1,45 @@
 # Explicit limitations and unsolved risks
 
-These are not planned to be hidden behind better wording. Each is a real gap.
+1. **Stale processes and files.** A lease proves authority over the task
+   record, and per-attempt worktrees keep attempts' files apart, but the
+   engine cannot stop an expired agent process from editing its old
+   worktree. The host must cancel the agent when `Renew` fails. Final
+   checks run on a detached snapshot, so a stale editor cannot change what
+   is verified.
 
-1. **Filesystem ownership after lease expiry.** A lease proves authority
-   over the task record. It does not stop an expired-but-alive process from
-   continuing to edit files in the task's worktree while a new attempt also
-   edits them. The engine cannot kill processes. Mitigations are external:
-   process supervision, per-attempt worktrees (not in V1), or a long enough
-   lease plus renewals. The agent contract tells a superseded agent to stop
-   writing files; that is a convention, not enforcement.
+2. **Local-user trust.** `--planner` and `AT_SESSION` are conventions. The
+   same OS user can edit the SQLite file, the repository, or the checks.
+   Self-certification is impossible *through the API*; it is not a defence
+   against a hostile local user. That needs a protected service or CI.
 
-2. **Local-user trust boundary.** The same OS user that runs agents can open
-   the SQLite file, edit tests, or alter a policy. The engine makes
-   self-certification impossible *through its API* (claims never complete
-   tasks; policies are not reachable through session tokens); it does not
-   defend against a hostile local user. A protected service or CI runner is
-   needed for that and is out of scope for V1.
+3. **Checks are declared, not proven, side-effect free.** They run in a
+   disposable snapshot with `GOFLAGS=-count=1` and without the session
+   token, but nothing stops a check from touching shared services. Task
+   and regression suites run sequentially because isolation cannot be
+   proven; a declared-isolation flag is a future addition.
 
-3. **Semantic verification is imperfect.** A passing check proves an exit
-   status on a revision, not that the outcome is achieved. Acceptance
-   criteria are for human review. The tool warns about multi-outcome tasks
-   heuristically and never judges semantics with a model.
+4. **Semantic verification is imperfect.** A passing check proves an exit
+   status on a revision. Acceptance criteria are for reviewers.
 
-4. **A task without checks is complete on submission** under integration
-   policy `none`. That is the honest meaning of an empty contract; choose it
-   consciously, and attach at least one check to anything that matters.
+5. **Human gates are unsupported.** A task whose outcome only a human can
+   produce still needs a runnable check to complete. Model the human's
+   artefact (a file, a setting) as the check target.
 
-5. **Verification runs in the project directory, not a detached checkout.**
-   The executor refuses to run unless the tree is clean and at the submitted
-   revision, which binds evidence to the revision, but between the check
-   and the command another process could still modify files. A detached
-   verification worktree (Milestone 3) closes that window. Projects without
-   a Git tree record no revision and get no evidence reuse.
+6. **Regression policy edits apply to future runs only.** Completed tasks
+   are not re-judged when the project's regression list changes; task
+   contracts on completed tasks cannot change at all.
 
-5a. **Project-level regression changes do not re-judge completed tasks.**
-   Only task-level policy edits withdraw completion. Use
-   `tasks verify --again` (with `--no-reuse` to force execution rather than
-   evidence reuse) to re-verify deliberately.
+7. **Cohort blame is coarse.** A failing shared regression sends every
+   member back; a failing member check sends that member back.
 
-6. **Withdrawing completion does not evict released dependents.** If a
-   policy change (Milestone 2) invalidates a completed task's evidence,
-   dependents already taken keep their attempts. They will be blocked on
-   their next take.
+8. **Worktrees and branches are not pruned.** An agent's shell may still
+   be inside one.
 
-7. **Single machine, local filesystem.** WAL-mode SQLite on a network
-   filesystem is unsafe; multi-host access is unsupported.
+9. **Non-Git projects** record no revision; evidence binds to the policy
+   digest only.
 
-8. **Automatic selection is first-come.** There is no priority field;
-   automatic take prefers interrupted, then failed, then oldest. Agents that
-   need ordering should take by ID.
+10. **Single host, local filesystem.** WAL-mode SQLite on a network
+    filesystem is unsafe.
 
-9. **Ambiguous project names.** Resolution by name fails when two projects
-   share a name; use the ID.
-
-10. **Clock skew.** Lease expiry compares the engine's clock with stored
-    timestamps. Separate processes on one machine share a clock; a manually
-    moved clock can expire or extend leases.
+11. **`at` collides with POSIX `at`.** The name is provisional; install
+    under another name if the scheduler is in use.

@@ -1,0 +1,175 @@
+// Package plan owns the planning contract: the closed set of changes a
+// ChangeSet may contain, reference resolution rules, and patch semantics.
+// Applying a ChangeSet is the application's job (app.Apply); this package
+// decides what a change means and what is malformed before any store is
+// touched.
+package plan
+
+import (
+	"strings"
+
+	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/task"
+	"github.com/zachbornheimer/ai-task/internal/verification"
+)
+
+// Ref names a task in a ChangeSet: a task ID ("at-…") or a stable key,
+// including the key of a task added earlier in the same ChangeSet.
+type Ref string
+
+// IsID reports whether the ref is an ID rather than a key.
+func (r Ref) IsID() bool { return task.IsID(string(r)) }
+
+// Change is one operation in a ChangeSet. The set is closed: AddGroup,
+// AddTask, UpdateTask, ArchiveTask.
+type Change interface{ change() }
+
+// AddGroup creates an organizational group.
+type AddGroup struct {
+	Key    string
+	Title  string
+	Parent Ref // optional enclosing group
+}
+
+// AddTask creates an executable task.
+type AddTask struct {
+	Key         string
+	Title       string
+	Outcome     string
+	Parent      Ref // optional group
+	Constraints []string
+	Acceptance  []string
+	Requires    []Ref
+	Blocks      []Ref // existing tasks that will require the new one
+	Cohort      string
+	TaskChecks  []verification.CheckSpec
+}
+
+// UpdateTask patches a task or group. nil means leave unchanged; a pointer
+// to an empty value clears. List fields use Patch to distinguish unchanged
+// from replaced.
+type UpdateTask struct {
+	Target         Ref
+	Title          *string
+	Outcome        *string
+	Parent         *Ref // pointer to "" clears the parent
+	Constraints    Patch[string]
+	Acceptance     Patch[string]
+	Cohort         *string
+	TaskChecks     Patch[verification.CheckSpec]
+	Requires       Patch[Ref] // replace the whole prerequisite set
+	AddRequires    []Ref
+	RemoveRequires []Ref
+	// ResetAttempts clears failure bookkeeping so an exhausted task can be
+	// claimed again (planner decision).
+	ResetAttempts bool
+}
+
+// ArchiveTask soft-deletes a task or group.
+type ArchiveTask struct {
+	Target Ref
+}
+
+// Patch carries a list replacement: Set false means unchanged.
+type Patch[T any] struct {
+	Set   bool
+	Value []T
+}
+
+// Replace builds a Patch that replaces the list.
+func Replace[T any](v []T) Patch[T] { return Patch[T]{Set: true, Value: v} }
+
+func (AddGroup) change()    {}
+func (AddTask) change()     {}
+func (UpdateTask) change()  {}
+func (ArchiveTask) change() {}
+
+// ChangeSet is one atomic revision of a project's plan.
+type ChangeSet struct {
+	ProjectID project.ID
+	// ExpectedPlanRev, when non-zero, must equal the project's current plan
+	// revision or the set is rejected with PLAN_CONFLICT.
+	ExpectedPlanRev uint64
+	// IdempotencyKey, when set, makes a replay return the stored result
+	// instead of applying again.
+	IdempotencyKey string
+	// Session optionally authorises edits that touch a claimed task's
+	// eligibility (a discovered blocker added by the agent holding it).
+	Session string
+	// Planner asserts planning authority for edits to claimed tasks. It is
+	// a convention for the local trust model, not a security boundary.
+	Planner    bool
+	Operations []Change
+}
+
+// Validate checks each change structurally. Reference existence and graph
+// rules are checked by Apply against the store.
+func (cs ChangeSet) Validate() error {
+	if cs.ProjectID == "" {
+		return fault.New(fault.CodeInvalidInput, "change set needs a project")
+	}
+	if len(cs.Operations) == 0 {
+		return fault.New(fault.CodeInvalidInput, "change set has no operations")
+	}
+	keys := map[string]bool{}
+	for i, op := range cs.Operations {
+		switch c := op.(type) {
+		case AddGroup:
+			if err := task.ValidateKey(c.Key); err != nil {
+				return err
+			}
+			if strings.TrimSpace(c.Title) == "" {
+				return fault.New(fault.CodeInvalidInput, "operation %d: group title must not be empty", i)
+			}
+			if c.Key != "" {
+				if keys[c.Key] {
+					return fault.New(fault.CodeDuplicateKey, "key %q appears twice in the change set", c.Key)
+				}
+				keys[c.Key] = true
+			}
+		case AddTask:
+			if err := task.ValidateKey(c.Key); err != nil {
+				return err
+			}
+			if strings.TrimSpace(c.Title) == "" {
+				return fault.New(fault.CodeInvalidInput, "operation %d: task title must not be empty", i)
+			}
+			if c.Key != "" {
+				if keys[c.Key] {
+					return fault.New(fault.CodeDuplicateKey, "key %q appears twice in the change set", c.Key)
+				}
+				keys[c.Key] = true
+			}
+			for _, r := range append(append([]Ref{}, c.Requires...), c.Blocks...) {
+				if r == "" {
+					return fault.New(fault.CodeInvalidInput, "operation %d: empty reference", i)
+				}
+			}
+		case UpdateTask:
+			if c.Target == "" {
+				return fault.New(fault.CodeInvalidInput, "operation %d: update needs a target", i)
+			}
+			if c.Title != nil && strings.TrimSpace(*c.Title) == "" {
+				return fault.New(fault.CodeInvalidInput, "operation %d: title cannot be cleared", i)
+			}
+		case ArchiveTask:
+			if c.Target == "" {
+				return fault.New(fault.CodeInvalidInput, "operation %d: archive needs a target", i)
+			}
+		default:
+			return fault.New(fault.CodeInvalidInput, "operation %d: unknown change type", i)
+		}
+	}
+	return nil
+}
+
+// Result is what Apply reports.
+type Result struct {
+	PlanRev  uint64             `json:"plan_rev"`
+	Changed  int                `json:"changed"`
+	Replayed bool               `json:"replayed,omitempty"`
+	Created  map[string]task.ID `json:"created,omitempty"` // key or title -> id
+	Updated  []task.ID          `json:"updated,omitempty"`
+	Archived []task.ID          `json:"archived,omitempty"`
+}

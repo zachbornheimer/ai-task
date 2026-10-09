@@ -1,196 +1,157 @@
-# Agent contract: CLI and JSON
+# Agent contract: `at` CLI and JSON
 
-The same binary serves Claude Code, Codex CLI, OpenCode, Grok, and a human
-shell. No API keys, no daemon.
+Seven everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
+`list`. Project bootstrap (`init`, `project`, `projects`), `status`,
+`whoami`, `version` and `help` exist outside the agent's instruction set.
+The CLI is a thin adapter over the Go engine; both apply the same rules.
 
-## Output
+## Output and exit codes
 
-Set `TASKS_OUTPUT=json` once (or pass `--json`/`--output json`) and every
-command prints exactly one JSON envelope on stdout and nothing else there:
+`AT_OUTPUT=json` (or `--json`) makes every command print exactly one JSON
+envelope on stdout and nothing else there:
 
 ```json
 {"ok": true,  "result": {...}}
-{"ok": false, "error": {"code": "TASK_BLOCKED", "message": "..."}}
+{"ok": false, "error": {"code": "TASK_BLOCKED", "message": "...", "details": {...}}}
 ```
 
-Human mode prints text on stdout and `error [CODE]: message` on stderr.
-Warnings (never fatal) go to stderr in both modes. Exit status: `0` success,
-`1` any coded failure, `2` usage error (envelope still emitted in JSON mode).
+Human mode prints an acknowledgement on stdout after commit and
+`error [CODE]: message` on stderr. Exit status: `0` success, `1` coded
+domain failure, `2` usage error. Progress never goes to JSON stdout.
 
-## Error codes (stable)
+## Error codes
 
-| Code | Meaning | Typical action |
-|---|---|---|
-| `INVALID_INPUT` | malformed argument, ID, or spec | fix the call |
-| `NOT_FOUND` | task/project/edge does not exist | check the ID |
-| `NO_PROJECT` | no project for this directory | `tasks init` or `--project` |
-| `SELF_DEPENDENCY`, `DUPLICATE_DEPENDENCY`, `CROSS_PROJECT_DEPENDENCY`, `DEPENDENCY_CYCLE` | edge rejected (nothing written) | redesign the edge |
-| `TASK_BLOCKED` | prerequisites incomplete | work on them first |
-| `TASK_ALREADY_TAKEN` | another attempt holds a live lease (on `verify`: an attempt is open, so its finish will verify) | pick another task / finish the attempt |
-| `TASK_AWAITING_VERIFICATION` / `TASK_AWAITING_INTEGRATION` / `TASK_COMPLETE` | not takeable in that state | nothing to do |
-| `NO_AVAILABLE_TASK` | automatic take found nothing | wait or add work |
-| `INVALID_SESSION` | token unknown or malformed | re-take |
-| `LEASE_EXPIRED` | this attempt's lease ran out | `tasks take <task>` to resume |
-| `SESSION_SUPERSEDED` | a newer attempt owns the task | stop; do not write files |
-| `SESSION_FINISHED` | this attempt already submitted | re-take if more work is needed |
-| `VERIFICATION_FAILED` | checks ran and a required one did not pass; `error.details` holds the result | read `tasks evidence <task>`, fix, re-take |
-| `VERIFICATION_RUNNING` | the newest run is marked running | if that process is gone: `tasks verify <task> --retry` |
-| `NOTHING_TO_VERIFY` | no submission, or it already passed | `--again` to re-verify |
-| `WORKSPACE_DIRTY` | uncommitted changes in the project tree | commit (nothing is committed for you) |
-| `WORKSPACE_UNAVAILABLE` | not a Git repository with a commit, or Git missing | |
-| `SUBMISSION_NOT_INTEGRATED` | reserved for Milestone 3 | |
-| `INTERNAL` | bug or I/O failure | report |
+| Code | Meaning |
+|---|---|
+| `INVALID_INPUT` | malformed argument, reference, or spec; `at verify` without a mode |
+| `NOT_FOUND` | unknown task, key, or project |
+| `NO_PROJECT` | no project for this directory; `--project` or `at init` |
+| `PLAN_CONFLICT` | stale `--expect-rev`; edit to a completed or claimed contract; illegal archive |
+| `DUPLICATE_KEY` | key exists with a different definition |
+| `DEPENDENCY_CYCLE`, `SELF_DEPENDENCY`, `DUPLICATE_DEPENDENCY`, `CROSS_PROJECT_DEPENDENCY` | hard-edge rules |
+| `TASK_BLOCKED` | prerequisites incomplete (claim or complete) |
+| `ALREADY_CLAIMED` | a live lease exists; on `verify`, an open attempt owns the task |
+| `AWAITING_VERIFICATION`, `INTEGRATION_PENDING`, `TASK_COMPLETE` | not claimable in that state |
+| `NO_ELIGIBLE_WORK` | nothing claimable now (non-waiting claim, cooldown) |
+| `DONE` | every executable task is complete (waiting claim) |
+| `STALLED` | open tasks remain, nothing claimable, nothing in flight; `details` carries the summary with reasons |
+| `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED` | authority failures |
+| `MISSING_VERIFICATION` | a required category has no checks; completion fails closed |
+| `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence |
+| `INTEGRATION_FAILED` | merge conflict, moved target that kept moving, or dirty target checkout |
+| `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes / no repository or worktree |
+| `INTERNAL` | bug or I/O failure |
 
-## Commands
-
-```
-tasks init [--name NAME] [--path DIR] [--no-dir]      register a project (cwd by default)
-tasks projects                                        list projects
-tasks project [--name N] [--integration none|promote] [--regression-json JSON|--regression-file F]
-tasks add "description" [--requires T]* [--blocks T]* [--manual] [--outcome ..] [--constraint ..]* [--accept ..]* [--check "[id:] cmd"]* [--optional-check ..]* [--policy-json JSON]
-tasks status                                          project summary: counts, takeable, active, done, stuck
-tasks show <task>
-tasks list [--available|--takeable|--blocked|--in-progress|--interrupted|--awaiting-verification|--verification-failed|--awaiting-integration|--complete|--all|--status a,b]
-tasks deps add <task> --requires <prerequisite>       <task> requires <prerequisite>
-tasks deps remove <task> --requires <prerequisite>
-tasks deps list <task>
-tasks graph [--format text|json|dot|edges] [--around <task> --depth N]
-tasks take [<task>] [--lease 1h] [--wait D --poll 2s] atomic claim; prints the session token once; --wait polls until takeable
-tasks release <token> [--note ..]                     give the task back without submitting (handoff kept)
-tasks log <token> [--done ..] [--next ..] [--learned ..] [--note ..]
-tasks renew-task-lease <token> [--lease 1h]           (alias: renew)
-tasks finish <token> [--no-verify]                    submit; runs the checks unless --no-verify
-tasks verify <task> [--retry] [--again] [--no-reuse]  run (or re-run) the checks for the newest submission
-tasks evidence <task> [--run N] [--full]              verification runs and per-check evidence
-tasks policy <task> [--check ..]* [--optional-check ..]* [--policy-json ..] [--clear]
-tasks history <task> [--limit N] [--offset N]
-tasks whoami <token>                                  which task does this token belong to
-tasks version
-```
-
-Global flags may appear before or after the command: `--db PATH`,
-`--project ID|NAME`, `--json`, `--output text|json`. Environment:
-`TASKS_DB`, `TASKS_PROJECT`, `TASKS_OUTPUT`, `TASKS_SESSION`.
-
-### Dependencies and blockers are first class
-
-- At creation: `tasks add "B" --requires A` creates B already blocked on A;
-  `tasks add "X" --blocks C` creates X and makes C require it, in one
-  transaction. An invalid edge (cycle, other project, unknown task) creates
-  nothing.
-- Discovered mid-task: the agent holding C records the prerequisite with
-  `tasks add "X" --blocks C`, logs what it learned, and runs
-  `tasks release <token>`. C becomes `blocked`; when X completes, C is
-  `available` again with its handoff. Releasing is immediate; letting the
-  lease expire is the crash path, not the normal one.
-- Human gates: `tasks add "Approve the vendor contract" --manual` is a task
-  a machine never auto-claims. It blocks its dependents like any other
-  task; a person takes it by ID and finishes it.
-- `tasks status` tells a driver whether the project is `done`, `stuck`
-  (open tasks remain, nothing a machine can take, nothing in flight) or
-  still moving (`takeable`, `active`, `manual_pending`).
-
-### Dependency direction
-
-`tasks deps add B --requires A` means **B requires A**: A must be complete
-before B can be taken. `tasks graph --format edges` prints `B requires A`.
-DOT output draws an arrow from B to A. There is no other direction.
-
-### Token transport
-
-`<token>` may be: a positional argument; `-` to read one line from stdin;
-or omitted to use `TASKS_SESSION`. Positional secrets can show up in `ps`
-and shell history; prefer the environment variable or stdin where other
-users share the machine. Tokens are never printed by `show`, `list`,
-`history`, `graph`, or `deps`.
-
-## The `take` result
-
-```json
-{
-  "task_id": "task-k7p4m2x9q6r8v5z1",
-  "token": "sess-...",
-  "attempt": 2,
-  "lease_expires_at": "2026-03-01T10:00:00Z",
-  "resumed": true,
-  "task": {
-    "task": {"id": "...", "description": "...", "outcome": "...", "constraints": [], "acceptance": [...], "verification": {...}},
-    "status": "in_progress",
-    "requires": [{"id": "...", "status": "complete", "description": "..."}],
-    "required_by": [...],
-    "attempt": {"seq": 2, "lease_expires_at": "...", "lease_active": true},
-    "submission": {"id": 1, "verification": "failed", ...},
-    "policy_digest": "sha256:..."
-  },
-  "handoff": {
-    "latest_next": "Test malformed expiry values",
-    "learnings": ["Expiry validation is shared by two middleware paths"],
-    "recent_logs": [{"seq": 7, "attempt": 1, "at": "...", "done": "...", "next": "..."}],
-    "total_logs": 7,
-    "warnings": []
-  }
-}
-```
-
-`handoff.recent_logs` holds at most 10 entries, newest first; `learnings`
-at most 50; `history` returns everything, paged.
-
-## `finish` and verification
-
-`finish` records the submission first (ending the session), then runs the
-effective policy (task checks + project regression) in the project
-directory. If the directory is a Git repository the tree must be clean and
-HEAD is recorded as the submission's revision; checks refuse to run on a
-tree that no longer matches it. Success returns `ok: true` with
-`result.verification` and `result.status`. A failed check returns
-`ok: false`, code `VERIFICATION_FAILED`, and the same result under
-`error.details`; the submission, evidence, logs and learnings are all kept
-and the task becomes `verification_failed` (takeable for repair). With
-`--no-verify` the task waits at `awaiting_verification` until `tasks verify`.
-
-Evidence for a check is reused instead of re-executed when an identical
-check already passed at the same revision; `--no-reuse` forces execution.
-`verify` refuses while an execution attempt is open (active or expired):
-the attempt's own `finish` produces the submission to judge, so an older
-submission can never complete the task underneath repair work.
-
-`list --available` shows fresh work; `list --takeable` adds `interrupted`
-and `verification_failed` tasks, in the order automatic `take` prefers them.
-
-## Statuses
-
-`blocked`, `available`, `in_progress`, `interrupted`,
-`awaiting_verification`, `verification_failed`, `awaiting_integration`,
-`complete`. They are derived on every read; there is no command to set one.
-
-## Machine-only graph execution
-
-The graph can be executed with no human in the loop. One or more workers
-run:
+## Planning (planner authority)
 
 ```
-while status != done and not stuck:
-    session = tasks take --wait 10m        # NO_AVAILABLE_TASK after the wait => re-check status
-    run the agent with the session as its prompt (TASKS_SESSION exported)
-    the agent logs, adds discovered prerequisites with --blocks, releases or finishes
+at add "title" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--cohort C]
+       [--outcome ..] [--constraint ..]* [--accept ..]* [--check "[id:] cmd"]* [--optional-check ..]*
+       [--expect-rev N] [--idempotency-key K] [--planner]
+at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
+       [--requires REF]* [--remove-requires REF]* [--set-requires REF]*
+       [--accept ..]* [--constraint ..]* [--check ..]* [--clear-checks]
+       [--archive] [--reset-attempts] [--expect-rev N] [--planner]
 ```
 
-Claims are serialised by the engine, so workers never share a task; the
-DAG orders them; `finish` verifies; `status` ends the loop. A reference
-driver is `examples/executor.sh`. If the agent crashes, its lease expires
-and the task is resumed with the handoff; if verification fails, the task
-is re-taken for repair; if a manual task is reached, `status` reports
-`stuck` with `manual_pending` so a person can act.
+`REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
+plan revision; the Go `Apply` takes a whole batch. Rules:
 
-## Recommended agent loop
+- `B --requires A` means B cannot be claimed until A is complete. Hard
+  edges form a DAG; cycles, self-edges, and cross-project edges are
+  rejected and nothing is written.
+- Groups (`--group`, `--parent`) are organizational: membership never
+  implies an edge, groups cannot be claimed, and group progress is derived.
+- `--cohort C` marks coupled verification: members implement independently
+  and are judged together on one assembled candidate. It is not a blocker.
+- `--blocks C` on a claimed task needs C's session token (`AT_SESSION`) or
+  `--planner`; on a completed task it is rejected.
+- Completed tasks cannot be edited or archived. Claimed tasks accept
+  prerequisite changes with authority; contract changes need `--planner`
+  and make a running verification fail closed.
+- `--archive` is soft deletion: rejected for claimed/completed tasks and
+  when live dependents or members remain unless the same batch repairs
+  them.
+- There is no status flag of any kind. Status is derived.
+
+## Execution (session authority)
 
 ```
-S=$(tasks take --json | jq -r .result.token)   # or: tasks take <task>
-# read .result.task and .result.handoff; work in the repo
-tasks log "$S" --done "..." --next "..." --learned "..."
-tasks renew-task-lease "$S"                     # if working longer than the lease
-tasks finish "$S"                               # submits; status tells you what happened
+at claim [REF] [--wait] [--lease 1h]     one atomic leased attempt; prints the token once
+at claim renew <token|->                  token mandatory
+at claim release <token|-> [--note ..] [--failed]
+at log --done .. --next .. --learned .. --note ..     (AT_SESSION, --session, positional, or -)
+at verify task | regression | complete               (same token sources)
 ```
 
-On any `LEASE_EXPIRED`: run `tasks take <task>` again, read the handoff, and
-continue. On `SESSION_SUPERSEDED`: stop; another attempt owns the task.
+`claim` with no REF takes the oldest claimable task (stable ID tie-break;
+cooldowns and exhausted tasks excluded). `--wait` blocks until work is
+claimable, `DONE`, `STALLED`, or interrupted; while waiting the process
+runs any pending cohort verification job it finds. A claim in a Git
+project gets a private worktree on branch `at/<task>/<n>` (continuing the
+previous attempt's branch when one exists).
+
+`verify task` and `verify regression` run that category fresh in the
+attempt's worktree. They are diagnostic: they never complete, release, or
+integrate. `verify complete`:
+
+1. refuses unless both categories have checks (`MISSING_VERIFICATION`) and
+   every prerequisite is complete (`TASK_BLOCKED`);
+2. requires a clean worktree and records its HEAD as the immutable
+   submission (nothing is committed on your behalf);
+3. runs BOTH suites fresh on a detached snapshot of that revision;
+4. in `promote` projects, merges the revision onto the target branch in a
+   scratch worktree, re-runs both suites on the merge when it changed
+   content, and compare-and-swaps the target (rebuilding on a moved base
+   up to three times);
+5. in one transaction re-checks the session, prerequisites, contract
+   revision, regression policy and the run's evidence, then records
+   completion and ends the claim.
+
+For a cohort member, step 2 records the submission and ends the claim;
+when every peer has submitted, a verifier job assembles one candidate,
+runs every member's task checks and the regression suite on it, promotes,
+and completes all members atomically. The consumed token is not a cohort
+credential.
+
+A failed `verify complete` returns `VERIFICATION_FAILED` with the evidence
+in `error.details`; the claim stays live for repair and the task's failure
+count and cooldown are recorded. Replaying `verify complete` with the same
+token after a committed completion returns the stored result.
+
+## Reading
+
+```
+at show REF [--full]        glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
+                            TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
+at list                     hierarchy of open work (groups indented; blocked tasks show requires:)
+at list ready | blocked | all | archived
+at status                   counts, claimable, active, pending cohorts, done, stalled with reasons
+```
+
+Glyphs: `○` not in progress (with `[blocked]`, `[failed]`, `[awaiting
+verification]`, …), `◐` live claim or live verification, `●` complete. A
+group shows `(n/m complete)` and `●` only when a nonempty member set is
+complete. Tokens never appear in any read view.
+
+## Token transport
+
+`claim` is the only command that prints a token. A `claim` subprocess
+cannot set `AT_SESSION` in its parent shell: the host captures the JSON
+and injects the token into the agent's environment. `-` reads one line
+from stdin so secrets stay out of process listings.
+
+## The tiny agent prompt
+
+```
+Implement the claimed task's outcome and acceptance criteria.
+Use the supplied workspace and session. You do not set task status.
+Use `at log` for progress/discoveries.
+Use `at verify task` and `at verify regression` while iterating.
+When ready, commit the final code revision and call `at verify complete`.
+It runs BOTH suites again and establishes completion only if all gates pass.
+If new prerequisite work is needed, add it as a blocker of the current
+claimed task (`at add "..." --blocks <task>`), log the handoff, and
+release the claim with its token (`at claim release -`).
+Stop editing immediately if claim renewal/authorization fails.
+```

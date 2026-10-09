@@ -62,9 +62,25 @@ type Project struct {
 	// Regression is the project-wide check list merged into every
 	// submission's effective policy.
 	Regression []verification.CheckSpec `json:"regression,omitempty"`
-	CreatedAt  time.Time                `json:"created_at"`
-	UpdatedAt  time.Time                `json:"updated_at"`
+	// PlanRev increments on every applied ChangeSet; callers pass the
+	// revision they planned against for optimistic concurrency.
+	PlanRev uint64 `json:"plan_rev"`
+	// TargetBranch is where verified work is promoted (Git projects).
+	TargetBranch string `json:"target_branch,omitempty"`
+	// WorkspaceRoot holds per-attempt worktrees; "" means the default
+	// state directory.
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	// MaxAttempts bounds failed attempts before a task needs attention;
+	// 0 means unlimited.
+	MaxAttempts int `json:"max_attempts"`
+	// RetryCooldown delays re-claiming a task after a failed attempt.
+	RetryCooldown time.Duration `json:"retry_cooldown_ms"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
+
+// DefaultMaxAttempts applies to new projects.
+const DefaultMaxAttempts = 5
 
 // Validate enforces structural rules on a project record.
 func (p Project) Validate() error {
@@ -81,6 +97,12 @@ func (p Project) Validate() error {
 	}
 	if p.RootPath != "" && !filepath.IsAbs(p.RootPath) {
 		return fault.New(fault.CodeInvalidInput, "project root must be absolute: %q", p.RootPath)
+	}
+	if p.WorkspaceRoot != "" && !filepath.IsAbs(p.WorkspaceRoot) {
+		return fault.New(fault.CodeInvalidInput, "workspace root must be absolute: %q", p.WorkspaceRoot)
+	}
+	if p.MaxAttempts < 0 || p.RetryCooldown < 0 {
+		return fault.New(fault.CodeInvalidInput, "max attempts and retry cooldown must not be negative")
 	}
 	return (verification.Policy{Regression: p.Regression}).Validate()
 }

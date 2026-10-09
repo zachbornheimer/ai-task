@@ -1,4 +1,4 @@
-// Command tasks is the CLI for the task engine. See `tasks help`.
+// Command at is the CLI for the agent-task engine. See `at help`.
 package main
 
 import (

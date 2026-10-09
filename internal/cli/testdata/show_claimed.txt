@@ -1,0 +1,26 @@
+◐ at-d83 · Implement PostgreSQL token store
+[IN PROGRESS]
+Created: 2026-10-09 09:12
+
+DESCRIPTION
+Implement PostgreSQL token store
+
+VERIFICATION
+Task:        not run
+Regression:  not run
+
+ATTEMPT
+#2 (lease active until 2026-10-09T10:12:00Z)
+Workspace: /ws/at-d83-2 (at/at-d83/2)
+
+HANDOFF
+Next:     wire the migration
+Learned:  pool size matters
+Recent log (1 of 1, newest first):
+  #4 attempt 1 2026-10-09T08:12:00Z
+    done:    schema drafted
+    next:    wire the migration
+    learned: pool size matters
+
+HISTORY
+09:12 — Task defined.

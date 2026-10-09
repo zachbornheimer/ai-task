@@ -33,18 +33,24 @@ func (s RunStatus) Final() bool {
 	return false
 }
 
-// Run is one verification run of a submission.
+// Run is one verification run.
 type Run struct {
-	ID           int64
-	SubmissionID int64
-	Status       RunStatus
-	Policy       verification.Policy
-	PolicyDigest string
-	Environment  string
-	CreatedAt    time.Time
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
-	Summary      string
+	ID                 int64
+	TaskID             task.ID
+	AttemptID          int64
+	SubmissionID       int64 // 0 for diagnostic runs
+	JobID              int64 // cohort verifier job, if any
+	Mode               verification.Mode
+	Status             RunStatus
+	Revision           string
+	IntegratedRevision string
+	Policy             verification.Policy
+	PolicyDigest       string
+	Environment        string
+	CreatedAt          time.Time
+	StartedAt          *time.Time
+	FinishedAt         *time.Time
+	Summary            string
 }
 
 // Submission is the stored submission fact plus its newest run.
@@ -54,9 +60,10 @@ type Submission struct {
 	AttemptID   int64
 	AttemptSeq  int
 	Revision    string
+	Cohort      string
 	SubmittedAt time.Time
-	// Run is the newest verification run; nil means none recorded yet
-	// (treated as pending).
+	// Run is the newest verification run of this submission; nil means
+	// none recorded yet (treated as pending).
 	Run *Run
 }
 
@@ -69,21 +76,28 @@ func (s Submission) RunStatus() RunStatus {
 }
 
 // Record is a task together with every fact needed to derive its status.
-// Acceptance criteria are loaded separately (LoadAcceptance) because list
-// views do not need them.
+// Acceptance criteria are loaded separately (LoadAcceptance).
 type Record struct {
 	Task              task.Task
-	UnmetDependencies int
+	UnmetRequires     int
 	Attempt           *execution.Attempt // the current (fencing) attempt, if any
 	Submission        *Submission        // the newest submission, if any
 	CompletedAt       *time.Time
+	CompletedRevision string
+	Failures          int
+	NextEligibleAt    time.Time
 }
 
 // Facts converts the record into the domain's status inputs.
-func (r Record) Facts(now time.Time) task.Facts {
+func (r Record) Facts(now time.Time, maxAttempts int) task.Facts {
 	f := task.Facts{
-		Complete:          r.CompletedAt != nil,
-		UnmetDependencies: r.UnmetDependencies,
+		Group:         r.Task.Kind == task.KindGroup,
+		Archived:      r.Task.Archived(),
+		Complete:      r.CompletedAt != nil,
+		UnmetRequires: r.UnmetRequires,
+		Exhausted:     maxAttempts > 0 && r.Failures >= maxAttempts,
+		CooldownUntil: r.NextEligibleAt,
+		Now:           now,
 	}
 	if r.Attempt != nil {
 		f.LeaseActive = r.Attempt.LeaseActive(now)
@@ -93,9 +107,11 @@ func (r Record) Facts(now time.Time) task.Facts {
 		switch s.RunStatus() {
 		case RunPassed:
 			f.AwaitingIntegration = !f.Complete
+		case RunRunning:
+			f.Verifying = true
 		case RunFailed, RunError:
 			f.VerificationFailed = true
-		default: // pending, running, or no run yet
+		default: // pending or none
 			f.SubmissionPending = true
 		}
 	}
@@ -103,19 +119,22 @@ func (r Record) Facts(now time.Time) task.Facts {
 }
 
 // Status derives the user-facing status.
-func (r Record) Status(now time.Time) task.Status { return task.Derive(r.Facts(now)) }
+func (r Record) Status(now time.Time, maxAttempts int) task.Status {
+	return task.Derive(r.Facts(now, maxAttempts))
+}
 
 // recordSelect is the one query shape used for every task read. The
-// correlated subqueries are index-backed (task_dependencies PK, tasks PK,
-// verification_runs_submission).
+// correlated subqueries are index-backed.
 const recordSelect = `
-SELECT t.id, t.project_id, t.description, t.outcome, t.constraints_json, t.policy_json, t.manual,
-       t.current_attempt_seq, t.completed_at, t.created_at, t.updated_at,
+SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome, t.constraints_json, t.policy_json,
+       t.cohort, t.contract_rev, t.archived_at, t.failures, t.next_eligible_at,
+       t.completed_at, t.created_at, t.updated_at,
        (SELECT count(*) FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
          WHERE d.task_id = t.id AND r.completed_at IS NULL) AS unmet,
-       a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason,
-       s.id, s.attempt_id, sa.seq, s.revision, s.submitted_at,
-       vr.id, vr.status, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary
+       a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch,
+       s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
+       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
+       (SELECT revision FROM submissions WHERE id = t.completed_submission_id)
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
 LEFT JOIN submissions s ON s.id = t.latest_submission_id
@@ -126,24 +145,34 @@ LEFT JOIN verification_runs vr ON vr.id = (
 
 func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var r Record
+	var key, parent sql.NullString
 	var constraints, policy string
-	var completed sql.NullInt64
-	var created, updated int64
+	var archived, completed sql.NullInt64
+	var created, updated, nextEligible int64
 	var aID, aSeq, aStarted, aExpires, aEnded sql.NullInt64
-	var aReason sql.NullString
+	var aReason, aPath, aBranch sql.NullString
 	var sID, sAttempt, sAttemptSeq, sAt sql.NullInt64
-	var sRev sql.NullString
+	var sRev, sCohort sql.NullString
 	var run runScan
-	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Description, &r.Task.Outcome, &constraints, &policy, &r.Task.Manual,
-		new(int), &completed, &created, &updated, &r.UnmetDependencies,
-		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason,
-		&sID, &sAttempt, &sAttemptSeq, &sRev, &sAt,
-		&run.id, &run.status, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary)
+	var completedRev sql.NullString
+	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Kind, &key, &parent, &r.Task.Description, &r.Task.Outcome, &constraints, &policy,
+		&r.Task.Cohort, &r.Task.ContractRev, &archived, &r.Failures, &nextEligible,
+		&completed, &created, &updated, &r.UnmetRequires,
+		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch,
+		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
+		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
+		&completedRev)
 	if err != nil {
 		return r, err
 	}
+	r.Task.Key, r.Task.ParentID = key.String, task.ID(parent.String)
+	r.Task.ArchivedAt = nullMS(archived)
 	r.Task.CreatedAt, r.Task.UpdatedAt = fromMS(created), fromMS(updated)
 	r.CompletedAt = nullMS(completed)
+	r.CompletedRevision = completedRev.String
+	if nextEligible > 0 {
+		r.NextEligibleAt = fromMS(nextEligible)
+	}
 	if err := json.Unmarshal([]byte(constraints), &r.Task.Constraints); err != nil {
 		return r, wrapInternal(err, "decode constraints")
 	}
@@ -155,14 +184,15 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 			ID: aID.Int64, TaskID: r.Task.ID, Seq: int(aSeq.Int64),
 			StartedAt: fromMS(aStarted.Int64), LeaseExpiresAt: fromMS(aExpires.Int64),
 			EndedAt: nullMS(aEnded), EndReason: execution.EndReason(aReason.String),
+			WorkspacePath: aPath.String, WorkspaceBranch: aBranch.String,
 		}
 	}
 	if sID.Valid {
 		sub := &Submission{
 			ID: sID.Int64, TaskID: r.Task.ID, AttemptID: sAttempt.Int64, AttemptSeq: int(sAttemptSeq.Int64),
-			Revision: sRev.String, SubmittedAt: fromMS(sAt.Int64),
+			Revision: sRev.String, Cohort: sCohort.String, SubmittedAt: fromMS(sAt.Int64),
 		}
-		if sub.Run, err = run.toRun(sID.Int64); err != nil {
+		if sub.Run, err = run.toRun(r.Task.ID, sID.Int64); err != nil {
 			return r, err
 		}
 		r.Submission = sub
@@ -172,12 +202,12 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 
 // runScan holds the nullable columns of a LEFT JOINed verification run.
 type runScan struct {
-	id, created, started, finished sql.NullInt64
-	status, policy, digest, env    sql.NullString
-	summary                        sql.NullString
+	id, attempt, job, created, started, finished sql.NullInt64
+	mode, status, revision, integrated           sql.NullString
+	policy, digest, env, summary                 sql.NullString
 }
 
-func (rs runScan) toRun(submissionID int64) (*Run, error) {
+func (rs runScan) toRun(taskID task.ID, submissionID int64) (*Run, error) {
 	if !rs.id.Valid {
 		return nil, nil
 	}
@@ -186,7 +216,9 @@ func (rs runScan) toRun(submissionID int64) (*Run, error) {
 		return nil, wrapInternal(err, "decode run policy")
 	}
 	return &Run{
-		ID: rs.id.Int64, SubmissionID: submissionID, Status: RunStatus(rs.status.String), Policy: pol,
+		ID: rs.id.Int64, TaskID: taskID, AttemptID: rs.attempt.Int64, SubmissionID: submissionID, JobID: rs.job.Int64,
+		Mode: verification.Mode(rs.mode.String), Status: RunStatus(rs.status.String),
+		Revision: rs.revision.String, IntegratedRevision: rs.integrated.String, Policy: pol,
 		PolicyDigest: rs.digest.String, Environment: rs.env.String, CreatedAt: fromMS(rs.created.Int64),
 		StartedAt: nullMS(rs.started), FinishedAt: nullMS(rs.finished), Summary: rs.summary.String,
 	}, nil
@@ -202,21 +234,83 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if err != nil {
 		return wrapInternal(err, "encode policy")
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, description, outcome, constraints_json, policy_json, policy_digest, manual, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Manual, ms(tk.CreatedAt), ms(tk.UpdatedAt))
+	var key, parent any
+	if tk.Key != "" {
+		key = tk.Key
+	}
+	if tk.ParentID != "" {
+		parent = tk.ParentID
+	}
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt))
 	if err != nil {
 		if IsUniqueViolation(err) {
-			return err // caller retries with a fresh ID
+			return err // caller distinguishes id vs key collisions
 		}
 		return wrapInternal(err, "insert task")
 	}
-	for i, a := range tk.Acceptance {
-		if _, err := t.tx.ExecContext(t.ctx, `INSERT INTO acceptance_criteria (task_id, position, description) VALUES (?, ?, ?)`, tk.ID, i, a.Description); err != nil {
+	return t.replaceAcceptance(tk.ID, tk.Acceptance)
+}
+
+func (t *Tx) replaceAcceptance(id task.ID, acceptance []task.AcceptanceCriterion) error {
+	if _, err := t.tx.ExecContext(t.ctx, `DELETE FROM acceptance_criteria WHERE task_id = ?`, id); err != nil {
+		return wrapInternal(err, "clear acceptance criteria")
+	}
+	for i, a := range acceptance {
+		if _, err := t.tx.ExecContext(t.ctx, `INSERT INTO acceptance_criteria (task_id, position, description) VALUES (?, ?, ?)`, id, i, a.Description); err != nil {
 			return wrapInternal(err, "insert acceptance criterion")
 		}
 	}
 	return nil
+}
+
+// UpdateTaskContract rewrites the mutable contract fields of a task and
+// bumps its contract revision.
+func (t *Tx) UpdateTaskContract(tk task.Task, now time.Time) error {
+	constraints, err := json.Marshal(nonNil(tk.Constraints))
+	if err != nil {
+		return wrapInternal(err, "encode constraints")
+	}
+	policy, err := tk.Verification.Canonical()
+	if err != nil {
+		return wrapInternal(err, "encode policy")
+	}
+	var parent any
+	if tk.ParentID != "" {
+		parent = tk.ParentID
+	}
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, cohort = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
+		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(now), tk.ID)
+	if err != nil {
+		return wrapInternal(err, "update task")
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fault.New(fault.CodeNotFound, "task %s not found", tk.ID)
+	}
+	return t.replaceAcceptance(tk.ID, tk.Acceptance)
+}
+
+// ArchiveTask soft-deletes a task.
+func (t *Tx) ArchiveTask(id task.ID, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`, ms(now), ms(now), id)
+	return wrapInternal(err, "archive task")
+}
+
+// ResetAttempts clears failure bookkeeping.
+func (t *Tx) ResetAttempts(id task.ID, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = 0, next_eligible_at = 0, updated_at = ? WHERE id = ?`, ms(now), id)
+	return wrapInternal(err, "reset attempts")
+}
+
+// RecordFailure increments the failure count and sets the cooldown.
+func (t *Tx) RecordFailure(id task.ID, cooldown time.Duration, now time.Time) error {
+	next := int64(0)
+	if cooldown > 0 {
+		next = ms(now.Add(cooldown))
+	}
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = failures + 1, next_eligible_at = ?, updated_at = ? WHERE id = ?`, next, ms(now), id)
+	return wrapInternal(err, "record failure")
 }
 
 func nonNil(s []string) []string {
@@ -234,6 +328,16 @@ func (t *Tx) GetRecord(id task.ID) (Record, error) {
 		return r, fault.New(fault.CodeNotFound, "task %s not found", id)
 	}
 	return r, wrapInternal(err, "get task")
+}
+
+// GetByKey loads a task by its stable key within a project.
+func (t *Tx) GetByKey(pid project.ID, key string) (Record, bool, error) {
+	row := t.tx.QueryRowContext(t.ctx, recordSelect+` WHERE t.project_id = ? AND t.key = ?`, pid, key)
+	r, err := scanRecord(row)
+	if isNoRows(err) {
+		return r, false, nil
+	}
+	return r, err == nil, wrapInternal(err, "get task by key")
 }
 
 // LoadAcceptance fills in the acceptance criteria of a task.
@@ -255,24 +359,26 @@ func (t *Tx) LoadAcceptance(tk *task.Task) error {
 }
 
 // ListScope narrows a project listing at the SQL level. The domain still
-// derives the final status; the scope only avoids scanning rows that cannot
-// match.
+// derives the final status; the scope only avoids scanning rows that
+// cannot match.
 type ListScope int
 
 const (
+	// ScopeAll: every task and group, archived included.
 	ScopeAll ListScope = iota
-	// ScopeOpen: not complete.
+	// ScopeLive: not archived.
+	ScopeLive
+	// ScopeOpen: not archived, not complete.
 	ScopeOpen
-	// ScopeComplete: complete only.
-	ScopeComplete
-	// ScopeTakeable: open, no unmet prerequisite, no active lease, and no
-	// submission pending or awaiting integration. Candidates for Take.
-	ScopeTakeable
+	// ScopeClaimable: open executable tasks with no unmet prerequisite, no
+	// live lease, no submission pending or passed, no cooldown, and
+	// failures below the limit. Candidates for Claim.
+	ScopeClaimable
 )
 
 // ListRecords returns the tasks of a project in creation order.
-func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time) ([]Record, error) {
-	where, args := scopeWhere(pid, scope, now)
+func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time, maxAttempts int) ([]Record, error) {
+	where, args := scopeWhere(pid, scope, now, maxAttempts)
 	rows, err := t.tx.QueryContext(t.ctx, recordSelect+where+` ORDER BY t.created_at, t.id`, args...)
 	if err != nil {
 		return nil, wrapInternal(err, "list tasks")
@@ -289,47 +395,38 @@ func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time) ([]Reco
 	return out, rows.Err()
 }
 
-func scopeWhere(pid project.ID, scope ListScope, now time.Time) (string, []any) {
+func scopeWhere(pid project.ID, scope ListScope, now time.Time, maxAttempts int) (string, []any) {
 	where := ` WHERE t.project_id = ?`
 	args := []any{pid}
 	switch scope {
+	case ScopeLive:
+		where += ` AND t.archived_at IS NULL`
 	case ScopeOpen:
-		where += ` AND t.completed_at IS NULL`
-	case ScopeComplete:
-		where += ` AND t.completed_at IS NOT NULL`
-	case ScopeTakeable:
-		where += takeableWhere
-		args = append(args, ms(now))
+		where += ` AND t.archived_at IS NULL AND t.completed_at IS NULL`
+	case ScopeClaimable:
+		where += claimableWhere
+		args = append(args, ms(now), ms(now), maxAttempts, maxAttempts)
 	}
 	return where, args
 }
 
-// takeableWhere mirrors task.Status.Takeable in SQL. It is a pre-filter: the
-// application re-derives the status from the returned facts before claiming.
-const takeableWhere = `
-  AND t.completed_at IS NULL
+// claimableWhere mirrors task.Status.Claimable in SQL. It is a pre-filter:
+// the application re-derives the status from the returned facts before
+// claiming.
+const claimableWhere = `
+  AND t.archived_at IS NULL AND t.completed_at IS NULL AND t.kind = 'task'
   AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
                   WHERE d.task_id = t.id AND r.completed_at IS NULL)
   AND (a.id IS NULL OR a.ended_at IS NOT NULL OR a.lease_expires_at <= ?)
-  AND (s.id IS NULL OR vr.status IN ('failed', 'error'))`
+  AND (s.id IS NULL OR vr.status IN ('failed', 'error'))
+  AND t.next_eligible_at <= ?
+  AND (? = 0 OR t.failures < ?)`
 
-// TakeCandidate picks the task automatic Take should claim: interrupted work
-// first, then failed verification, then fresh work, oldest first within each
-// group. Returns false when nothing is takeable.
-//
-// Cost is one index scan over the project's open tasks (leased tasks are
-// open and must be examined) plus a sort of the few takeable rows. Probing
-// the three groups separately was measured slower (three scans).
-func (t *Tx) TakeCandidate(pid project.ID, now time.Time) (Record, bool, error) {
-	where, args := scopeWhere(pid, ScopeTakeable, now)
-	where += ` AND t.manual = 0` // human-gated work is never auto-claimed
-	// Priority mirrors task.Status.TakePriority after task.Derive: a failed
-	// run outranks an expired open attempt, so it is tested first.
-	order := ` ORDER BY CASE
-	    WHEN vr.status IN ('failed', 'error') THEN 1
-	    WHEN a.id IS NOT NULL AND a.ended_at IS NULL THEN 0
-	    ELSE 2 END, t.created_at, t.id LIMIT 1`
-	row := t.tx.QueryRowContext(t.ctx, recordSelect+where+order, args...)
+// ClaimCandidate picks the task automatic Claim should take: the oldest
+// claimable task, ties broken by ID. Deterministic; no priority field.
+func (t *Tx) ClaimCandidate(pid project.ID, now time.Time, maxAttempts int) (Record, bool, error) {
+	where, args := scopeWhere(pid, ScopeClaimable, now, maxAttempts)
+	row := t.tx.QueryRowContext(t.ctx, recordSelect+where+` ORDER BY t.created_at, t.id LIMIT 1`, args...)
 	r, err := scanRecord(row)
 	if isNoRows(err) {
 		return r, false, nil
@@ -337,15 +434,17 @@ func (t *Tx) TakeCandidate(pid project.ID, now time.Time) (Record, bool, error) 
 	return r, err == nil, wrapInternal(err, "select candidate")
 }
 
-// TaskProject returns the owning project of a task without loading the
-// record; used where only existence and ownership matter.
-func (t *Tx) TaskProject(id task.ID) (project.ID, error) {
+// TaskProject returns the owning project and kind of a task without
+// loading the record.
+func (t *Tx) TaskProject(id task.ID) (project.ID, task.Kind, bool, error) {
 	var pid project.ID
-	err := t.tx.QueryRowContext(t.ctx, `SELECT project_id FROM tasks WHERE id = ?`, id).Scan(&pid)
+	var kind task.Kind
+	var archived sql.NullInt64
+	err := t.tx.QueryRowContext(t.ctx, `SELECT project_id, kind, archived_at FROM tasks WHERE id = ?`, id).Scan(&pid, &kind, &archived)
 	if isNoRows(err) {
-		return "", fault.New(fault.CodeNotFound, "task %s not found", id)
+		return "", "", false, fault.New(fault.CodeNotFound, "task %s not found", id)
 	}
-	return pid, wrapInternal(err, "task project")
+	return pid, kind, archived.Valid, wrapInternal(err, "task project")
 }
 
 // MarkComplete records the completion fact.
@@ -354,34 +453,98 @@ func (t *Tx) MarkComplete(id task.ID, submissionID int64, now time.Time) error {
 	return wrapInternal(err, "mark complete")
 }
 
-// ClearComplete withdraws the completion fact (used when evidence is
-// invalidated). Dependents that were released by this task are not
-// retroactively un-taken; see docs/invariants.md.
+// ClearComplete withdraws the completion fact.
 func (t *Tx) ClearComplete(id task.ID, now time.Time) error {
 	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET completed_at = NULL, completed_submission_id = NULL, updated_at = ? WHERE id = ?`, ms(now), id)
 	return wrapInternal(err, "clear complete")
 }
 
-// CountTasks returns the number of tasks in a project (used by benchmarks
-// and diagnostics).
+// Children returns the direct members of a group (live only), oldest first.
+func (t *Tx) Children(id task.ID) ([]Record, error) {
+	rows, err := t.tx.QueryContext(t.ctx, recordSelect+` WHERE t.parent_id = ? AND t.archived_at IS NULL ORDER BY t.created_at, t.id`, id)
+	if err != nil {
+		return nil, wrapInternal(err, "list children")
+	}
+	defer rows.Close()
+	var out []Record
+	for rows.Next() {
+		r, err := scanRecord(rows)
+		if err != nil {
+			return nil, wrapInternal(err, "scan child")
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ParentChainContains reports whether `ancestor` is `id` or one of its
+// parents, used to keep the group hierarchy a tree.
+func (t *Tx) ParentChainContains(id, ancestor task.ID) (bool, error) {
+	cur := id
+	for i := 0; i < 1000 && cur != ""; i++ {
+		if cur == ancestor {
+			return true, nil
+		}
+		var parent sql.NullString
+		err := t.tx.QueryRowContext(t.ctx, `SELECT parent_id FROM tasks WHERE id = ?`, cur).Scan(&parent)
+		if isNoRows(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, wrapInternal(err, "parent chain")
+		}
+		cur = task.ID(parent.String)
+	}
+	return false, nil
+}
+
+// CountTasks returns the number of tasks in a project.
 func (t *Tx) CountTasks(pid project.ID) (int, error) {
 	var n int
 	err := t.tx.QueryRowContext(t.ctx, `SELECT count(*) FROM tasks WHERE project_id = ?`, pid).Scan(&n)
 	return n, wrapInternal(err, "count tasks")
 }
 
-// UpdateTaskPolicy rewrites a task's verification policy.
-func (t *Tx) UpdateTaskPolicy(id task.ID, policy verification.Policy, now time.Time) error {
-	body, err := policy.Canonical()
+// CohortMembers returns live, incomplete executable tasks of a cohort.
+func (t *Tx) CohortMembers(pid project.ID, cohort string) ([]Record, error) {
+	rows, err := t.tx.QueryContext(t.ctx, recordSelect+` WHERE t.project_id = ? AND t.cohort = ? AND t.archived_at IS NULL AND t.completed_at IS NULL AND t.kind = 'task' ORDER BY t.created_at, t.id`, pid, cohort)
 	if err != nil {
-		return wrapInternal(err, "encode policy")
+		return nil, wrapInternal(err, "cohort members")
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET policy_json = ?, policy_digest = ?, updated_at = ? WHERE id = ?`, string(body), policy.Digest(), ms(now), id)
+	defer rows.Close()
+	var out []Record
+	for rows.Next() {
+		r, err := scanRecord(rows)
+		if err != nil {
+			return nil, wrapInternal(err, "scan member")
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// TaskCheckIDs returns every task-check ID used by live tasks in a project,
+// so a regression policy change can reject collisions.
+func (t *Tx) TaskCheckIDs(pid project.ID) (map[string]task.ID, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT id, policy_json FROM tasks WHERE project_id = ? AND archived_at IS NULL AND policy_json <> ''`, pid)
 	if err != nil {
-		return wrapInternal(err, "update task policy")
+		return nil, wrapInternal(err, "task check ids")
 	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return fault.New(fault.CodeNotFound, "task %s not found", id)
+	defer rows.Close()
+	out := map[string]task.ID{}
+	for rows.Next() {
+		var id task.ID
+		var body string
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, wrapInternal(err, "scan policy")
+		}
+		p, err := verification.Parse([]byte(body))
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range p.TaskChecks {
+			out[c.ID] = id
+		}
 	}
-	return nil
+	return out, rows.Err()
 }

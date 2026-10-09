@@ -8,13 +8,12 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-// InsertSubmission records a submission for an attempt and points the task
-// at it. The newest submission is the one that must be judged, so any
-// completion fact recorded for an older submission is withdrawn here.
-// It returns the submission ID.
-func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision string, now time.Time) (int64, error) {
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO submissions (task_id, attempt_id, revision, submitted_at) VALUES (?, ?, ?, ?)`,
-		id, attemptID, revision, ms(now))
+// InsertSubmission records an immutable submission for an attempt and
+// points the task at it. The newest submission is the one that must be
+// judged, so any completion fact for an older submission is withdrawn.
+func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision, cohort string, now time.Time) (int64, error) {
+	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO submissions (task_id, attempt_id, revision, cohort, submitted_at) VALUES (?, ?, ?, ?, ?)`,
+		id, attemptID, revision, cohort, ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "insert submission")
 	}
@@ -25,39 +24,50 @@ func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision string, now 
 	return sid, nil
 }
 
-// InsertRun records a verification run under an effective policy.
-func (t *Tx) InsertRun(submissionID int64, status RunStatus, policy verification.Policy, environment, summary string, now time.Time) (int64, error) {
-	body, err := policy.Canonical()
+// NewRun describes a run to insert.
+type NewRun struct {
+	TaskID       task.ID
+	AttemptID    int64
+	SubmissionID int64
+	JobID        int64
+	Mode         verification.Mode
+	Status       RunStatus
+	Revision     string
+	Policy       verification.Policy
+	Environment  string
+	Summary      string
+}
+
+// InsertRun records a verification run.
+func (t *Tx) InsertRun(r NewRun, now time.Time) (int64, error) {
+	body, err := r.Policy.Canonical()
 	if err != nil {
 		return 0, wrapInternal(err, "encode run policy")
 	}
-	var started, finished any
+	var started, finished, attempt, submission, job any
 	switch {
-	case status.Final():
+	case r.Status.Final():
 		started, finished = ms(now), ms(now)
-	case status == RunRunning:
+	case r.Status == RunRunning:
 		started = ms(now)
 	}
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_runs (submission_id, status, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		submissionID, status, string(body), policy.Digest(), environment, ms(now), started, finished, summary)
+	if r.AttemptID != 0 {
+		attempt = r.AttemptID
+	}
+	if r.SubmissionID != 0 {
+		submission = r.SubmissionID
+	}
+	if r.JobID != 0 {
+		job = r.JobID
+	}
+	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_runs (task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.TaskID, attempt, submission, job, r.Mode, r.Status, r.Revision, string(body), r.Policy.Digest(), r.Environment, ms(now), started, finished, r.Summary)
 	if err != nil {
 		return 0, wrapInternal(err, "insert verification run")
 	}
 	rid, _ := res.LastInsertId()
 	return rid, nil
-}
-
-// StartRun marks a pending run as running.
-func (t *Tx) StartRun(runID int64, environment string, now time.Time) error {
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = ?, environment = ?, started_at = ? WHERE id = ? AND status = ?`, RunRunning, environment, ms(now), runID, RunPending)
-	if err != nil {
-		return wrapInternal(err, "start verification run")
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return fault.New(fault.CodeVerificationRunning, "run %d is not pending", runID)
-	}
-	return nil
 }
 
 // FinishRun records the final state of a run.
@@ -66,23 +76,38 @@ func (t *Tx) FinishRun(runID int64, status RunStatus, summary string, now time.T
 	return wrapInternal(err, "finish verification run")
 }
 
-// GetRun loads one run.
-func (t *Tx) GetRun(runID int64) (Run, error) {
+// SetRunIntegratedRevision records the revision a run's evidence finally
+// applied to after integration.
+func (t *Tx) SetRunIntegratedRevision(runID int64, rev string) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET integrated_revision = ? WHERE id = ?`, rev, runID)
+	return wrapInternal(err, "set integrated revision")
+}
+
+const runColumns = `id, task_id, attempt_id, submission_id, job_id, mode, status, revision, integrated_revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary`
+
+func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var rs runScan
-	var sub int64
-	err := t.tx.QueryRowContext(t.ctx, `SELECT id, submission_id, status, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary FROM verification_runs WHERE id = ?`, runID).
-		Scan(&rs.id, &sub, &rs.status, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary)
-	if isNoRows(err) {
-		return Run{}, fault.New(fault.CodeNotFound, "verification run %d not found", runID)
-	}
+	var taskID task.ID
+	var submission nullInt
+	err := sc.Scan(&rs.id, &taskID, &rs.attempt, &submission, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.integrated, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary)
 	if err != nil {
-		return Run{}, wrapInternal(err, "get run")
+		return Run{}, err
 	}
-	r, err := rs.toRun(sub)
+	r, err := rs.toRun(taskID, submission.Int64)
 	if err != nil {
 		return Run{}, err
 	}
 	return *r, nil
+}
+
+// GetRun loads one run.
+func (t *Tx) GetRun(runID int64) (Run, error) {
+	row := t.tx.QueryRowContext(t.ctx, `SELECT `+runColumns+` FROM verification_runs WHERE id = ?`, runID)
+	r, err := scanRun(row)
+	if isNoRows(err) {
+		return Run{}, fault.New(fault.CodeNotFound, "verification run %d not found", runID)
+	}
+	return r, wrapInternal(err, "get run")
 }
 
 // LatestRunID returns the newest run of a submission (0 if none).
@@ -99,8 +124,8 @@ func (t *Tx) LatestRunID(submissionID int64) (int64, error) {
 // newest run.
 func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 	rows, err := t.tx.QueryContext(t.ctx, `
-		SELECT s.id, s.attempt_id, a.seq, s.revision, s.submitted_at,
-		       vr.id, vr.status, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary
+		SELECT s.id, s.attempt_id, a.seq, s.revision, s.cohort, s.submitted_at,
+		       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary
 		FROM submissions s JOIN execution_attempts a ON a.id = s.attempt_id
 		LEFT JOIN verification_runs vr ON vr.id = (SELECT id FROM verification_runs WHERE submission_id = s.id ORDER BY id DESC LIMIT 1)
 		WHERE s.task_id = ? ORDER BY s.id`, id)
@@ -113,12 +138,12 @@ func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 		var s Submission
 		var at int64
 		var rs runScan
-		if err := rows.Scan(&s.ID, &s.AttemptID, &s.AttemptSeq, &s.Revision, &at, &rs.id, &rs.status, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary); err != nil {
+		if err := rows.Scan(&s.ID, &s.AttemptID, &s.AttemptSeq, &s.Revision, &s.Cohort, &at, &rs.id, &rs.attempt, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.integrated, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary); err != nil {
 			return nil, wrapInternal(err, "scan submission")
 		}
 		s.TaskID = id
 		s.SubmittedAt = fromMS(at)
-		if s.Run, err = rs.toRun(s.ID); err != nil {
+		if s.Run, err = rs.toRun(id, s.ID); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -126,25 +151,39 @@ func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 	return out, rows.Err()
 }
 
-// Runs lists every run of a submission, oldest first.
-func (t *Tx) Runs(submissionID int64) ([]Run, error) {
-	rows, err := t.tx.QueryContext(t.ctx, `SELECT id, submission_id, status, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary FROM verification_runs WHERE submission_id = ? ORDER BY id`, submissionID)
+// RunsForTask lists every run of a task (diagnostic and final), oldest
+// first.
+func (t *Tx) RunsForTask(id task.ID) ([]Run, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT `+runColumns+` FROM verification_runs WHERE task_id = ? ORDER BY id`, id)
 	if err != nil {
 		return nil, wrapInternal(err, "list runs")
 	}
 	defer rows.Close()
 	var out []Run
 	for rows.Next() {
-		var rs runScan
-		var sub int64
-		if err := rows.Scan(&rs.id, &sub, &rs.status, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary); err != nil {
+		r, err := scanRun(rows)
+		if err != nil {
 			return nil, wrapInternal(err, "scan run")
 		}
-		r, err := rs.toRun(sub)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RunsForJob lists the member runs of a cohort job.
+func (t *Tx) RunsForJob(jobID int64) ([]Run, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT `+runColumns+` FROM verification_runs WHERE job_id = ? ORDER BY id`, jobID)
+	if err != nil {
+		return nil, wrapInternal(err, "list job runs")
+	}
+	defer rows.Close()
+	var out []Run
+	for rows.Next() {
+		r, err := scanRun(rows)
 		if err != nil {
-			return nil, err
+			return nil, wrapInternal(err, "scan run")
 		}
-		out = append(out, *r)
+		out = append(out, r)
 	}
 	return out, rows.Err()
 }
@@ -199,21 +238,28 @@ func (t *Tx) EvidenceForRun(runID int64) ([]verification.Evidence, error) {
 	return out, rows.Err()
 }
 
-// FindReusableEvidence returns the newest original passed evidence for the
-// same check content at the same revision, if any. The caller applies
-// verification.Reusable to the result as the authoritative rule.
-func (t *Tx) FindReusableEvidence(checkDigest, revision string) (*verification.Evidence, error) {
-	if revision == "" {
-		return nil, nil
-	}
-	row := t.tx.QueryRowContext(t.ctx, `SELECT `+evidenceColumns+` FROM verification_results WHERE check_digest = ? AND revision = ? AND outcome = ? AND reused = 0 ORDER BY id DESC LIMIT 1`,
-		checkDigest, revision, verification.OutcomePassed)
-	e, err := scanEvidence(row)
-	if isNoRows(err) {
-		return nil, nil
-	}
+// ReconcileRuns closes final runs whose owning attempt's lease has expired
+// (the verifying process is gone) and resets cohort member runs whose job
+// lease expired to pending so the job can be retried. Returns how many
+// rows changed.
+func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the verifying attempt lease expired before the run finished'
+		WHERE status = 'running' AND mode = 'complete' AND attempt_id IN (SELECT id FROM execution_attempts WHERE lease_expires_at <= ?)`, ms(now), ms(now))
 	if err != nil {
-		return nil, wrapInternal(err, "find reusable evidence")
+		return 0, wrapInternal(err, "reconcile final runs")
 	}
-	return &e, nil
+	n, _ := res.RowsAffected()
+	res2, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'pending', summary = 'verifier interrupted; waiting for a new verifier'
+		WHERE status = 'running' AND mode = 'cohort' AND job_id IN (SELECT id FROM verification_jobs WHERE status = 'running' AND lease_expires_at <= ?)`, ms(now))
+	if err != nil {
+		return 0, wrapInternal(err, "reconcile cohort runs")
+	}
+	n2, _ := res2.RowsAffected()
+	res3, err := t.tx.ExecContext(t.ctx, `UPDATE verification_jobs SET status = 'error', finished_at = ?, summary = 'verifier lease expired; job will be retried'
+		WHERE status = 'running' AND lease_expires_at <= ?`, ms(now), ms(now))
+	if err != nil {
+		return 0, wrapInternal(err, "reconcile jobs")
+	}
+	n3, _ := res3.RowsAffected()
+	return n + n2 + n3, nil
 }

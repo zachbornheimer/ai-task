@@ -18,6 +18,10 @@ const (
 	CodeNotFound     Code = "NOT_FOUND"
 	CodeNoProject    Code = "NO_PROJECT"
 
+	// Planning failures.
+	CodePlanConflict Code = "PLAN_CONFLICT"
+	CodeDuplicateKey Code = "DUPLICATE_KEY"
+
 	// Dependency graph failures.
 	CodeDependencyCycle     Code = "DEPENDENCY_CYCLE"
 	CodeSelfDependency      Code = "SELF_DEPENDENCY"
@@ -26,11 +30,13 @@ const (
 
 	// Take failures: the task exists but is not takeable right now.
 	CodeTaskBlocked              Code = "TASK_BLOCKED"
-	CodeTaskAlreadyTaken         Code = "TASK_ALREADY_TAKEN"
+	CodeTaskAlreadyTaken         Code = "ALREADY_CLAIMED"
 	CodeTaskComplete             Code = "TASK_COMPLETE"
-	CodeTaskAwaitingVerification Code = "TASK_AWAITING_VERIFICATION"
-	CodeTaskAwaitingIntegration  Code = "TASK_AWAITING_INTEGRATION"
-	CodeNoAvailableTask          Code = "NO_AVAILABLE_TASK"
+	CodeTaskAwaitingVerification Code = "AWAITING_VERIFICATION"
+	CodeTaskAwaitingIntegration  Code = "INTEGRATION_PENDING"
+	CodeNoAvailableTask          Code = "NO_ELIGIBLE_WORK"
+	CodeDone                     Code = "DONE"
+	CodeStalled                  Code = "STALLED"
 
 	// Session authority failures.
 	CodeInvalidSession    Code = "INVALID_SESSION"
@@ -40,6 +46,9 @@ const (
 
 	// Verification and workspace failures.
 	CodeVerificationFailed      Code = "VERIFICATION_FAILED"
+	CodeMissingVerification     Code = "MISSING_VERIFICATION"
+	CodeRevisionChanged         Code = "REVISION_CHANGED"
+	CodeIntegrationFailed       Code = "INTEGRATION_FAILED"
 	CodeVerificationRunning     Code = "VERIFICATION_RUNNING"
 	CodeNothingToVerify         Code = "NOTHING_TO_VERIFY"
 	CodeWorkspaceUnavailable    Code = "WORKSPACE_UNAVAILABLE"
@@ -68,6 +77,13 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Err }
+
+// Is makes errors.Is match any error carrying the same code, so sentinel
+// values such as ErrDone compare by code rather than by pointer.
+func (e *Error) Is(target error) bool {
+	t, ok := target.(*Error)
+	return ok && t.Code == e.Code
+}
 
 // New builds a coded error.
 func New(code Code, format string, args ...any) *Error {

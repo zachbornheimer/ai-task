@@ -1,126 +1,84 @@
 # Verification
 
-Verification is separate from implementation. An agent's `finish` is a
-claim; evidence is produced by running the task's verification contract.
+Verification is separate from implementation. An agent's word never
+completes a task; only `verify complete` can, and only with fresh evidence.
 
-## Three responsibilities
+## Two required categories
 
-1. **Contract** (`verification.Policy`): which checks must pass.
-   `TaskChecks` prove the task's own outcome; `Regression` guards the rest of
-   the project and is normally inherited from the project. Each
-   `CheckSpec` is an argv array, optional working directory, timeout, and a
-   `Required` flag. Optional checks are recorded but never compensate for a
-   failed required check.
-2. **Planner** (Milestone 2): orders cheap checks first, groups compatible
-   ones, reuses safe prior results, and later batches shared regression. It
-   may never drop a required check.
-3. **Evidence** (Milestone 2): per check, the policy digest, check ID and
-   version, revision, timestamps, exit code, outcome, bounded stdout/stderr,
-   the attempt, and whether it was reused.
+- **Task checks** (`at add --check`, `at update --check`) prove the task's
+  own outcome. Required unless a task is a group.
+- **Project regression checks** (`at project --regression-check` /
+  `--regression-json`) guard the rest of the project. Trusted
+  configuration; never reachable through a session token.
 
-## Durable representation
+Check IDs are separate namespaces; a task check whose ID matches a
+regression check is rejected, and vice versa. A task missing either
+category cannot complete (`MISSING_VERIFICATION`).
 
-Policies are stored as canonical JSON and identified by `sha256:` digest of
-that JSON. Timeouts are `timeout_ms` integers. Go function values are never
-stored. Example of the durable form (also accepted by `tasks add
---policy-json` and `tasks project --regression-json` for the array part):
+Each check is an argv array (no shell), optional directory, timeout
+(default 30 min, stored as `timeout_ms`), and `required` flag. Policies are
+canonical JSON with a `sha256:` digest; the digest in force is recorded on
+every run.
 
-```json
-{
-  "task_checks": [
-    {"id": "unit", "version": "1", "command": ["go", "test", "./auth/..."], "timeout_ms": 300000, "required": true}
-  ],
-  "regression": [
-    {"id": "full", "command": ["make", "test"], "required": true}
-  ]
-}
-```
+## Modes
 
-The CLI shorthand `--check "unit: go test ./auth/..."` produces the same
-structure with a default timeout (30 min) and `required: true`;
-`--optional-check` sets `required: false`.
+| Invocation | Inputs | Effect |
+|---|---|---|
+| `at verify task` | attempt worktree (editable) | runs task checks fresh; records a diagnostic run; never completes/releases/integrates |
+| `at verify regression` | attempt worktree | same for regression checks |
+| `at verify complete` | clean worktree → immutable HEAD → detached snapshot | runs BOTH categories fresh, integrates, finalises completion |
+| `at verify` | | usage error |
 
-## Effective policy and versioning
+Order within a run: required task checks, optional task checks, then
+regression checks; regression is skipped (recorded as `skipped`) when a
+required task check failed. Outcomes: `passed`, `failed`, `timeout`,
+`error` (could not run), `skipped`. Only `passed` counts; optional checks
+never compensate.
 
-At `finish`, the task's policy is merged with the project's regression
-checks (task definitions win on ID collision) and the merged policy's
-digest is stored on the submission. Any later policy edit yields a new
-digest, so evidence gathered under an older contract is distinguishable and
-(Milestone 2) treated as invalid for completion.
+## No reuse
 
-## Execution (Milestone 2)
+Every invocation executes its checks. Stored evidence is history for
+diagnosis (`at show --full`), never proof for a new run. Checks run with
+`GOFLAGS=-count=1` so Go's own test cache cannot replay a success, and
+without `AT_SESSION` so a check cannot act on the task. The one exception
+is an idempotent acknowledgement: `verify complete` with the same token
+after a committed completion returns the stored result and runs nothing.
 
-`finish` records the submission and a `pending` run in one transaction, then
-(unless `--no-verify`) calls the same code path as `tasks verify`:
+## Completion algorithm
 
-1. One write transaction marks the run `running` and snapshots the
-   effective policy and an environment fingerprint (OS/arch, Go version,
-   host).
-2. Each planned check runs **outside any transaction** in the project
-   directory (`project root` + check `dir`), via argv with no shell, with
-   its timeout and bounded output (first and last 16 KiB of each stream).
-   Its evidence row commits in its own short transaction the moment it
-   finishes. Before running, the executor confirms the tree is clean and at
-   the submitted revision; otherwise the evidence is an `error`, never a
-   pass.
-3. One write transaction judges the run: it passes iff every required check
-   has `passed` evidence. Under integration policy `none` a passed run
-   records the completion fact.
+1. Refuse unless both categories have checks and every prerequisite is
+   complete; require a clean worktree and take HEAD as the submission.
+2. Record the submission and a running run; renew the lease on a
+   heartbeat while checks run.
+3. Check out the revision into a detached snapshot and run both suites
+   there; each evidence row commits as it finishes, fenced on the session
+   and on the run still being the newest.
+4. Judge. On failure: run failed, failure count and cooldown recorded,
+   claim stays live, `VERIFICATION_FAILED` with evidence.
+5. In `promote` projects: merge the revision onto the target in a scratch
+   worktree; if the merge changed content, run both suites on the merge
+   too; compare-and-swap the target (rebuild on a moved base up to three
+   times). Conflicts and dirty target checkouts fail with
+   `INTEGRATION_FAILED` and the target never moves.
+6. One transaction re-checks the session, prerequisites, the task's
+   contract revision, the project regression digest, and that stored
+   evidence proves the final revision; then marks complete and ends the
+   claim.
 
-Order: required task checks, optional task checks, then regression checks.
-Regression checks are skipped (recorded as `skipped`) when a required task
-check failed, so a broken implementation does not pay for a project-wide
-run. Evidence outcomes are `passed`, `failed`, `timeout`, `error` (could
-not run: missing binary, bad directory, tree mismatch, project without a
-directory) and `skipped`. Only `passed` counts.
+## Cohorts
 
-Checks run sequentially in Milestone 2; resource-aware concurrency arrives
-with batching (Milestone 4).
+Tasks sharing `--cohort C` implement independently. `verify complete` on a
+member records its submission and ends its claim. When every live member
+has submitted, a verifier job (durable, leased, owned by a fresh token)
+assembles one candidate by merging every member revision onto the target,
+runs each member's task checks and the regression suite on it, promotes,
+and completes all members in one transaction. Failing member checks send
+that member back for repair while passing peers keep waiting; a failing
+regression sends every member back. A verifier that dies leaves a job
+whose lease expires; `Claim(wait)` in any worker reconciles and retries it,
+so no hidden command is needed.
 
-### Reuse
-
-Before executing a check, the engine looks for original (non-reused)
-`passed` evidence with the same check digest (content hash of ID, version,
-argv, dir, timeout, required) at the same non-empty revision, from any run
-in the store. If found, a `reused` evidence row pointing at it is recorded
-instead of executing. Failures are never reused; evidence without a revision
-is never reused. Build-tool caches (Go test cache, etc.) remain the tools'
-own business.
-
-### Interruption and retry
-
-If the process dies or is cancelled mid-run, the run stays `running` and
-the evidence already committed survives. `tasks verify <task>` then reports
-`VERIFICATION_RUNNING`; `--retry` closes the stuck run as `error` and starts
-a new one, which reuses the committed evidence at the same revision. A
-run that is superseded by a concurrent retry stops at its next evidence
-write and is closed as `error`.
-
-### Policy changes
-
-`tasks policy <task> ...` replaces the task's checks and yields a new
-digest. If the newest submission was judged (or is pending) under a
-different effective digest, a `stale` run is appended, completion is
-withdrawn, and the task returns to `awaiting_verification`; dependents that
-were released become `blocked` on their next take (attempts already
-running are not evicted; see `docs/limitations.md`). A project's regression
-list applies to future runs only: re-judging every completed task in a
-project on each regression edit would stall it, and `tasks verify --again`
-exists for deliberate re-verification.
-
-## Self-certification
-
-An implementation session cannot change the policy: `tasks add --check`,
-`tasks project --regression-json`, and (Milestone 2) `tasks policy set`
-are separate operations that produce a new digest. This is a correctness
-boundary within the engine, not a security boundary against the local OS
-user (see `docs/limitations.md`).
-
-## What a passing check proves
-
-A zero exit status proves that the command exited zero on that revision
-under that policy. It does not prove the semantic outcome: a test that
-exercises nothing still passes. Ten tests for one behaviour are a fine
-check; ten unrelated behaviours hidden in one script suggest the task should
-be split. Acceptance criteria exist for the human reviewer precisely because
-this gap cannot be closed mechanically.
+Cohorts are not hard edges and must not be used where A truly cannot be
+implemented before B; that is a design problem a cohort cannot fix. Prefer
+an explicit integration task that `--requires` independently verifiable
+implementation tasks whenever possible.

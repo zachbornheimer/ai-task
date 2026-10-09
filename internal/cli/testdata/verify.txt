@@ -1,0 +1,9 @@
+✓ Verify complete · at-b42: passed
+Revision:  abc123
+Summary:   2/2 required checks passed
+Task:      COMPLETE (claim ended)
+task complete; claim ended
+✓ Verify task · at-b42: FAILED
+Summary:   0/1 required checks passed; failed: unit (failed)
+Task:      NOT complete (in progress)
+task checks failed; this run does not complete the task

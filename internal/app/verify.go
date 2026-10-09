@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/checkexec"
+	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
@@ -17,248 +20,176 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
-// VerifyOptions controls Verify.
-type VerifyOptions struct {
-	// Retry restarts verification when the newest run is stuck in
-	// "running" (the process that ran it is gone). The stuck run is closed
-	// as an error and a new run starts; per-check evidence already recorded
-	// at the same revision is reused.
-	Retry bool
-	// Again re-verifies a submission that already passed, under the current
-	// effective policy. Completion is withdrawn until the new run passes.
-	Again bool
-	// NoReuse executes every check even when identical evidence exists at
-	// the same revision (e.g. to re-test after an environment change).
-	NoReuse bool
-}
-
-// VerifyResult reports one verification run.
-type VerifyResult struct {
-	TaskID       task.ID                 `json:"task_id"`
-	SubmissionID int64                   `json:"submission_id"`
-	RunID        int64                   `json:"run_id"`
-	Revision     string                  `json:"revision,omitempty"`
-	PolicyDigest string                  `json:"policy_digest"`
-	Verification sqlite.RunStatus        `json:"verification"`
-	Summary      string                  `json:"summary"`
-	Status       task.Status             `json:"status"`
-	Evidence     []verification.Evidence `json:"evidence"`
-}
-
-// runPlan is what the first transaction hands to the executor.
-type runPlan struct {
-	taskID     task.ID
-	submission int64
-	runID      int64
-	revision   string
-	root       string
-	policy     verification.Policy
-	steps      []verification.Step
-	proj       project.Project
-	noReuse    bool
-}
-
-// Verify executes the effective verification policy against the task's
-// newest submission and records evidence. The work happens in three
-// phases so that no database transaction is held while checks run:
-//
-//  1. one write transaction records the run as "running";
-//  2. each check runs outside any transaction and its evidence commits
-//     in its own short transaction as soon as it finishes;
-//  3. one write transaction judges the evidence and records the verdict
-//     (and the completion fact when the policy passed under integration
-//     policy "none").
-//
-// A crash between phases leaves a "running" run that `Verify` with Retry
-// closes and restarts, reusing the evidence already committed.
-func (e *Engine) Verify(ctx context.Context, id task.ID, opts VerifyOptions) (VerifyResult, error) {
-	plan, early, err := e.beginRun(ctx, id, opts)
-	if err != nil {
-		return VerifyResult{}, err
-	}
-	if early != nil {
-		return *early, nil
-	}
-	if err := e.executeRun(ctx, plan); err != nil {
-		return VerifyResult{}, err
-	}
-	return e.finishRun(ctx, plan)
-}
-
 func environmentFingerprint() string {
 	host, _ := os.Hostname()
 	return fmt.Sprintf("%s/%s %s host=%s", runtime.GOOS, runtime.GOARCH, runtime.Version(), host)
 }
 
-func (e *Engine) beginRun(ctx context.Context, id task.ID, opts VerifyOptions) (runPlan, *VerifyResult, error) {
-	now := e.now()
-	var plan runPlan
-	var early *VerifyResult
-	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		r, err := tx.GetRecord(id)
-		if err != nil {
-			return err
-		}
-		sub := r.Submission
-		if sub == nil {
-			return fault.New(fault.CodeNothingToVerify, "task %s has no submission; an agent must `tasks finish` first", id)
-		}
-		// An open attempt owns the task's current intent: its finish will
-		// produce the submission to judge. Verifying an older submission
-		// underneath it could complete the task over in-flight repair work.
-		if a := r.Attempt; a != nil && a.EndedAt == nil {
-			state := "lease expired; take the task to resume it, then finish"
-			if a.LeaseActive(now) {
-				state = "lease active until " + a.LeaseExpiresAt.Format(time.RFC3339) + "; its finish will verify"
-			}
-			return fault.New(fault.CodeTaskAlreadyTaken, "task %s has an open attempt %d (%s)", id, a.Seq, state)
-		}
-		switch sub.RunStatus() {
-		case sqlite.RunRunning:
-			if !opts.Retry {
-				started := ""
-				if sub.Run.StartedAt != nil {
-					started = sub.Run.StartedAt.Format(time.RFC3339)
-				}
-				return fault.New(fault.CodeVerificationRunning, "run %d of task %s is marked running (started %s); if that process is gone, re-run with --retry", sub.Run.ID, id, started)
-			}
-			if err := tx.FinishRun(sub.Run.ID, sqlite.RunError, "interrupted; superseded by a retry", now); err != nil {
-				return err
-			}
-		case sqlite.RunPassed:
-			if !opts.Again {
-				return fault.New(fault.CodeNothingToVerify, "submission %d of task %s already passed verification (run %d); use --again to re-verify under the current policy", sub.ID, id, sub.Run.ID)
-			}
-			if r.CompletedAt != nil {
-				if err := tx.ClearComplete(id, now); err != nil {
-					return err
-				}
-			}
-		}
-		proj, err := tx.GetProject(r.Task.ProjectID)
-		if err != nil {
-			return err
-		}
-		policy := verification.Merge(r.Task.Verification, proj.Regression)
-		env := environmentFingerprint()
-		if policy.Empty() {
-			runID, err := tx.InsertRun(sub.ID, sqlite.RunPassed, policy, env, "no checks required by policy "+policy.Digest(), now)
-			if err != nil {
-				return err
-			}
-			if proj.Integration == project.IntegrationNone {
-				if err := tx.MarkComplete(id, sub.ID, now); err != nil {
-					return err
-				}
-			}
-			r2, err := tx.GetRecord(id)
-			if err != nil {
-				return err
-			}
-			early = &VerifyResult{TaskID: id, SubmissionID: sub.ID, RunID: runID, Revision: sub.Revision, PolicyDigest: policy.Digest(), Verification: sqlite.RunPassed, Summary: "no checks required", Status: r2.Status(now), Evidence: []verification.Evidence{}}
-			return nil
-		}
-		var runID int64
-		if sub.Run != nil && sub.Run.Status == sqlite.RunPending && sub.Run.PolicyDigest == policy.Digest() {
-			// Reuse the pending row Finish recorded for this exact policy.
-			runID = sub.Run.ID
-			if err := tx.StartRun(runID, env, now); err != nil {
-				return err
-			}
-		} else {
-			if runID, err = tx.InsertRun(sub.ID, sqlite.RunRunning, policy, env, "", now); err != nil {
-				return err
-			}
-		}
-		plan = runPlan{taskID: id, submission: sub.ID, runID: runID, revision: sub.Revision, root: proj.RootPath, policy: policy, steps: verification.Plan(policy), proj: proj, noReuse: opts.NoReuse}
-		return nil
-	})
-	return plan, early, err
+// Verify runs checks under a session's authority.
+//
+//   - ModeTask / ModeRegression run that category fresh in the attempt's
+//     workspace (editable, so results are diagnostic) and never complete,
+//     release, or integrate.
+//   - ModeComplete records an immutable submission (a clean commit in Git
+//     projects), runs BOTH categories fresh on a detached snapshot of that
+//     revision, integrates when the project requires it, and then, in one
+//     short transaction that re-checks authority, prerequisites, contract
+//     and policy, records completion and ends the claim. For cohort
+//     members it records the submission, ends the claim, and runs the
+//     cohort job if every peer has submitted.
+//
+// Every invocation executes checks; stored evidence is never reused as
+// proof. A failing result is returned as VERIFICATION_FAILED with the
+// result in Details; the claim stays live so the agent can repair.
+func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verification.Mode) (VerifyResult, error) {
+	if _, err := verification.ParseMode(string(mode)); err != nil {
+		return VerifyResult{}, err
+	}
+	if mode == verification.ModeComplete {
+		return e.verifyComplete(ctx, token)
+	}
+	return e.verifyDiagnostic(ctx, token, mode)
 }
 
-// executeRun runs every planned step, committing each result as it lands.
-func (e *Engine) executeRun(ctx context.Context, plan runPlan) error {
-	requiredTaskFailed := false
-	for _, step := range plan.steps {
-		if err := ctx.Err(); err != nil {
-			// Leave the run "running": Retry recovers it.
-			return fault.Wrap(err, fault.CodeInternal, "verification interrupted; run %d can be resumed with `tasks verify %s --retry`", plan.runID, plan.taskID)
+// prepared is what the preparation read gathers before any Git call.
+type prepared struct {
+	attempt execution.Attempt
+	rec     sqlite.Record
+	proj    project.Project
+	policy  verification.Policy
+	dir     string
+	git     bool
+}
+
+func (e *Engine) prepare(ctx context.Context, token execution.Token) (prepared, error) {
+	now := e.now()
+	var p prepared
+	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		a, err := e.authorize(tx, token, now)
+		if err != nil {
+			return err
 		}
-		ev := e.runStep(ctx, plan, step, requiredTaskFailed)
+		p.attempt = a
+		if p.rec, err = tx.GetRecord(a.TaskID); err != nil {
+			return err
+		}
+		if p.proj, err = tx.GetProject(p.rec.Task.ProjectID); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return p, err
+	}
+	p.policy = effectivePolicy(p.rec.Task, p.proj)
+	p.dir = p.attempt.WorkspacePath
+	if p.dir == "" {
+		p.dir = p.proj.RootPath
+	}
+	_, p.git = e.manager(p.proj)
+	if p.dir == "" {
+		return p, fault.New(fault.CodeWorkspaceUnavailable, "project %s has no directory to run checks in; register one with `at init --path`", p.proj.ID)
+	}
+	return p, nil
+}
+
+func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mode verification.Mode) (VerifyResult, error) {
+	p, err := e.prepare(ctx, token)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	policy := p.policy.Subset(mode)
+	if policy.Empty() {
+		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "no %s checks are defined for %s; `verify complete` will fail closed", mode, p.rec.Task.ID)
+	}
+	revision, dirty := "", false
+	if p.git && p.attempt.WorkspacePath != "" {
+		if st, err := workspace.Inspect(ctx, p.dir); err == nil {
+			revision, dirty = st.Revision, !st.Clean()
+		}
+	}
+	now := e.now()
+	var runID int64
+	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if _, err := e.authorize(tx, token, now); err != nil {
+			return err
+		}
+		var err error
+		runID, err = tx.InsertRun(sqlite.NewRun{TaskID: p.rec.Task.ID, AttemptID: p.attempt.ID, Mode: mode, Status: sqlite.RunRunning, Revision: revision, Policy: policy, Environment: environmentFingerprint()}, now)
+		return err
+	})
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	stop := e.heartbeat(ctx, token)
+	fence := func(tx *sqlite.Tx) error { _, err := e.authorize(tx, token, e.now()); return err }
+	evidence, err := e.runChecks(ctx, p.dir, policy, runID, revision, fence)
+	stop()
+	res := VerifyResult{TaskID: p.rec.Task.ID, Mode: mode, RunID: runID, Revision: revision, Evidence: evidence}
+	if err != nil {
+		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(runID, sqlite.RunError, err.Error(), e.now()) })
+		return res, err
+	}
+	verdict := verification.Judge(policy, evidence)
+	status := sqlite.RunFailed
+	if verdict.Passed {
+		status = sqlite.RunPassed
+	}
+	summary := verdict.Summary
+	if dirty {
+		summary += "; workspace had uncommitted changes (diagnostic only)"
+	}
+	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(runID, status, summary, e.now()) }); err != nil {
+		return res, err
+	}
+	res.Passed, res.Summary = verdict.Passed, summary
+	res.Status = p.rec.Status(e.now(), p.proj.MaxAttempts)
+	res.Message = fmt.Sprintf("%s checks %s; this run does not complete the task", mode, status)
+	if !verdict.Passed {
+		return res, &fault.Error{Code: fault.CodeVerificationFailed, Message: fmt.Sprintf("%s checks failed for %s: %s", mode, p.rec.Task.ID, summary), Details: res}
+	}
+	return res, nil
+}
+
+// runChecks executes a policy's checks in dir in planner order, committing
+// each evidence row as it lands. fence is evaluated in each evidence
+// transaction; a failure (lost authority, superseded run) stops the run.
+func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.Policy, runID int64, revision string, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
+	var out []verification.Evidence
+	requiredTaskFailed := false
+	for _, step := range verification.Plan(policy) {
+		if err := ctx.Err(); err != nil {
+			return out, fault.Wrap(err, fault.CodeInternal, "verification interrupted")
+		}
+		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed)
 		if !step.Regression && step.Check.Required && ev.Outcome != verification.OutcomePassed {
 			requiredTaskFailed = true
 		}
 		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-			latest, err := tx.LatestRunID(plan.submission)
-			if err != nil {
+			if err := fence(tx); err != nil {
 				return err
 			}
-			if latest != plan.runID {
-				return fault.New(fault.CodeVerificationRunning, "run %d was superseded by run %d while executing", plan.runID, latest)
-			}
-			_, err = tx.InsertEvidence(ev)
+			id, err := tx.InsertEvidence(ev)
+			ev.ID = id
 			return err
 		}); err != nil {
-			return err
+			return out, err
 		}
+		out = append(out, ev)
 	}
-	return nil
+	return out, nil
 }
 
-// runStep produces the evidence for one step: reused, skipped, or executed.
-func (e *Engine) runStep(ctx context.Context, plan runPlan, step verification.Step, skipRegression bool) verification.Evidence {
+func (e *Engine) execStep(ctx context.Context, dir string, step verification.Step, runID int64, revision, policyDigest string, skipRegression bool) verification.Evidence {
 	c := step.Check
 	now := e.now()
-	ev := verification.Evidence{
-		RunID: plan.runID, CheckID: c.ID, CheckVersion: c.Version, CheckDigest: c.Digest(), Required: c.Required,
-		Revision: plan.revision, PolicyDigest: plan.policy.Digest(), StartedAt: now, FinishedAt: now, ExitCode: -1,
-	}
+	ev := verification.Evidence{RunID: runID, CheckID: c.ID, CheckVersion: c.Version, CheckDigest: c.Digest(), Required: c.Required, Revision: revision, PolicyDigest: policyDigest, StartedAt: now, FinishedAt: now, ExitCode: -1}
 	if step.Regression && skipRegression {
 		ev.Outcome = verification.OutcomeSkipped
 		ev.Message = "skipped: a required task check failed"
 		return ev
 	}
-	// Reuse: identical check content at the same immutable revision.
-	var prior *verification.Evidence
-	if !plan.noReuse {
-		_ = e.store.Read(ctx, func(tx *sqlite.Tx) error {
-			var err error
-			prior, err = tx.FindReusableEvidence(c.Digest(), plan.revision)
-			return err
-		})
-	}
-	if prior != nil && verification.Reusable(*prior, c, plan.revision) {
-		ev.Outcome = verification.OutcomePassed
-		ev.ExitCode = prior.ExitCode
-		ev.Reused, ev.ReusedFrom = true, prior.ID
-		ev.Message = fmt.Sprintf("reused evidence %d (run %d) for the same check at revision %s", prior.ID, prior.RunID, plan.revision)
-		return ev
-	}
-	if plan.root == "" {
-		ev.Outcome = verification.OutcomeError
-		ev.Message = "project has no directory to run checks in; register one with `tasks init --path`"
-		return ev
-	}
-	// The evidence must describe the submitted revision: refuse to run on
-	// a tree that no longer matches it.
-	if plan.revision != "" {
-		st, err := workspace.Inspect(ctx, plan.root)
-		switch {
-		case err != nil:
-			ev.Outcome = verification.OutcomeError
-			ev.Message = err.Error()
-			return ev
-		case st.Revision != plan.revision:
-			ev.Outcome = verification.OutcomeError
-			ev.Message = fmt.Sprintf("working tree is at %s but the submission is revision %s; check out the submitted revision", st.Revision, plan.revision)
-			return ev
-		case !st.Clean():
-			ev.Outcome = verification.OutcomeError
-			ev.Message = fmt.Sprintf("working tree has %d uncommitted change(s); evidence would not describe revision %s", len(st.Dirty), plan.revision)
-			return ev
-		}
-	}
-	res := checkexec.Run(ctx, checkexec.Spec{Argv: c.Command, Dir: filepath.Join(plan.root, c.Dir), Timeout: c.EffectiveTimeout()})
+	res := checkexec.Run(ctx, checkexec.Spec{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Timeout: c.EffectiveTimeout(), Env: checkEnv(dir)})
 	ev.StartedAt, ev.FinishedAt = res.StartedAt, res.FinishedAt
 	ev.ExitCode, ev.Stdout, ev.Stderr = res.ExitCode, res.Stdout, res.Stderr
 	switch {
@@ -280,113 +211,328 @@ func (e *Engine) runStep(ctx context.Context, plan runPlan, step verification.St
 	return ev
 }
 
-// finishRun judges the evidence and records the verdict.
-func (e *Engine) finishRun(ctx context.Context, plan runPlan) (VerifyResult, error) {
+// checkEnv is the environment checks run with: the parent environment
+// minus any session token, plus GOFLAGS=-count=1 so Go's own test cache
+// cannot turn a fresh run into a replay.
+func checkEnv(dir string) []string {
+	var env []string
+	flags := "-count=1"
+	for _, kv := range os.Environ() {
+		switch {
+		case strings.HasPrefix(kv, "AT_SESSION="), strings.HasPrefix(kv, "TASKS_SESSION="):
+			continue
+		case strings.HasPrefix(kv, "GOFLAGS="):
+			flags = strings.TrimPrefix(kv, "GOFLAGS=") + " -count=1"
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "GOFLAGS="+flags, "AT_CHECK_DIR="+dir)
+}
+
+// finalRun carries the state of one verify-complete invocation.
+type finalRun struct {
+	prepared
+	token        execution.Token
+	revision     string
+	submission   int64
+	runID        int64
+	contractRev  int
+	regressionID string
+}
+
+func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (VerifyResult, error) {
+	// Idempotent acknowledgement of an already-committed completion.
+	if res, ok, err := e.replayCompletion(ctx, token); err != nil || ok {
+		return res, err
+	}
+	p, err := e.prepare(ctx, token)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if p.rec.Task.Kind != task.KindTask {
+		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s is a group", p.rec.Task.ID)
+	}
+	if missing := p.policy.MissingCategory(); missing != "" {
+		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
+	}
+	if p.rec.UnmetRequires > 0 {
+		return VerifyResult{}, fault.New(fault.CodeTaskBlocked, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
+	}
+	revision := ""
+	if p.git {
+		if p.attempt.WorkspacePath == "" {
+			return VerifyResult{}, fault.New(fault.CodeWorkspaceUnavailable, "attempt has no worktree; claim the task again")
+		}
+		st, err := workspace.RequireClean(ctx, p.dir)
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		revision = st.Revision
+	}
+	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.proj.Regression}).Digest()}
+	if p.rec.Task.Cohort != "" {
+		return e.submitForCohort(ctx, fr)
+	}
 	now := e.now()
-	var out VerifyResult
-	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		latest, err := tx.LatestRunID(plan.submission)
+	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if _, err := e.authorize(tx, token, now); err != nil {
+			return err
+		}
+		r, err := tx.GetRecord(p.rec.Task.ID)
 		if err != nil {
 			return err
 		}
-		if latest != plan.runID {
-			_ = tx.FinishRun(plan.runID, sqlite.RunError, fmt.Sprintf("superseded by run %d", latest), now)
-			return fault.New(fault.CodeVerificationRunning, "run %d was superseded by run %d", plan.runID, latest)
+		if r.UnmetRequires > 0 {
+			return fault.New(fault.CodeTaskBlocked, "%s cannot complete: prerequisites changed", r.Task.ID)
 		}
-		evidence, err := tx.EvidenceForRun(plan.runID)
-		if err != nil {
+		if fr.submission, err = tx.InsertSubmission(r.Task.ID, p.attempt.ID, revision, "", now); err != nil {
 			return err
 		}
-		verdict := verification.Judge(plan.policy, evidence)
-		status := sqlite.RunFailed
-		if verdict.Passed {
-			status = sqlite.RunPassed
-		}
-		if err := tx.FinishRun(plan.runID, status, verdict.Summary, now); err != nil {
-			return err
-		}
-		if verdict.Passed && plan.proj.Integration == project.IntegrationNone {
-			if err := tx.MarkComplete(plan.taskID, plan.submission, now); err != nil {
-				return err
-			}
-		}
-		r, err := tx.GetRecord(plan.taskID)
-		if err != nil {
-			return err
-		}
-		out = VerifyResult{TaskID: plan.taskID, SubmissionID: plan.submission, RunID: plan.runID, Revision: plan.revision, PolicyDigest: plan.policy.Digest(), Verification: status, Summary: verdict.Summary, Status: r.Status(now), Evidence: evidence}
-		return nil
+		fr.runID, err = tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, AttemptID: p.attempt.ID, SubmissionID: fr.submission, Mode: verification.ModeComplete, Status: sqlite.RunRunning, Revision: revision, Policy: p.policy, Environment: environmentFingerprint()}, now)
+		return err
 	})
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	if out.Verification != sqlite.RunPassed {
-		return out, &fault.Error{Code: fault.CodeVerificationFailed, Message: fmt.Sprintf("verification of task %s failed: %s; see `tasks evidence %s`", plan.taskID, out.Summary, plan.taskID), Details: out}
-	}
-	return out, nil
+	e.notify()
+	stop := e.heartbeat(ctx, token)
+	defer stop()
+	res, err := e.executeFinal(ctx, fr)
+	e.notify()
+	return res, err
 }
 
-// RunView is a verification run with its evidence.
-type RunView struct {
-	ID           int64                   `json:"id"`
-	SubmissionID int64                   `json:"submission_id"`
-	Status       sqlite.RunStatus        `json:"status"`
-	PolicyDigest string                  `json:"policy_digest"`
-	Environment  string                  `json:"environment,omitempty"`
-	CreatedAt    time.Time               `json:"created_at"`
-	StartedAt    *time.Time              `json:"started_at,omitempty"`
-	FinishedAt   *time.Time              `json:"finished_at,omitempty"`
-	Summary      string                  `json:"summary,omitempty"`
-	Evidence     []verification.Evidence `json:"evidence"`
-}
-
-// EvidencePage lists the runs (newest first) of a task's submissions.
-type EvidencePage struct {
-	TaskID      task.ID          `json:"task_id"`
-	Submissions []SubmissionView `json:"submissions"`
-	Runs        []RunView        `json:"runs"`
-}
-
-// Evidence returns every run and its evidence for a task. With runID > 0
-// only that run is returned. Outputs are included; callers may truncate.
-func (e *Engine) Evidence(ctx context.Context, id task.ID, runID int64) (EvidencePage, error) {
-	page := EvidencePage{TaskID: id, Submissions: []SubmissionView{}, Runs: []RunView{}}
-	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
-		if _, err := tx.GetRecord(id); err != nil {
+// executeFinal runs both suites on an immutable snapshot, integrates, and
+// finalises. It is used by the single-task path; cohorts have their own.
+func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, error) {
+	res := VerifyResult{TaskID: fr.rec.Task.ID, Mode: verification.ModeComplete, RunID: fr.runID, Revision: fr.revision, SubmissionID: fr.submission}
+	fence := func(tx *sqlite.Tx) error {
+		if _, err := e.authorize(tx, fr.token, e.now()); err != nil {
 			return err
 		}
-		subs, err := tx.Submissions(id)
+		latest, err := tx.LatestRunID(fr.submission)
 		if err != nil {
 			return err
 		}
-		for i := range subs {
-			page.Submissions = append(page.Submissions, *submissionView(&subs[i]))
-			runs, err := tx.Runs(subs[i].ID)
-			if err != nil {
+		if latest != fr.runID {
+			return fault.New(fault.CodeSessionSuperseded, "run %d superseded", fr.runID)
+		}
+		return nil
+	}
+	fail := func(status sqlite.RunStatus, code fault.Code, summary string, evidence []verification.Evidence) (VerifyResult, error) {
+		now := e.now()
+		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+			if err := tx.FinishRun(fr.runID, status, summary, now); err != nil {
 				return err
 			}
-			for _, r := range runs {
-				if runID > 0 && r.ID != runID {
-					continue
-				}
-				ev, err := tx.EvidenceForRun(r.ID)
+			return tx.RecordFailure(fr.rec.Task.ID, fr.proj.RetryCooldown, now)
+		})
+		res.Evidence, res.Summary = evidence, summary
+		res.Status = e.statusOf(ctx, fr.rec.Task.ID)
+		res.Message = "task NOT complete; the claim stays live for repair"
+		return res, &fault.Error{Code: code, Message: fmt.Sprintf("%s: %s", fr.rec.Task.ID, summary), Details: res}
+	}
+	// Immutable inputs: a detached snapshot of the submitted revision.
+	dir, cleanup := fr.dir, func() {}
+	mgr, hasGit := e.manager(fr.proj)
+	if hasGit {
+		var err error
+		if dir, cleanup, err = mgr.Snapshot(ctx, fr.revision); err != nil {
+			return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
+		}
+	}
+	evidence, err := e.runChecks(ctx, dir, fr.policy, fr.runID, fr.revision, fence)
+	cleanup()
+	if err != nil {
+		res.Evidence = evidence
+		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(fr.runID, sqlite.RunError, err.Error(), e.now()) })
+		return res, err
+	}
+	verdict := verification.Judge(fr.policy, evidence)
+	if !verdict.Passed {
+		return fail(sqlite.RunFailed, fault.CodeVerificationFailed, verdict.Summary, evidence)
+	}
+	final := fr.revision
+	var cand workspace.Candidate
+	if hasGit && fr.proj.Integration == project.IntegrationPromote {
+		// Guarded promotion: build the candidate on the current target,
+		// verify it when the merge changed content, then compare-and-swap
+		// the target. If the target moved meanwhile, rebuild on the new
+		// base (bounded) rather than promote stale content.
+		promoted := false
+		for attempt := 0; attempt < 3 && !promoted; attempt++ {
+			var err error
+			cand, err = mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, fmt.Sprintf("at: integrate %s (%s)", fr.rec.Task.ID, fr.rec.Task.Description))
+			if err != nil {
+				return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
+			}
+			final = fr.revision
+			if cand.Revision != fr.revision {
+				snap, snapCleanup, err := mgr.Snapshot(ctx, cand.Revision)
 				if err != nil {
-					return err
+					cand.Cleanup()
+					return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
 				}
-				if ev == nil {
-					ev = []verification.Evidence{}
+				more, err := e.runChecks(ctx, snap, fr.policy, fr.runID, cand.Revision, fence)
+				snapCleanup()
+				if err != nil {
+					cand.Cleanup()
+					_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(fr.runID, sqlite.RunError, err.Error(), e.now()) })
+					return res, err
 				}
-				page.Runs = append(page.Runs, RunView{ID: r.ID, SubmissionID: r.SubmissionID, Status: r.Status, PolicyDigest: r.PolicyDigest, Environment: r.Environment, CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt, Summary: r.Summary, Evidence: ev})
+				evidence = append(evidence, more...)
+				if v := verification.Judge(fr.policy, more); !v.Passed {
+					cand.Cleanup()
+					return fail(sqlite.RunFailed, fault.CodeVerificationFailed, "integrated candidate "+short(cand.Revision)+": "+v.Summary, evidence)
+				}
+				final = cand.Revision
+			}
+			err = mgr.Promote(ctx, fr.proj.TargetBranch, cand)
+			cand.Cleanup()
+			switch {
+			case err == nil:
+				promoted = true
+			case errors.Is(err, workspace.ErrTargetMoved):
+				continue
+			default:
+				return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
 			}
 		}
-		// newest first
-		for i, j := 0, len(page.Runs)-1; i < j; i, j = i+1, j-1 {
-			page.Runs[i], page.Runs[j] = page.Runs[j], page.Runs[i]
+		if !promoted {
+			return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, "target branch kept moving; verify again", evidence)
 		}
-		if runID > 0 && len(page.Runs) == 0 {
-			return fault.New(fault.CodeNotFound, "task %s has no verification run %d", id, runID)
+		if final != fr.revision {
+			_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.SetRunIntegratedRevision(fr.runID, final) })
+		}
+	}
+	// One short transaction: re-check everything the completion depends on,
+	// then record completion and end the claim atomically.
+	now := e.now()
+	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if err := fence(tx); err != nil {
+			return err
+		}
+		r, err := tx.GetRecord(fr.rec.Task.ID)
+		if err != nil {
+			return err
+		}
+		proj, err := tx.GetProject(r.Task.ProjectID)
+		if err != nil {
+			return err
+		}
+		switch {
+		case r.UnmetRequires > 0:
+			return fault.New(fault.CodeTaskBlocked, "a prerequisite became incomplete during verification")
+		case r.Task.ContractRev != fr.contractRev:
+			return fault.New(fault.CodePlanConflict, "the task contract changed during verification; verify again")
+		case (verification.Policy{Regression: proj.Regression}).Digest() != fr.regressionID:
+			return fault.New(fault.CodePlanConflict, "the project regression policy changed during verification; verify again")
+		case r.Task.Archived():
+			return fault.New(fault.CodePlanConflict, "the task was archived during verification")
+		}
+		stored, err := tx.EvidenceForRun(fr.runID)
+		if err != nil {
+			return err
+		}
+		var onFinal []verification.Evidence
+		for _, ev := range stored {
+			if ev.Revision == final {
+				onFinal = append(onFinal, ev)
+			}
+		}
+		if v := verification.Judge(fr.policy, onFinal); !v.Passed {
+			return fault.New(fault.CodeVerificationFailed, "stored evidence does not prove revision %s: %s", short(final), v.Summary)
+		}
+		if err := tx.FinishRun(fr.runID, sqlite.RunPassed, verdict.Summary, now); err != nil {
+			return err
+		}
+		if err := tx.MarkComplete(r.Task.ID, fr.submission, now); err != nil {
+			return err
+		}
+		if err := tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now); err != nil {
+			return err
+		}
+		if hasGit && fr.proj.Integration == project.IntegrationPromote {
+			if err := tx.InsertIntegration(proj.ID, r.Task.ID, 0, proj.TargetBranch, cand.Base, fr.revision, final, now); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
-	return page, err
+	if err != nil {
+		code := fault.CodeOf(err)
+		if code == fault.CodeInternal {
+			return res, err
+		}
+		return fail(sqlite.RunFailed, code, err.Error(), evidence)
+	}
+	res.Evidence, res.Passed, res.Completed = evidence, true, true
+	res.IntegratedRevision = final
+	if final == fr.revision {
+		res.IntegratedRevision = ""
+	}
+	res.Status = task.StatusComplete
+	res.Summary = verdict.Summary
+	res.Message = "task complete; claim ended"
+	return res, nil
 }
+
+// replayCompletion returns the committed result when the token's attempt
+// already completed its task, so a client that crashed after the commit
+// gets an acknowledgement without a new run or new authority.
+func (e *Engine) replayCompletion(ctx context.Context, token execution.Token) (VerifyResult, bool, error) {
+	var res VerifyResult
+	ok := false
+	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		auth, err := tx.AttemptByDigest(token.Digest())
+		if err != nil {
+			return err
+		}
+		a := auth.Attempt
+		if a.EndedAt == nil || a.EndReason != execution.EndFinished {
+			return nil
+		}
+		r, err := tx.GetRecord(a.TaskID)
+		if err != nil {
+			return err
+		}
+		if r.CompletedAt == nil || r.Submission == nil || r.Submission.AttemptID != a.ID || r.Submission.Run == nil {
+			return nil
+		}
+		ev, err := tx.EvidenceForRun(r.Submission.Run.ID)
+		if err != nil {
+			return err
+		}
+		res = VerifyResult{TaskID: a.TaskID, Mode: verification.ModeComplete, RunID: r.Submission.Run.ID, Revision: r.Submission.Revision, IntegratedRevision: r.Submission.Run.IntegratedRevision, SubmissionID: r.Submission.ID, Passed: true, Completed: true, Status: task.StatusComplete, Summary: r.Submission.Run.Summary, Evidence: ev, Replayed: true, Message: "already complete; stored result returned, no checks re-run"}
+		ok = true
+		return nil
+	})
+	return res, ok, err
+}
+
+func (e *Engine) statusOf(ctx context.Context, id task.ID) task.Status {
+	st := task.StatusReady
+	_ = e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		r, err := tx.GetRecord(id)
+		if err != nil {
+			return err
+		}
+		p, err := tx.GetProject(r.Task.ProjectID)
+		if err != nil {
+			return err
+		}
+		st = r.Status(e.now(), p.MaxAttempts)
+		return nil
+	})
+	return st
+}
+
+func short(rev string) string {
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	return rev
+}
+
+var _ = time.Second

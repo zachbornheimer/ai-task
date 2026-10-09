@@ -61,6 +61,24 @@ type Neighbor struct {
 	Record Record
 }
 
+// RequirementIDs returns the IDs of the tasks `id` requires.
+func (t *Tx) RequirementIDs(id task.ID) ([]task.ID, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT requires_id FROM task_dependencies WHERE task_id = ? ORDER BY created_at, requires_id`, id)
+	if err != nil {
+		return nil, wrapInternal(err, "list requirements")
+	}
+	defer rows.Close()
+	var out []task.ID
+	for rows.Next() {
+		var n task.ID
+		if err := rows.Scan(&n); err != nil {
+			return nil, wrapInternal(err, "scan requirement")
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // Requirements returns the tasks `id` requires, with their status facts.
 func (t *Tx) Requirements(id task.ID) ([]Record, error) {
 	return t.neighbors(`SELECT requires_id FROM task_dependencies WHERE task_id = ? ORDER BY created_at, requires_id`, id)

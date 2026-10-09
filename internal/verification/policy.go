@@ -179,23 +179,78 @@ func Parse(b []byte) (Policy, error) {
 	return p, nil
 }
 
-// Merge returns the effective policy for a submission: the task's own checks
-// plus the project's regression checks. The result is digested at submission
-// time so evidence is bound to the exact contract that was in force.
+// Merge returns the effective policy for a verification run: the task's
+// own checks plus the project's regression checks. The two categories are
+// separate namespaces: a task check whose ID matches a regression check is
+// rejected at definition time (see Collides), never allowed to shadow it.
 func Merge(task Policy, projectRegression []CheckSpec) Policy {
-	out := Policy{TaskChecks: append([]CheckSpec(nil), task.TaskChecks...)}
-	out.Regression = append(out.Regression, task.Regression...)
-	seen := map[string]bool{}
-	for _, c := range out.TaskChecks {
-		seen[c.ID] = true
+	return Policy{
+		TaskChecks: append([]CheckSpec(nil), task.TaskChecks...),
+		Regression: append([]CheckSpec(nil), projectRegression...),
 	}
-	for _, c := range out.Regression {
-		seen[c.ID] = true
+}
+
+// Collides returns the first task check ID that also names a regression
+// check, or "".
+func Collides(taskChecks, regression []CheckSpec) string {
+	ids := map[string]bool{}
+	for _, c := range regression {
+		ids[c.ID] = true
 	}
-	for _, c := range projectRegression {
-		if !seen[c.ID] { // task-level definitions win over project-level ones
-			out.Regression = append(out.Regression, c)
+	for _, c := range taskChecks {
+		if ids[c.ID] {
+			return c.ID
 		}
 	}
-	return out
+	return ""
+}
+
+// Mode names what a verification run proves.
+type Mode string
+
+const (
+	// ModeTask: the task's own checks, run fresh, diagnostic only.
+	ModeTask Mode = "task"
+	// ModeRegression: the project's regression checks, run fresh,
+	// diagnostic only.
+	ModeRegression Mode = "regression"
+	// ModeComplete: both categories fresh on an immutable revision; the
+	// only mode that can establish completion.
+	ModeComplete Mode = "complete"
+	// ModeCohort: both categories for every cohort member on one
+	// assembled candidate, run by a verifier job.
+	ModeCohort Mode = "cohort"
+)
+
+// ParseMode validates a mode from user input; "" is rejected because a
+// bare `verify` has no implicit meaning.
+func ParseMode(s string) (Mode, error) {
+	switch Mode(s) {
+	case ModeTask, ModeRegression, ModeComplete:
+		return Mode(s), nil
+	}
+	return "", fault.New(fault.CodeInvalidInput, "verify needs a mode: task, regression, or complete")
+}
+
+// Subset returns the checks a mode executes.
+func (p Policy) Subset(m Mode) Policy {
+	switch m {
+	case ModeTask:
+		return Policy{TaskChecks: p.TaskChecks}
+	case ModeRegression:
+		return Policy{Regression: p.Regression}
+	}
+	return p
+}
+
+// MissingCategory reports which required category is absent for a complete
+// run, or "" when both are present. Completion fails closed without both.
+func (p Policy) MissingCategory() string {
+	switch {
+	case len(p.TaskChecks) == 0:
+		return "task checks"
+	case len(p.Regression) == 0:
+		return "project regression checks"
+	}
+	return ""
 }

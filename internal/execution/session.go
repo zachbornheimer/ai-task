@@ -77,6 +77,9 @@ const (
 	// and the task is immediately takeable again (or blocked, if a new
 	// prerequisite was added).
 	EndReleased EndReason = "released"
+	// EndSubmitted: the attempt recorded an immutable submission for a
+	// cohort and handed verification to the cohort verifier.
+	EndSubmitted EndReason = "submitted"
 )
 
 // Attempt is one execution attempt of a task. Seq is the fencing generation:
@@ -90,6 +93,10 @@ type Attempt struct {
 	LeaseExpiresAt time.Time
 	EndedAt        *time.Time
 	EndReason      EndReason
+	// WorkspacePath/WorkspaceBranch name the attempt's private Git
+	// worktree when the project is a repository.
+	WorkspacePath   string
+	WorkspaceBranch string
 }
 
 // LeaseActive reports whether the attempt currently holds authority.
@@ -111,8 +118,11 @@ func Authorize(a Attempt, currentSeq int, now time.Time) error {
 		return fault.New(fault.CodeSessionSuperseded, "session for %s was superseded by attempt %d; run `tasks take %s` to start a new attempt", a.TaskID, currentSeq, a.TaskID)
 	}
 	if a.EndedAt != nil {
-		if a.EndReason == EndFinished {
-			return fault.New(fault.CodeSessionFinished, "session for %s already finished; take the task again to continue", a.TaskID)
+		switch a.EndReason {
+		case EndFinished:
+			return fault.New(fault.CodeSessionFinished, "session for %s already finished; claim the task again to continue", a.TaskID)
+		case EndSubmitted:
+			return fault.New(fault.CodeSessionFinished, "session for %s submitted its implementation; the cohort verifier owns it now", a.TaskID)
 		}
 		return fault.New(fault.CodeSessionSuperseded, "session for %s has ended", a.TaskID)
 	}

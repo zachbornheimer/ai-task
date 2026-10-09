@@ -1,0 +1,11 @@
+○ at-a91  Rotate leaked credentials
+○ at-g01  Identity Core (1/4 complete)
+├── ● at-c17  Confirm OAuth API compatibility
+├── ◐ at-d83  Implement PostgreSQL token store
+├── ○ at-e29  Implement scope enforcement
+└── ○ at-f16  Verify end-to-end OAuth flow [blocked]
+        requires: at-d83, at-e29
+
+○ at-g02  Embed Platform (0/2 complete)
+├── ○ at-h14  Build application shell
+└── ○ at-j37  Implement iframe messaging

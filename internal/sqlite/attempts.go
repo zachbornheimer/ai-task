@@ -25,9 +25,9 @@ func (t *Tx) AttemptByDigest(digest string) (AttemptAuth, error) {
 	var ended sql.NullInt64
 	var reason sql.NullString
 	err := t.tx.QueryRowContext(t.ctx, `
-		SELECT a.id, a.task_id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, t.current_attempt_seq
+		SELECT a.id, a.task_id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch, t.current_attempt_seq
 		FROM execution_attempts a JOIN tasks t ON t.id = a.task_id WHERE a.token_digest = ?`, digest).
-		Scan(&a.Attempt.ID, &a.Attempt.TaskID, &a.Attempt.Seq, &started, &expires, &ended, &reason, &a.CurrentSeq)
+		Scan(&a.Attempt.ID, &a.Attempt.TaskID, &a.Attempt.Seq, &started, &expires, &ended, &reason, &a.Attempt.WorkspacePath, &a.Attempt.WorkspaceBranch, &a.CurrentSeq)
 	if isNoRows(err) {
 		return a, fault.New(fault.CodeInvalidSession, "unknown session token")
 	}
@@ -72,6 +72,23 @@ func (t *Tx) StartAttempt(id task.ID, prev *execution.Attempt, digest string, no
 	return execution.Attempt{ID: aid, TaskID: id, Seq: seq, StartedAt: now, LeaseExpiresAt: expires}, nil
 }
 
+// SetWorkspace records the attempt's worktree.
+func (t *Tx) SetWorkspace(attemptID int64, path, branch string) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE execution_attempts SET workspace_path = ?, workspace_branch = ? WHERE id = ?`, path, branch, attemptID)
+	return wrapInternal(err, "set workspace")
+}
+
+// PreviousWorkspaceBranch returns the branch of the newest earlier attempt
+// of a task that had a workspace, so a new attempt can continue from it.
+func (t *Tx) PreviousWorkspaceBranch(id task.ID) (string, error) {
+	var branch string
+	err := t.tx.QueryRowContext(t.ctx, `SELECT workspace_branch FROM execution_attempts WHERE task_id = ? AND workspace_branch <> '' ORDER BY seq DESC LIMIT 1`, id).Scan(&branch)
+	if isNoRows(err) {
+		return "", nil
+	}
+	return branch, wrapInternal(err, "previous workspace")
+}
+
 // RenewLease extends an open attempt's lease. The attempt must still be
 // open; authority was checked by the caller in this transaction.
 func (t *Tx) RenewLease(attemptID int64, expires time.Time) error {
@@ -100,7 +117,7 @@ func (t *Tx) EndAttempt(attemptID int64, reason execution.EndReason, now time.Ti
 // Attempts lists every attempt of a task, oldest first. Token digests are
 // never returned.
 func (t *Tx) Attempts(id task.ID) ([]execution.Attempt, error) {
-	rows, err := t.tx.QueryContext(t.ctx, `SELECT id, seq, started_at, lease_expires_at, ended_at, end_reason FROM execution_attempts WHERE task_id = ? ORDER BY seq`, id)
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT id, seq, started_at, lease_expires_at, ended_at, end_reason, workspace_path, workspace_branch FROM execution_attempts WHERE task_id = ? ORDER BY seq`, id)
 	if err != nil {
 		return nil, wrapInternal(err, "list attempts")
 	}
@@ -111,7 +128,7 @@ func (t *Tx) Attempts(id task.ID) ([]execution.Attempt, error) {
 		var started, expires int64
 		var ended sql.NullInt64
 		var reason sql.NullString
-		if err := rows.Scan(&a.ID, &a.Seq, &started, &expires, &ended, &reason); err != nil {
+		if err := rows.Scan(&a.ID, &a.Seq, &started, &expires, &ended, &reason, &a.WorkspacePath, &a.WorkspaceBranch); err != nil {
 			return nil, wrapInternal(err, "scan attempt")
 		}
 		a.TaskID = id

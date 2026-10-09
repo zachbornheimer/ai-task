@@ -5,6 +5,7 @@
 package task
 
 import (
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,21 +14,56 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-// ID is an opaque task identifier of the form "task-" + 16 base32 chars.
-// It never changes after creation and is never reused.
+// ID is an opaque task identifier: "at-" + 6 base32 characters (30 bits).
+// IDs are random, never derived from content, and never reused; the store's
+// UNIQUE constraint detects the rare collision and the engine redraws.
+// Legacy "task-" + 16 character IDs from earlier releases still parse.
 type ID string
 
-const idPrefix = "task-"
+const (
+	idPrefix       = "at-"
+	idChars        = 6
+	legacyPrefix   = "task-"
+	legacyIDLength = 16
+)
 
-// NewID draws a fresh random ID (80 bits of entropy).
-func NewID() ID { return ID(idPrefix + project.RandomBase32(16)) }
+// NewID draws a fresh random ID.
+func NewID() ID { return ID(idPrefix + project.RandomBase32(idChars)) }
 
 // ParseID validates the external form.
 func ParseID(s string) (ID, error) {
-	if !strings.HasPrefix(s, idPrefix) || !project.ValidBase32(strings.TrimPrefix(s, idPrefix), 16) {
-		return "", fault.New(fault.CodeInvalidInput, "invalid task id %q (expected task-xxxxxxxxxxxxxxxx)", s)
+	switch {
+	case strings.HasPrefix(s, idPrefix) && project.ValidBase32(strings.TrimPrefix(s, idPrefix), idChars):
+		return ID(s), nil
+	case strings.HasPrefix(s, legacyPrefix) && project.ValidBase32(strings.TrimPrefix(s, legacyPrefix), legacyIDLength):
+		return ID(s), nil
 	}
-	return ID(s), nil
+	return "", fault.New(fault.CodeInvalidInput, "invalid task id %q (expected at-xxxxxx)", s)
+}
+
+// IsID reports whether s has the syntax of an ID (as opposed to a key).
+func IsID(s string) bool { _, err := ParseID(s); return err == nil }
+
+// Kind distinguishes executable tasks from organizational groups.
+type Kind string
+
+const (
+	KindTask  Kind = "task"
+	KindGroup Kind = "group"
+)
+
+var keyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$`)
+
+// ValidateKey checks a caller-supplied stable key. Keys must not look like
+// IDs so that references are unambiguous.
+func ValidateKey(k string) error {
+	if k == "" {
+		return nil
+	}
+	if !keyPattern.MatchString(k) || IsID(k) {
+		return fault.New(fault.CodeInvalidInput, "invalid key %q (letters, digits, '.', '_', '-', '/'; max 128; not an id)", k)
+	}
+	return nil
 }
 
 // AcceptanceCriterion is one human-checkable statement that must hold when
@@ -40,30 +76,40 @@ type AcceptanceCriterion struct {
 // Spec is the input to task creation.
 type Spec struct {
 	ProjectID    project.ID
+	Kind         Kind
+	Key          string
+	ParentID     ID // organizational group, optional
 	Description  string
 	Outcome      string
 	Constraints  []string
 	Acceptance   []AcceptanceCriterion
 	Verification verification.Policy
-	// Manual marks a task that needs a human (a decision, an approval, a
-	// credential). It is excluded from automatic selection so a machine
-	// executor never claims it, and it still blocks its dependents.
-	Manual bool
+	// Cohort names a coupled-verification cohort: members implement
+	// independently and are judged together on one assembled candidate.
+	Cohort string
 }
 
 // Task is the stored contract.
 type Task struct {
 	ID           ID                    `json:"id"`
 	ProjectID    project.ID            `json:"project_id"`
-	Description  string                `json:"description"`
+	Kind         Kind                  `json:"kind"`
+	Key          string                `json:"key,omitempty"`
+	ParentID     ID                    `json:"parent_id,omitempty"`
+	Description  string                `json:"title"`
 	Outcome      string                `json:"outcome"`
 	Constraints  []string              `json:"constraints,omitempty"`
 	Acceptance   []AcceptanceCriterion `json:"acceptance,omitempty"`
 	Verification verification.Policy   `json:"verification"`
-	Manual       bool                  `json:"manual,omitempty"`
+	Cohort       string                `json:"cohort,omitempty"`
+	ContractRev  int                   `json:"contract_rev"`
+	ArchivedAt   *time.Time            `json:"archived_at,omitempty"`
 	CreatedAt    time.Time             `json:"created_at"`
 	UpdatedAt    time.Time             `json:"updated_at"`
 }
+
+// Archived reports whether the task has been soft-deleted.
+func (t Task) Archived() bool { return t.ArchivedAt != nil }
 
 const (
 	maxDescription = 4000
@@ -80,21 +126,30 @@ func (s *Spec) Validate() error {
 	if s.ProjectID == "" {
 		return fault.New(fault.CodeInvalidInput, "task needs a project")
 	}
+	if s.Kind == "" {
+		s.Kind = KindTask
+	}
+	if s.Kind != KindTask && s.Kind != KindGroup {
+		return fault.New(fault.CodeInvalidInput, "unknown kind %q", s.Kind)
+	}
+	if err := ValidateKey(s.Key); err != nil {
+		return err
+	}
 	s.Description = strings.TrimSpace(s.Description)
 	if s.Description == "" {
-		return fault.New(fault.CodeInvalidInput, "task description must not be empty")
+		return fault.New(fault.CodeInvalidInput, "title must not be empty")
 	}
 	if len(s.Description) > maxDescription {
-		return fault.New(fault.CodeInvalidInput, "task description must be at most %d characters", maxDescription)
+		return fault.New(fault.CodeInvalidInput, "title must be at most %d characters", maxDescription)
 	}
 	s.Outcome = strings.TrimSpace(s.Outcome)
 	if s.Outcome == "" {
-		// One intended outcome is mandatory; a short description is usually
-		// the outcome itself ("Reject expired access tokens").
+		// One intended outcome is mandatory; a short title is usually the
+		// outcome itself ("Reject expired access tokens").
 		s.Outcome = s.Description
 	}
 	if len(s.Outcome) > maxOutcome {
-		return fault.New(fault.CodeInvalidInput, "task outcome must be at most %d characters", maxOutcome)
+		return fault.New(fault.CodeInvalidInput, "outcome must be at most %d characters", maxOutcome)
 	}
 	if len(s.Constraints) > maxListItems || len(s.Acceptance) > maxListItems {
 		return fault.New(fault.CodeInvalidInput, "at most %d constraints and %d acceptance criteria", maxListItems, maxListItems)
@@ -123,6 +178,18 @@ func (s *Spec) Validate() error {
 		accepted = append(accepted, a)
 	}
 	s.Acceptance = accepted
+	s.Cohort = strings.TrimSpace(s.Cohort)
+	if err := ValidateKey(s.Cohort); err != nil {
+		return fault.New(fault.CodeInvalidInput, "invalid cohort name %q", s.Cohort)
+	}
+	if s.Kind == KindGroup {
+		if !s.Verification.Empty() || s.Cohort != "" {
+			return fault.New(fault.CodeInvalidInput, "a group cannot have checks or a cohort; it is organizational only")
+		}
+	}
+	if len(s.Verification.Regression) > 0 {
+		return fault.New(fault.CodeInvalidInput, "regression checks are project-level; tasks define task checks only")
+	}
 	return s.Verification.Validate()
 }
 
@@ -130,6 +197,9 @@ func (s *Spec) Validate() error {
 // heuristics, deliberately weak, and never gate creation.
 func (s Spec) Warnings() []string {
 	var w []string
+	if s.Kind == KindGroup {
+		return nil
+	}
 	lower := strings.ToLower(s.Outcome)
 	for _, conj := range []string{" and ", " and also ", "; "} {
 		if strings.Contains(lower, conj) {
@@ -139,6 +209,9 @@ func (s Spec) Warnings() []string {
 	}
 	if len(s.Acceptance) > 12 {
 		w = append(w, "more than 12 acceptance criteria; consider whether this is one semantic outcome")
+	}
+	if len(s.Verification.TaskChecks) == 0 {
+		w = append(w, "no task checks: `verify complete` will fail closed until checks are defined")
 	}
 	return w
 }

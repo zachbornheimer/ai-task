@@ -224,3 +224,21 @@ judge (tx). Each boundary leaves a recoverable state (see
 | `verification_policies`, `verification_checks` tables | JSON value + digest on task/submission | immutable value object; no referential churn |
 | `types.go` in root | aliases in `tasks.go` | one definition per concept |
 | `list` default | open tasks only; `--all` adds complete | the agent-facing default should be actionable work |
+
+## Addendum: the `at` handoff (October 2026)
+
+The second specification ("Agent Task (`at`) implementation handoff")
+replaced several earlier decisions. Deviations from it, with reasons:
+
+| Handoff | Implementation | Why |
+|---|---|---|
+| `Engine` as a Go interface with eight methods | `at.Engine` interface plus `*at.Store` concrete type; bootstrap methods on the concrete type | an interface documents the everyday surface; bootstrap stays trusted and separate |
+| `Release(ctx, token, note) error` | `Release(ctx, token, ReleaseOptions{Note, Failed}) (TaskView, error)` | the host needs to record a recoverable agent failure for retry bookkeeping, and sees the resulting state |
+| `Log` returns `error` | returns the recorded entry | the sequence number is useful to agents |
+| `Show(ctx, id)` | `Show(ctx, project, ref, full)` | keys need a project; full history is opt-in |
+| Human-gated tasks retained or attestation path | removed; documented unsupported | an empty-check completion loophole is worse than no feature |
+| Parallel task/regression suites when isolated | sequential always | isolation cannot be proven from a declaration |
+| Priority field | none | as decided |
+
+Hazards 1–10 from the handoff's section 10 are each closed or documented
+in `docs/status.md`.

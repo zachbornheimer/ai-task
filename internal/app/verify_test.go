@@ -3,359 +3,357 @@ package app_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-func sh(script string) []string { return []string{"sh", "-c", script} }
-
-func check(id, script string, required bool) verification.CheckSpec {
-	return verification.CheckSpec{ID: id, Command: sh(script), Required: required, Timeout: 20 * time.Second}
+func TestBareVerifyIsInvalid(t *testing.T) {
+	f := newGitFixture(t)
+	s := f.claim(string(f.add("a")))
+	_, err := f.e.Verify(f.ctx, s.Token, "")
+	wantCode(t, err, fault.CodeInvalidInput)
 }
 
-// gitFixture is a fixture whose project root is a real Git repository.
-type gitFixture struct {
-	*fixture
-	repo string
-}
-
-func newGitFixture(t *testing.T) *gitFixture {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
+func TestEmptyChecksFailClosed(t *testing.T) {
+	f := newGitFixture(t)
+	// No task checks.
+	noChecks := f.apply(plan.AddTask{Key: "nc", Title: "no checks"}).Created["nc"]
+	s := f.claim(string(noChecks))
+	f.commit(s.Workspace, "w.txt", "w")
+	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeMissingVerification)
+	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+	wantCode(t, err, fault.CodeMissingVerification)
+	if f.status(string(noChecks)) != task.StatusClaimed {
+		t.Fatal("claim must survive a fail-closed refusal")
 	}
-	f := &fixture{t: t, ctx: context.Background(), c: newClock(), path: filepath.Join(t.TempDir(), "tasks.db")}
-	f.e = f.open()
-	g := &gitFixture{fixture: f, repo: filepath.Join(t.TempDir(), "repo")}
-	os.MkdirAll(g.repo, 0o755)
-	g.git("init", "-q", "-b", "main")
-	g.commit("one")
-	var err error
-	f.proj, err = f.e.InitProject(f.ctx, "gitproj", g.repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return g
-}
-
-func (g *gitFixture) git(args ...string) string {
-	g.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", g.repo}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		g.t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// commit writes a file and commits, returning the new HEAD.
-func (g *gitFixture) commit(content string) string {
-	g.t.Helper()
-	os.WriteFile(filepath.Join(g.repo, "f.txt"), []byte(content), 0o644)
-	g.git("add", "f.txt")
-	g.git("commit", "-q", "-m", content)
-	return g.git("rev-parse", "HEAD")
-}
-
-func (f *fixture) addWithPolicy(desc string, p verification.Policy) task.Task {
-	f.t.Helper()
-	tk, _, err := f.e.Add(f.ctx, task.Spec{ProjectID: f.proj.ID, Description: desc, Verification: p})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return tk
-}
-
-func (f *fixture) takeAndFinish(id task.ID, opts app.FinishOptions) (app.SubmissionResult, error) {
-	f.t.Helper()
-	s, err := f.e.Take(f.ctx, app.TakeRequest{Task: &id})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return f.e.Finish(f.ctx, s.Token, opts)
-}
-
-func TestFailingRequiredCheckPreventsCompletionAndPreservesWork(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	a := f.addWithPolicy("needs proof", verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", "echo boom >&2; exit 2", true)}})
-	b := f.add("dependent")
-	f.e.AddDependency(f.ctx, b.ID, a.ID)
-	s, _ := f.e.Take(f.ctx, app.TakeRequest{Task: &a.ID})
-	f.e.Log(f.ctx, s.Token, executionLogEntry{Done: "tried", Next: "fix the thing"})
-	res, err := f.e.Finish(f.ctx, s.Token, app.FinishOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	if res.Verification != "failed" || res.Status != task.StatusVerificationFailed || res.SubmissionID == 0 || len(res.Revision) != 40 {
-		t.Fatalf("result: %+v", res)
-	}
-	var fe *fault.Error
-	if !asFaultErr(err, &fe) || fe.Details == nil {
-		t.Fatalf("details missing: %v", err)
-	}
-	if f.status(b.ID) != task.StatusBlocked {
-		t.Fatal("failed verification must not release dependents")
-	}
-	page, err := f.e.Evidence(f.ctx, a.ID, 0)
-	if err != nil || len(page.Runs) != 1 || len(page.Runs[0].Evidence) != 1 {
-		t.Fatalf("evidence: %+v %v", page, err)
-	}
-	ev := page.Runs[0].Evidence[0]
-	if ev.Outcome != verification.OutcomeFailed || ev.ExitCode != 2 || !strings.Contains(ev.Stderr, "boom") || ev.Revision != res.Revision || ev.PolicyDigest != res.PolicyDigest {
-		t.Fatalf("evidence row: %+v", ev)
-	}
-	// Work and handoff survive; the task is takeable again for repair.
-	v, _ := f.e.Show(f.ctx, a.ID)
-	if v.Handoff.LatestNext != "fix the thing" || v.Submission == nil || v.Submission.Verification != "failed" {
-		t.Fatalf("view: %+v", v)
-	}
-	s2, err := f.e.Take(f.ctx, app.TakeRequest{Project: f.proj.ID})
-	if err != nil || s2.TaskID != a.ID || s2.AttemptSeq != 2 {
-		t.Fatalf("repair take: %+v %v", s2, err)
-	}
-	if f.status(a.ID) != task.StatusInProgress {
-		t.Fatal("active attempt outranks the failed verification")
-	}
-	v2, _ := f.e.Show(f.ctx, a.ID)
-	if v2.Submission == nil || v2.Submission.Verification != "failed" {
-		t.Fatal("failure details must remain visible during the repair attempt")
-	}
-}
-
-func TestOptionalCheckCannotCompensateForRequiredFailure(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	a := f.addWithPolicy("a", verification.Policy{TaskChecks: []verification.CheckSpec{check("req", "exit 1", true), check("opt", "true", false)}})
-	_, err := f.takeAndFinish(a.ID, app.FinishOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	b := f.addWithPolicy("b", verification.Policy{TaskChecks: []verification.CheckSpec{check("req", "true", true), check("opt", "exit 1", false)}})
-	res, err := f.takeAndFinish(b.ID, app.FinishOptions{})
-	if err != nil || res.Status != task.StatusComplete || !strings.Contains(res.Summary, "optional failed: opt") {
-		t.Fatalf("%+v %v", res, err)
-	}
-}
-
-func TestMissingVerifierAndTimeoutAreNotPassed(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	a := f.addWithPolicy("a", verification.Policy{TaskChecks: []verification.CheckSpec{{ID: "ghost", Command: []string{"no-such-verifier-binary-xyz"}, Required: true}}})
-	res, err := f.takeAndFinish(a.ID, app.FinishOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	page, _ := f.e.Evidence(f.ctx, a.ID, res.RunID)
-	if page.Runs[0].Evidence[0].Outcome != verification.OutcomeError {
-		t.Fatalf("missing verifier: %+v", page.Runs[0].Evidence[0])
-	}
-	b := f.addWithPolicy("b", verification.Policy{TaskChecks: []verification.CheckSpec{{ID: "slow", Command: sh("exec sleep 10"), Required: true, Timeout: 300 * time.Millisecond}}})
-	start := time.Now()
-	res, err = f.takeAndFinish(b.ID, app.FinishOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	if time.Since(start) > 8*time.Second {
-		t.Fatal("timeout not enforced promptly")
-	}
-	page, _ = f.e.Evidence(f.ctx, b.ID, res.RunID)
-	if page.Runs[0].Evidence[0].Outcome != verification.OutcomeTimeout {
-		t.Fatalf("timeout: %+v", page.Runs[0].Evidence[0])
-	}
-}
-
-func TestRegressionSkippedWhenRequiredTaskCheckFails(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	marker := filepath.Join(t.TempDir(), "regression-ran")
-	p := f.proj
-	p.Regression = []verification.CheckSpec{check("full", "touch "+marker, true)}
-	if err := f.e.UpdateProject(f.ctx, p); err != nil {
-		t.Fatal(err)
-	}
-	a := f.addWithPolicy("a", verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", "exit 1", true)}})
-	res, err := f.takeAndFinish(a.ID, app.FinishOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("regression must not run after a required task check failed")
-	}
-	page, _ := f.e.Evidence(f.ctx, a.ID, res.RunID)
-	if len(page.Runs[0].Evidence) != 2 || page.Runs[0].Evidence[1].Outcome != verification.OutcomeSkipped {
-		t.Fatalf("%+v", page.Runs[0].Evidence)
-	}
-}
-
-func TestEvidenceReuseIsBoundToRevisionAndCheckContent(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	counter := filepath.Join(t.TempDir(), "count")
-	script := "echo x >> " + counter
-	runs := func() int {
-		b, _ := os.ReadFile(counter)
-		return strings.Count(string(b), "x")
-	}
-	pol := verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", script, true)}}
-	a := f.addWithPolicy("a", pol)
-	res, err := f.takeAndFinish(a.ID, app.FinishOptions{})
-	if err != nil || res.Status != task.StatusComplete || runs() != 1 {
-		t.Fatalf("%+v %v runs=%d", res, err, runs())
-	}
-	// Same check content at the same revision: reused, not executed.
-	b := f.addWithPolicy("b", pol)
-	res, err = f.takeAndFinish(b.ID, app.FinishOptions{})
-	if err != nil || res.Status != task.StatusComplete || runs() != 1 {
-		t.Fatalf("reuse: %+v %v runs=%d", res, err, runs())
-	}
-	page, _ := f.e.Evidence(f.ctx, b.ID, res.RunID)
-	if ev := page.Runs[0].Evidence[0]; !ev.Reused || ev.ReusedFrom == 0 || ev.Outcome != verification.OutcomePassed {
-		t.Fatalf("expected reused evidence: %+v", ev)
-	}
-	// Changing the task's policy invalidates its completion; the unchanged
-	// check is reused, the new one runs.
-	pol2 := verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", script, true), check("extra", "true", true)}}
-	v, err := f.e.SetTaskPolicy(f.ctx, a.ID, pol2)
-	if err != nil || v.Status != task.StatusAwaitingVerification || v.CompletedAt != nil {
-		t.Fatalf("policy change: %+v %v", v, err)
-	}
-	vr, err := f.e.Verify(f.ctx, a.ID, app.VerifyOptions{})
-	if err != nil || vr.Status != task.StatusComplete || runs() != 1 || len(vr.Evidence) != 2 || !vr.Evidence[0].Reused || vr.Evidence[1].Reused {
-		t.Fatalf("re-verify: %+v %v runs=%d", vr, err, runs())
-	}
-	// A new revision is a new input: the check executes again.
-	g.commit("two")
-	c := f.addWithPolicy("c", pol)
-	res, err = f.takeAndFinish(c.ID, app.FinishOptions{})
-	if err != nil || runs() != 2 {
-		t.Fatalf("new revision: %+v %v runs=%d", res, err, runs())
-	}
-	// A changed command is a new input too.
-	d := f.addWithPolicy("d", verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", script+" # v2", true)}})
-	if _, err := f.takeAndFinish(d.ID, app.FinishOptions{}); err != nil || runs() != 3 {
-		t.Fatalf("changed command: %v runs=%d", err, runs())
-	}
-	// Unchanged policy edit is a no-op for evidence.
-	if v, err := f.e.SetTaskPolicy(f.ctx, d.ID, d.Verification); err != nil || v.Status != task.StatusComplete {
-		t.Fatalf("same policy must not invalidate: %+v %v", v, err)
-	}
-}
-
-func TestVerificationRefusesTreeThatDoesNotMatchSubmission(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	a := f.addWithPolicy("a", verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", "true", true)}})
-	res, err := f.takeAndFinish(a.ID, app.FinishOptions{NoVerify: true})
-	if err != nil || res.Verification != "pending" {
-		t.Fatalf("%+v %v", res, err)
-	}
-	r1 := res.Revision
-	// Dirty tree: evidence would not describe r1.
-	os.WriteFile(filepath.Join(g.repo, "f.txt"), []byte("dirty"), 0o644)
-	vr, err := f.e.Verify(f.ctx, a.ID, app.VerifyOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	if vr.Evidence[0].Outcome != verification.OutcomeError || !strings.Contains(vr.Evidence[0].Message, "uncommitted") {
-		t.Fatalf("%+v", vr.Evidence[0])
-	}
-	// Different revision checked out.
-	g.commit("two")
-	vr, err = f.e.Verify(f.ctx, a.ID, app.VerifyOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	if !strings.Contains(vr.Evidence[0].Message, r1) {
-		t.Fatalf("%+v", vr.Evidence[0])
-	}
-	// Submitted revision checked out again: passes.
-	g.git("checkout", "-q", r1)
-	vr, err = f.e.Verify(f.ctx, a.ID, app.VerifyOptions{})
-	if err != nil || vr.Status != task.StatusComplete || vr.Evidence[0].Revision != r1 {
-		t.Fatalf("%+v %v", vr, err)
-	}
-}
-
-func TestDirtyWorktreeSubmissionIsRejected(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
+	// No project regression checks.
+	f.setRegression()
 	a := f.add("a")
-	s, _ := f.e.Take(f.ctx, app.TakeRequest{Task: &a.ID})
-	os.WriteFile(filepath.Join(g.repo, "new.txt"), []byte("x"), 0o644)
-	_, err := f.e.Finish(f.ctx, s.Token, app.FinishOptions{})
-	wantCode(t, err, fault.CodeWorkspaceDirty)
-	if f.status(a.ID) != task.StatusInProgress {
-		t.Fatal("a rejected submission must leave the attempt intact")
+	sa := f.claim(string(a))
+	f.commit(sa.Workspace, "a.txt", "a")
+	_, err = f.e.Verify(f.ctx, sa.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeMissingVerification)
+	_, err = f.e.Verify(f.ctx, sa.Token, verification.ModeRegression)
+	wantCode(t, err, fault.CodeMissingVerification)
+	if f.status(string(a)) != task.StatusClaimed {
+		t.Fatal("not complete")
 	}
-	g.git("add", "new.txt")
-	head := g.git("commit", "-q", "-m", "add")
-	_ = head
-	res, err := f.e.Finish(f.ctx, s.Token, app.FinishOptions{})
-	if err != nil || res.Revision != g.git("rev-parse", "HEAD") || res.Status != task.StatusComplete {
+}
+
+func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
+	f := newGitFixture(t)
+	counter := filepath.Join(t.TempDir(), "count")
+	runs := func() int { b, _ := os.ReadFile(counter); return strings.Count(string(b), "x") }
+	a := f.addWith("a", "echo x >> "+counter)
+	s := f.claim(string(a))
+	// Uncommitted edits are fine for diagnostics.
+	os.WriteFile(filepath.Join(s.Workspace, "wip.txt"), []byte("wip"), 0o644)
+	for i := 1; i <= 3; i++ {
+		res, err := f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+		if err != nil || !res.Passed || res.Completed || runs() != i {
+			t.Fatalf("run %d: %+v %v runs=%d", i, res, err, runs())
+		}
+	}
+	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeRegression)
+	if err != nil || !res.Passed || res.Completed || res.Mode != verification.ModeRegression {
 		t.Fatalf("%+v %v", res, err)
 	}
-	// Replay after the tree becomes dirty again still returns the record.
-	os.WriteFile(filepath.Join(g.repo, "later.txt"), []byte("x"), 0o644)
-	again, err := f.e.Finish(f.ctx, s.Token, app.FinishOptions{})
-	if err != nil || !again.AlreadySubmitted {
+	if st := f.status(string(a)); st != task.StatusClaimed {
+		t.Fatalf("diagnostics changed status to %s", st)
+	}
+	v := f.show(string(a))
+	if v.Verification.Task == nil || v.Verification.Regression == nil || v.Verification.Complete != nil || v.Attempt == nil || !v.Attempt.LeaseActive {
+		t.Fatalf("%+v", v.Verification)
+	}
+	// Failing diagnostics report VERIFICATION_FAILED with details and keep
+	// the claim live.
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; exit 3", true)})}}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err = f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+	wantCode(t, err, fault.CodeVerificationFailed)
+	if res.Passed || runs() != 4 || res.Evidence[0].ExitCode != 3 || f.status(string(a)) != task.StatusClaimed {
+		t.Fatalf("%+v runs=%d", res, runs())
+	}
+}
+
+func TestNoEvidenceReuseAndSameSnapshot(t *testing.T) {
+	f := newGitFixture(t)
+	counter := filepath.Join(t.TempDir(), "count")
+	runs := func() int { b, _ := os.ReadFile(counter); return strings.Count(string(b), "x") }
+	// The check reads the snapshot's file; the agent keeps editing its
+	// worktree during verification. Evidence must describe the commit.
+	a := f.apply(plan.AddTask{Key: "a", Title: "a", TaskChecks: []verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; test \"$(cat f.txt)\" = committed", true)}}).Created["a"]
+	s := f.claim(string(a))
+	f.commit(s.Workspace, "f.txt", "committed")
+	res := f.complete(s)
+	if runs() != 1 || res.Revision == "" {
+		t.Fatalf("%+v runs=%d", res, runs())
+	}
+	// A second task with the identical check on the identical content runs
+	// the check again: no cross-run reuse.
+	b := f.apply(plan.AddTask{Key: "b", Title: "b", TaskChecks: []verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; test \"$(cat f.txt)\" = committed", true)}}).Created["b"]
+	sb := f.claim(string(b))
+	resB := f.complete(sb)
+	if runs() != 2 {
+		t.Fatalf("evidence reused: runs=%d", runs())
+	}
+	for _, ev := range resB.Evidence {
+		if ev.Reused {
+			t.Fatal("reused evidence row")
+		}
+	}
+	// Same snapshot: the regression check sees exactly the committed content
+	// even though the worktree is edited after the commit.
+	c := f.apply(plan.AddTask{Key: "c", Title: "c", TaskChecks: []verification.CheckSpec{check("unit-c", "test \"$(cat f.txt)\" = committed-c", true)}}).Created["c"]
+	sc := f.claim(string(c))
+	f.commit(sc.Workspace, "f.txt", "committed-c")
+	os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("edited after commit"), 0o644)
+	// Dirty tree: refused outright.
+	_, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeWorkspaceDirty)
+	os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("committed-c"), 0o644)
+	f.complete(sc)
+}
+
+func TestFinalSuccessIsAtomicAndPromotes(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	d := f.add("d", "a")
+	s := f.claim(string(a))
+	rev := f.commit(s.Workspace, "a.txt", "a")
+	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	if err != nil || !res.Completed || res.Revision != rev || res.Status != task.StatusComplete {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// Claim ended atomically with completion.
+	_, err = f.e.Log(f.ctx, s.Token, execution.LogEntry{Done: "late"})
+	wantCode(t, err, fault.CodeSessionFinished)
+	// Promoted to main: the main worktree has the file.
+	if b, _ := os.ReadFile(filepath.Join(f.repo, "a.txt")); string(b) != "a" {
+		t.Fatal("not promoted")
+	}
+	if f.git(f.repo, "rev-parse", "main") != rev {
+		t.Fatal("main not at the verified revision")
+	}
+	v := f.show(string(a))
+	if v.CompletedRevision != rev || v.Verification.Complete == nil || v.Verification.Complete.Status != "passed" {
+		t.Fatalf("%+v", v)
+	}
+	// Downstream is released and its worktree starts from the promoted main.
+	sd := f.claim(string(d))
+	if b, _ := os.ReadFile(filepath.Join(sd.Workspace, "a.txt")); string(b) != "a" {
+		t.Fatal("dependent worktree lacks the prerequisite's change")
+	}
+	// Idempotent acknowledgement: same token after completion returns the
+	// stored result without a new run.
+	before := f.show(string(a)).Verification.Complete.ID
+	again, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	if err != nil || !again.Replayed || !again.Completed || again.RunID != before {
 		t.Fatalf("%+v %v", again, err)
 	}
+	// Full history shows the integration record.
+	full, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true)
+	if full.History == nil || len(full.History.Integrations) != 1 || full.History.Integrations[0].ResultRevision != rev {
+		t.Fatalf("%+v", full.History)
+	}
 }
 
-func TestInterruptedVerificationIsRecoverable(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	flag := filepath.Join(t.TempDir(), "go")
-	pol := verification.Policy{TaskChecks: []verification.CheckSpec{
-		check("fast", "true", true),
-		check("waits", "while [ ! -f "+flag+" ]; do sleep 0.05; done", true),
-	}}
-	a := f.addWithPolicy("a", pol)
-	if _, err := f.takeAndFinish(a.ID, app.FinishOptions{NoVerify: true}); err != nil {
+func TestFinalFailureKeepsClaimAndBlocksDownstream(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.addWith("a", "exit 1")
+	d := f.add("d", "a")
+	s := f.claim(string(a))
+	f.commit(s.Workspace, "a.txt", "a")
+	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeVerificationFailed)
+	if res.Completed || res.Status != task.StatusClaimed {
+		t.Fatalf("%+v", res)
+	}
+	if f.status(string(d)) != task.StatusBlocked {
+		t.Fatal("downstream released by a failed verification")
+	}
+	if f.git(f.repo, "rev-parse", "main") == f.git(s.Workspace, "rev-parse", "HEAD") {
+		t.Fatal("promoted a failing revision")
+	}
+	// The claim is live: the planner relaxes the check, the agent commits a
+	// fix and verifies again -> complete; a second submission supersedes.
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "true", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(f.ctx, 500*time.Millisecond)
-	_, err := f.e.Verify(ctx, a.ID, app.VerifyOptions{})
-	cancel()
+	f.commit(s.Workspace, "fix.txt", "fix")
+	res2, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	if err != nil || !res2.Completed || res2.SubmissionID == res.SubmissionID {
+		t.Fatalf("%+v %v", res2, err)
+	}
+	if f.status(string(d)) != task.StatusReady {
+		t.Fatal("downstream not released")
+	}
+}
+
+func TestLateBlockerPreventsCompletion(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	s := f.claim(string(a))
+	// Discovered blocker added by the holder while working.
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: []verification.CheckSpec{check("u", "true", true)}}}}); err != nil {
+		t.Fatal(err)
+	}
+	f.commit(s.Workspace, "a.txt", "a")
+	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeTaskBlocked)
+	if f.status(string(a)) != task.StatusClaimed {
+		t.Fatal("claim lost")
+	}
+	// Release, complete the prerequisite, resume and complete.
+	f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Note: "waiting on pre"})
+	if f.status(string(a)) != task.StatusBlocked {
+		t.Fatal("not blocked")
+	}
+	f.complete(f.claim("pre"))
+	s2 := f.claim(string(a))
+	if s2.Handoff.RecentLogs[0].Note != "waiting on pre" {
+		t.Fatal("handoff lost")
+	}
+	f.complete(s2)
+}
+
+func TestCompletedContractsCannotChangeSilently(t *testing.T) {
+	f := newGitFixture(t)
+	a, b := f.add("a"), f.add("b")
+	f.complete(f.claim(string(a)))
+	// A hard requirement on a complete task is rejected.
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{plan.Ref(b)}}}})
+	wantCode(t, err, fault.CodePlanConflict)
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", Blocks: []plan.Ref{plan.Ref(a)}}}})
+	wantCode(t, err, fault.CodePlanConflict)
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Title: strptr("renamed")}}})
+	wantCode(t, err, fault.CodePlanConflict)
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a)}}})
+	wantCode(t, err, fault.CodePlanConflict)
+	if f.status(string(a)) != task.StatusComplete {
+		t.Fatal("completion lost")
+	}
+	// Contract change during a running verification fails closed: simulate
+	// with a check that edits the contract through the planner mid-run.
+}
+
+func TestContractChangeDuringVerificationFailsClosed(t *testing.T) {
+	f := newGitFixture(t)
+	flag := filepath.Join(t.TempDir(), "go")
+	a := f.addWith("a", "while [ ! -f "+flag+" ]; do sleep 0.05; done")
+	s := f.claim(string(a))
+	f.commit(s.Workspace, "a.txt", "a")
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+		done <- err
+	}()
+	deadline := time.Now().Add(15 * time.Second)
+	for f.status(string(a)) != task.StatusVerifying && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if st := f.status(string(a)); st != task.StatusVerifying {
+		t.Fatalf("status during run: %s", st)
+	}
+	// Planner tightens the contract while the run is in flight.
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Acceptance: plan.Replace([]string{"stricter"})}}}); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(flag, []byte("1"), 0o644)
+	err := <-done
+	wantCode(t, err, fault.CodePlanConflict)
+	if f.status(string(a)) == task.StatusComplete {
+		t.Fatal("completed under a changed contract")
+	}
+}
+
+func TestVerifierCrashRecovery(t *testing.T) {
+	f := newGitFixture(t)
+	flag := filepath.Join(t.TempDir(), "go")
+	a := f.addWith("a", "while [ ! -f "+flag+" ]; do sleep 0.05; done")
+	s, _ := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a, Lease: 2 * time.Second})
+	f.commit(s.Workspace, "a.txt", "a")
+	// Simulate: the run was recorded running, then the process died.
+	err := f.interruptWhenVerifying(string(a), "verifying", func(ctx context.Context) error {
+		_, err := f.e.Verify(ctx, s.Token, verification.ModeComplete)
+		return err
+	})
 	if err == nil {
 		t.Fatal("expected interruption")
 	}
-	if f.status(a.ID) != task.StatusAwaitingVerification {
-		t.Fatalf("status: %s", f.status(a.ID))
+	if st := f.status(string(a)); st != task.StatusVerifying {
+		t.Fatalf("run should still be recorded running right after the crash: %s", st)
 	}
-	_, err = f.e.Verify(f.ctx, a.ID, app.VerifyOptions{})
-	wantCode(t, err, fault.CodeVerificationRunning)
 	os.WriteFile(flag, []byte("1"), 0o644)
-	vr, err := f.e.Verify(f.ctx, a.ID, app.VerifyOptions{Retry: true})
-	if err != nil || vr.Status != task.StatusComplete || len(vr.Evidence) != 2 || !vr.Evidence[0].Reused || vr.Evidence[1].Reused {
-		t.Fatalf("retry: %+v %v", vr, err)
+	f.c.Advance(time.Hour)
+	// Reconcile: no phantom "verifying"; another worker resumes.
+	if st := f.status(string(a)); st == task.StatusVerifying {
+		t.Fatal("phantom verifying state")
 	}
-	page, _ := f.e.Evidence(f.ctx, a.ID, 0)
-	if len(page.Runs) != 2 || page.Runs[1].Status != "error" {
-		t.Fatalf("interrupted run must be closed as error: %+v", page.Runs)
+	s2, err := f.open().Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
+	if err != nil || s2.Task.ID != a || s2.AttemptSeq != 2 {
+		t.Fatalf("%+v %v", s2, err)
+	}
+	// The new attempt's worktree continues from the previous branch.
+	if b, _ := os.ReadFile(filepath.Join(s2.Workspace, "a.txt")); string(b) != "a" {
+		t.Fatal("work not carried over")
+	}
+	f.complete(s2)
+}
+
+func TestIntegrationConflictDoesNotComplete(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	s := f.claim(string(a))
+	f.commit(s.Workspace, "f.txt", "from a")
+	// main moves with a conflicting change before a verifies.
+	f.commit(f.repo, "f.txt", "from main")
+	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeIntegrationFailed)
+	if f.status(string(a)) == task.StatusComplete || f.git(f.repo, "rev-parse", "HEAD") != f.git(f.repo, "rev-parse", "main") {
+		t.Fatal("completed or moved target despite conflict")
+	}
+	if b, _ := os.ReadFile(filepath.Join(f.repo, "f.txt")); string(b) != "from main" {
+		t.Fatal("target content changed")
+	}
+	// Non-conflicting divergence: merged candidate is verified, then promoted.
+	b := f.add("b")
+	sb := f.claim(string(b))
+	f.commit(sb.Workspace, "b.txt", "b")
+	f.commit(f.repo, "other.txt", "main again")
+	res, err := f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
+	if err != nil || !res.Completed || res.IntegratedRevision == "" || res.IntegratedRevision == res.Revision {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if f.git(f.repo, "rev-parse", "main") != res.IntegratedRevision {
+		t.Fatal("main not at merged candidate")
+	}
+	// Evidence exists for both the submitted revision and the candidate.
+	revs := map[string]bool{}
+	for _, ev := range res.Evidence {
+		revs[ev.Revision] = true
+	}
+	if !revs[res.Revision] || !revs[res.IntegratedRevision] {
+		t.Fatalf("evidence revisions: %v", revs)
 	}
 }
 
-func TestVerifyGuards(t *testing.T) {
-	g := newGitFixture(t)
-	f := g.fixture
-	a := f.addWithPolicy("a", verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", "true", true)}})
-	_, err := f.e.Verify(f.ctx, a.ID, app.VerifyOptions{})
-	wantCode(t, err, fault.CodeNothingToVerify)
-	res, err := f.takeAndFinish(a.ID, app.FinishOptions{})
-	if err != nil || res.Status != task.StatusComplete {
-		t.Fatalf("%+v %v", res, err)
-	}
-	_, err = f.e.Verify(f.ctx, a.ID, app.VerifyOptions{})
-	wantCode(t, err, fault.CodeNothingToVerify)
-	vr, err := f.e.Verify(f.ctx, a.ID, app.VerifyOptions{Again: true})
-	if err != nil || vr.Status != task.StatusComplete || !vr.Evidence[0].Reused {
-		t.Fatalf("again: %+v %v", vr, err)
-	}
-	// A project without a directory cannot run checks: the run errors,
-	// nothing passes.
-	nodir := newFixture(t)
-	b := nodir.addWithPolicy("b", verification.Policy{TaskChecks: []verification.CheckSpec{check("unit", "true", true)}})
-	_, err = nodir.takeAndFinish(b.ID, app.FinishOptions{})
-	wantCode(t, err, fault.CodeVerificationFailed)
-	page, _ := nodir.e.Evidence(nodir.ctx, b.ID, 0)
-	if page.Runs[0].Evidence[0].Outcome != verification.OutcomeError {
-		t.Fatalf("%+v", page.Runs[0].Evidence[0])
-	}
+func TestGoTestCacheDisabledInCheckEnvironment(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.addWith("a", "test \"$GOFLAGS\" = \"-count=1\" && test -z \"$AT_SESSION\"")
+	s := f.claim(string(a))
+	f.commit(s.Workspace, "a.txt", "a")
+	t.Setenv("AT_SESSION", string(s.Token))
+	f.complete(s)
 }

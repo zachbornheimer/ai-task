@@ -79,15 +79,27 @@ func TestPolicyValidate(t *testing.T) {
 	}
 }
 
-func TestMergeTaskDefinitionsWin(t *testing.T) {
-	task := Policy{TaskChecks: []CheckSpec{{ID: "unit", Command: []string{"a"}, Required: true}}, Regression: []CheckSpec{{ID: "lint", Command: []string{"task-lint"}, Required: true}}}
+func TestMergeKeepsNamespacesSeparate(t *testing.T) {
+	task := Policy{TaskChecks: []CheckSpec{{ID: "unit", Command: []string{"a"}, Required: true}}}
 	proj := []CheckSpec{{ID: "lint", Command: []string{"proj-lint"}, Required: true}, {ID: "full", Command: []string{"proj-full"}, Required: true}}
 	m := Merge(task, proj)
-	if len(m.Regression) != 2 || m.Regression[0].Command[0] != "task-lint" || m.Regression[1].ID != "full" {
-		t.Fatalf("unexpected merge: %+v", m.Regression)
+	if len(m.Regression) != 2 || m.Regression[0].Command[0] != "proj-lint" || len(m.TaskChecks) != 1 {
+		t.Fatalf("unexpected merge: %+v", m)
 	}
 	if got := len(m.RequiredChecks()); got != 3 {
 		t.Fatalf("required = %d", got)
+	}
+	if Collides([]CheckSpec{{ID: "lint"}}, proj) != "lint" || Collides([]CheckSpec{{ID: "unit"}}, proj) != "" {
+		t.Fatal("collision detection")
+	}
+	if m.MissingCategory() != "" || (Policy{TaskChecks: task.TaskChecks}).MissingCategory() != "project regression checks" || (Policy{Regression: proj}).MissingCategory() != "task checks" {
+		t.Fatal("missing category")
+	}
+	if _, err := ParseMode(""); err == nil {
+		t.Fatal("bare verify must be invalid")
+	}
+	if len(m.Subset(ModeTask).Regression) != 0 || len(m.Subset(ModeRegression).TaskChecks) != 0 {
+		t.Fatal("subset")
 	}
 	// Merge must not alias the input slices.
 	m.TaskChecks[0].ID = "changed"
