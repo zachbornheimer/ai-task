@@ -36,6 +36,7 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 | `NO_ELIGIBLE_WORK` | nothing claimable now (non-waiting claim, cooldown) |
 | `DONE` | every executable task is complete (waiting claim) |
 | `STALLED` | open tasks remain, nothing claimable, nothing in flight; `details` carries the summary with reasons |
+| `NEEDS_ATTENTION` | this task needs a planner: attempts exhausted, or its worktree could not be prepared (`attention_reason` says which) |
 | `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED` | authority failures |
 | `MISSING_VERIFICATION` | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim |
 | `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once |
@@ -93,7 +94,12 @@ at verify task | regression | complete               (same token sources)
 ```
 
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;
-cooldowns and exhausted tasks excluded). It refuses with
+cooldowns, exhausted tasks and tasks whose worktree could not be prepared
+excluded). A worktree that cannot be prepared marks that task
+`needs_attention` with the reason and ends the attempt; the queue moves
+on to the next task. `at claim <ref>` on such a task retries the
+preparation (the repair path after fixing the worktree); `at update <ref>
+--reset-attempts` clears the mark. It refuses with
 `MISSING_VERIFICATION` while the project has no regression checks: work
 that can never complete is never handed out. `--wait` blocks until work is
 claimable, `DONE`, `STALLED`, or interrupted; while waiting the process

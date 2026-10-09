@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
@@ -112,7 +113,9 @@ type TaskView struct {
 	Failures    int         `json:"failures,omitempty"`
 	// LastError is the most recent environment or authority problem that
 	// stopped a verification without counting as a failure.
-	LastError         string     `json:"last_error,omitempty"`
+	LastError string `json:"last_error,omitempty"`
+	// AttentionReason says why a needs_attention task needs a planner.
+	AttentionReason   string     `json:"attention_reason,omitempty"`
 	NextEligibleAt    *time.Time `json:"next_eligible_at,omitempty"`
 	CompletedAt       *time.Time `json:"completed_at,omitempty"`
 	CompletedRevision string     `json:"completed_revision,omitempty"`
@@ -271,6 +274,17 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		Checks: t.Verification.TaskChecks, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
+	}
+	if st == task.StatusNeedsAttention {
+		facts := r.Facts(now, p.MaxAttempts)
+		switch {
+		case facts.Unverifiable:
+			v.AttentionReason = "no required task check; add one with `at update --check`"
+		case facts.Exhausted:
+			v.AttentionReason = fmt.Sprintf("attempts exhausted (%d failures); `at update --reset-attempts` after fixing the cause", r.Failures)
+		case facts.WorkspaceBlocked:
+			v.AttentionReason = "workspace unusable: " + r.WorkspaceError + "; fix the worktree and `at claim " + string(t.ID) + "`, or `at update --reset-attempts`"
+		}
 	}
 	if st == task.StatusAwaitingIntegration {
 		if in, err := tx.ActiveIntentForTask(t.ID); err == nil && in != nil {

@@ -59,6 +59,11 @@ claimed, verifying, and submissions whose cohort can be verified.
   (`TestWaitingClaimDoneAndStalled`, `TestCoupledVerificationRecoversAfterVerifierCrash`)
 - Release keeps the handoff; `--failed` counts a failure and applies the
   cooldown; exhausted tasks need a planner reset. (`TestReleaseAndCooldown`)
+- One unusable worktree never blocks the queue: the task is marked
+  needs_attention with the reason, excluded from automatic selection (SQL
+  and status agree), retried by an explicit claim, cleared by a planner
+  reset; `list ready`, `status` and `claim` agree throughout.
+  (`TestUnusableWorktreeDoesNotBlockTheQueue`)
 - Failure accounting is fenced and classified: a failed proof counts once
   per current attempt; environment and authority problems are recorded as
   `last_error`, never counted; a stale attempt cannot count against its

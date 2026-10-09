@@ -88,6 +88,9 @@ func retryable(err error) bool {
 	switch fault.CodeOf(err) {
 	case fault.CodeNoAvailableTask, fault.CodeTaskBlocked, fault.CodeTaskAlreadyTaken, fault.CodeTaskAwaitingVerification, fault.CodeTaskAwaitingIntegration:
 		return true
+	case fault.CodeWorkspaceUnavailable:
+		// The task that failed is now excluded from selection; keep scanning.
+		return true
 	}
 	return false
 }
@@ -115,7 +118,9 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			if err := regressionGate(proj); err != nil {
 				return err
 			}
-			if err := notClaimable(r, proj, now); err != nil {
+			// An explicit claim is the retry path for a task whose worktree
+			// could not be prepared: the caller decided to try again.
+			if err := notClaimable(r, proj, now, true); err != nil {
 				return err
 			}
 		} else {
@@ -135,7 +140,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			r = cand
 			// The SQL pre-filter must agree with the domain rule; a
 			// disagreement is a bug, never a silent wrong claim.
-			if err := notClaimable(r, proj, now); err != nil {
+			if err := notClaimable(r, proj, now, false); err != nil {
 				return fault.Wrap(err, fault.CodeInternal, "candidate selection disagreed with status rules")
 			}
 		}
@@ -180,11 +185,25 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		werr = workspace.StoreToken(ctx, info.Path, string(token))
 	}
 	if werr != nil {
-		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.EndAttempt(attempt.ID, execution.EndReleased, e.now()) })
+		// The task, not the queue, is blocked: record the reason so
+		// automatic selection skips it and humans can see it, and end the
+		// attempt that never got a workspace.
+		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+			now := e.now()
+			if err := tx.EndAttempt(attempt.ID, execution.EndReleased, now); err != nil {
+				return err
+			}
+			return tx.SetWorkspaceError(sess.Task.ID, fault.MessageOf(werr), now)
+		})
 		e.notify()
-		return Session{}, werr
+		return Session{}, fault.New(fault.CodeWorkspaceUnavailable, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `at claim %s` succeeds or a planner runs `at update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
 	}
-	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.SetWorkspace(attempt.ID, info.Path, info.Branch) }); err != nil {
+	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if err := tx.SetWorkspace(attempt.ID, info.Path, info.Branch); err != nil {
+			return err
+		}
+		return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
+	}); err != nil {
 		return Session{}, err
 	}
 	sess.Workspace, sess.Branch, sess.WorkspaceDirty, sess.QuarantinedWorkspace = info.Path, info.Branch, info.Dirty, info.Quarantined
@@ -247,8 +266,14 @@ func regressionGate(proj project.Project) error {
 }
 
 // notClaimable maps a non-claimable status to the error an agent sees.
-func notClaimable(r sqlite.Record, proj project.Project, now time.Time) error {
-	st := r.Status(now, proj.MaxAttempts)
+// retryWorkspace lets an explicit claim try again on a task whose only
+// problem is a workspace that could not be prepared.
+func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWorkspace bool) error {
+	facts := r.Facts(now, proj.MaxAttempts)
+	if retryWorkspace {
+		facts.WorkspaceBlocked = false
+	}
+	st := task.Derive(facts)
 	if st.Claimable() {
 		return nil
 	}
@@ -269,10 +294,13 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time) error {
 	case task.StatusComplete:
 		return fault.New(fault.CodeTaskComplete, "%s is complete", id)
 	case task.StatusNeedsAttention:
-		if !verification.HasRequired(r.Task.Verification.TaskChecks) {
+		switch {
+		case !verification.HasRequired(r.Task.Verification.TaskChecks):
 			return fault.New(fault.CodeMissingVerification, "%s has no required task check (legacy or edited policy); a planner must `at update %s --check ...` before it can be claimed", id, id)
+		case facts.Exhausted:
+			return fault.New(fault.CodeNeedsAttention, "%s exhausted its attempts (%d failures); a planner must `at update %s --reset-attempts`", id, r.Failures, id)
 		}
-		return fault.New(fault.CodeNeedsAttention, "%s exhausted its attempts (%d failures); a planner must `at update %s --reset-attempts`", id, r.Failures, id)
+		return fault.New(fault.CodeNeedsAttention, "%s: workspace unusable (%s); fix the worktree and `at claim %s`, or `at update %s --reset-attempts`", id, r.WorkspaceError, id, id)
 	case task.StatusCooldown:
 		return fault.New(fault.CodeNoAvailableTask, "%s is in retry cooldown until %s", id, r.NextEligibleAt.Format(time.RFC3339))
 	}

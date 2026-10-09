@@ -95,19 +95,24 @@ type Record struct {
 	// LastError is the most recent environment or authority problem that
 	// stopped a verification without counting as a failure.
 	LastError string
+	// WorkspaceError is set when the task's worktree could not be prepared
+	// for a claim; the task is excluded from automatic selection until an
+	// explicit claim succeeds or a planner resets it.
+	WorkspaceError string
 }
 
 // Facts converts the record into the domain's status inputs.
 func (r Record) Facts(now time.Time, maxAttempts int) task.Facts {
 	f := task.Facts{
-		Group:         r.Task.Kind == task.KindGroup,
-		Archived:      r.Task.Archived(),
-		Complete:      r.CompletedAt != nil,
-		UnmetRequires: r.UnmetRequires,
-		Exhausted:     maxAttempts > 0 && r.Failures >= maxAttempts,
-		Unverifiable:  r.Task.Kind == task.KindTask && !verification.HasRequired(r.Task.Verification.TaskChecks),
-		CooldownUntil: r.NextEligibleAt,
-		Now:           now,
+		Group:            r.Task.Kind == task.KindGroup,
+		Archived:         r.Task.Archived(),
+		Complete:         r.CompletedAt != nil,
+		UnmetRequires:    r.UnmetRequires,
+		Exhausted:        maxAttempts > 0 && r.Failures >= maxAttempts,
+		Unverifiable:     r.Task.Kind == task.KindTask && !verification.HasRequired(r.Task.Verification.TaskChecks),
+		WorkspaceBlocked: r.WorkspaceError != "",
+		CooldownUntil:    r.NextEligibleAt,
+		Now:              now,
 	}
 	if r.Attempt != nil {
 		f.LeaseActive = r.Attempt.LeaseActive(now)
@@ -145,7 +150,7 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
-       t.completed_submission_id, t.last_failure_attempt_id, t.last_error
+       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
 LEFT JOIN submissions s ON s.id = t.latest_submission_id
@@ -173,7 +178,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
-		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError)
+		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError)
 	if err != nil {
 		return r, err
 	}
@@ -312,8 +317,15 @@ func (t *Tx) ArchiveTask(id task.ID, reason string, now time.Time) error {
 
 // ResetAttempts clears failure bookkeeping.
 func (t *Tx) ResetAttempts(id task.ID, now time.Time) error {
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = 0, next_eligible_at = 0, last_failure_attempt_id = 0, last_error = '', updated_at = ? WHERE id = ?`, ms(now), id)
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = 0, next_eligible_at = 0, last_failure_attempt_id = 0, last_error = '', workspace_error = '', updated_at = ? WHERE id = ?`, ms(now), id)
 	return wrapInternal(err, "reset attempts")
+}
+
+// SetWorkspaceError records why the task's worktree could not be
+// prepared ("" clears it).
+func (t *Tx) SetWorkspaceError(id task.ID, msg string, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET workspace_error = ?, updated_at = ? WHERE id = ?`, msg, ms(now), id)
+	return wrapInternal(err, "set workspace error")
 }
 
 // RecordFailure counts one failure of an attempt and sets the cooldown.
@@ -453,7 +465,8 @@ const claimableWhere = `
   AND (s.id IS NULL OR vr.status IN ('failed', 'error'))
   AND t.next_eligible_at <= ?
   AND (? = 0 OR t.failures < ?)
-  AND EXISTS (SELECT 1 FROM json_each(t.policy_json, '$.task_checks') WHERE json_extract(value, '$.required') = 1)`
+  AND EXISTS (SELECT 1 FROM json_each(t.policy_json, '$.task_checks') WHERE json_extract(value, '$.required') = 1)
+  AND t.workspace_error = ''`
 
 // ClaimCandidate picks the task automatic Claim should take: the oldest
 // claimable task, ties broken by ID. Deterministic; no priority field.

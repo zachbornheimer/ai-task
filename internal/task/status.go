@@ -52,6 +52,10 @@ type Facts struct {
 	// required check), so no attempt could ever complete it. A planner
 	// must repair the checks; it is never handed out.
 	Unverifiable bool
+	// WorkspaceBlocked: the task's worktree could not be prepared at the
+	// last claim. Automatic selection skips it so the queue keeps moving;
+	// an explicit claim retries; a planner reset clears it.
+	WorkspaceBlocked bool
 	// CooldownUntil, when after now, delays the next claim.
 	CooldownUntil time.Time
 	Now           time.Time
@@ -80,7 +84,7 @@ func Derive(f Facts) Status {
 		return StatusClaimed
 	case f.UnmetRequires > 0:
 		return StatusBlocked
-	case f.Exhausted, f.Unverifiable:
+	case f.Exhausted, f.Unverifiable, f.WorkspaceBlocked:
 		return StatusNeedsAttention
 	case f.VerificationFailed:
 		return StatusVerificationFailed

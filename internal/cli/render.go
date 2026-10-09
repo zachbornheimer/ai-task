@@ -279,6 +279,12 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 		}
 		fmt.Fprintln(w)
 	}
+	if v.AttentionReason != "" {
+		fmt.Fprintf(w, "\nATTENTION\n%s\n", v.AttentionReason)
+	}
+	if v.LastError != "" {
+		fmt.Fprintf(w, "\nLAST ERROR (not counted as a failure)\n%s\n", v.LastError)
+	}
 	if v.Failures > 0 {
 		fmt.Fprintf(w, "\nRETRIES\n%d failed attempt(s)", v.Failures)
 		if v.NextEligibleAt != nil {

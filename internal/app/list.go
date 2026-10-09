@@ -188,7 +188,7 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		}
 		runnable[cohort] = ok
 	}
-	var exhausted, blockedByExhausted int
+	var exhausted, blockedByExhausted, workspaceBlocked, unverifiable int
 	for _, r := range records {
 		if r.Task.Kind != task.KindTask {
 			continue
@@ -212,7 +212,14 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 				s.Active++
 			}
 		case st == task.StatusNeedsAttention:
-			exhausted++
+			switch facts := r.Facts(n, proj.MaxAttempts); {
+			case facts.Unverifiable:
+				unverifiable++
+			case facts.Exhausted:
+				exhausted++
+			default:
+				workspaceBlocked++
+			}
 		case st == task.StatusBlocked:
 			blockedByExhausted++
 		}
@@ -228,6 +235,12 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	if s.Stalled {
 		if exhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `at update <task> --reset-attempts`", exhausted))
+		}
+		if workspaceBlocked > 0 {
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have an unusable workspace; fix the worktree and `at claim <task>`, or `at update <task> --reset-attempts`", workspaceBlocked))
+		}
+		if unverifiable > 0 {
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `at update <task> --check ...`", unverifiable))
 		}
 		if c := s.Counts[task.StatusCooldown]; c > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) in retry cooldown", c))
