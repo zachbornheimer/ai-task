@@ -33,10 +33,9 @@
 7. **Cohort blame is coarse.** A failing shared regression sends every
    member back; a failing member check sends that member back.
 
-8. **Worktrees and branches are not pruned.** An agent's shell may still
-   be inside one, and the worktree is the next attempt's starting point.
-   Prune `at/<id>` worktrees and branches with your worktree tooling once
-   the task is complete.
+8. **Branches are not pruned.** `at prune` removes worktrees of complete
+   and archived tasks and quarantined directories; `at/<id>` branches
+   stay for history and are yours to delete.
 
 9. **Git only.** A project must be a repository (`at init` creates one).
    Evidence is bound to the verified revision; a trivial check (`true`)

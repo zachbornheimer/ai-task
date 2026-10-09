@@ -11,7 +11,8 @@ documented limitations, not silent gaps.
 | M0 preserve/correct the engine | done: fail-closed completion, no evidence reuse, prerequisite/contract/policy recheck at finalisation, regression namespace separation, token fencing and replay, CI workflow |
 | M1 planning/import API | done: keys, groups, atomic `Apply` with optimistic revision and idempotency, typed `List`/`Show`, deterministic selector, planner authority rules, `at add/update/show/list` with the circle glyphs |
 | M2 execution/verification contract | done: `claim`/`claim renew`/`claim release`/`log`/`verify task\|regression\|complete`, per-task worktrees (`at/<id>`, reused across attempts), worktree-resident tokens with quarantine of unended attempts' worktrees on takeover, mandatory required checks at `add` and `claim`, prerequisite learnings and last-failure evidence in the handoff, detached snapshots, finalisation transaction, stable JSON, `Claim(wait)` with `DONE`/`STALLED`/cancel, persistent failures and cooldowns |
-| M3 integration and coupled verification | done: guarded two-phase promotion with compare-and-swap and bounded retry on a moved base; durable leased cohort jobs with crash recovery; no DAG cycles for cohorts |
+| M3 integration and coupled verification | done: durable integration intents (fenced re-check, descriptor-owned promotion lock, compare-and-swap, completion keyed on the intent, reconciliation from Git after a crash) for single tasks and cohorts; durable leased cohort jobs with crash recovery, pinned submitted contracts, idempotent acknowledgement, per-member blame and capped promotion backoff; no DAG cycles for cohorts |
+| M5 corrective directive (P0-A..F, P1-A..H, Phase 3) | done on the work branch: required gates everywhere, quarantine on takeover, intents, fenced and classified failure accounting, no head-of-line blocking, one eligibility rule, payload-bound idempotency, category isolation, safe fast-forward into dirty checkouts, resilient heartbeat, progress glyphs, CLI corners, prune. See docs/invariants.md for the test behind each. |
 | M4 reference example | done: `examples/embedded_runner` with fake planner, reviewer and coding agent; its test drains a seven-task graph (including a cohort) with four workers |
 
 ## Acceptance matrix
@@ -59,10 +60,10 @@ documented limitations, not silent gaps.
 
 ## Unsupported or compromised in this implementation
 
-- **Parallel task/regression execution.** Both suites run sequentially on
-  the same snapshot. Nothing can prove two arbitrary suites are isolated,
-  so the safe default is sequential; a declared-isolation flag is a future
-  addition.
+- **Parallel task/regression execution.** The two suites run
+  sequentially, each on its own snapshot of the revision; nothing can
+  prove two arbitrary suites are safe to run at once, so a
+  declared-isolation flag is a future addition.
 - **Host-side process control.** The engine renews the lease on every
   authenticated command, but it cannot stop a stale agent process from
   editing files. Per-task worktrees
@@ -76,14 +77,16 @@ documented limitations, not silent gaps.
 - **Check side effects.** Checks run in a disposable snapshot with
   `GOFLAGS=-count=1`; the engine cannot prove a check does not touch
   shared services or write outside the snapshot.
-- **Worktree cleanup.** Task worktrees and `at/<id>` branches are kept
-  (the next attempt reuses them; an agent's shell may still be inside
-  one). No automatic pruning.
+- **Worktree cleanup.** A task's quarantined directories are removed when
+  it completes; `at prune` removes worktrees of complete and archived
+  tasks and idle tasks' quarantines. `at/<id>` branches are kept.
 - **Git only.** Non-Git projects were removed; `at init` creates a
   repository when needed.
 - **Regression policy edits do not re-judge completed tasks**; they apply
   to future runs. Task-contract edits on completed tasks are rejected.
-- **Cohort failure attribution.** A failing shared regression sends every
-  member back; a failing member task check sends that member back and
-  leaves passing peers waiting. No automatic blame beyond that.
+- **Cohort failure attribution.** A failing member task check sends that
+  member back (one counted failure) while passing peers wait; a failing
+  shared regression sends every member back with the evidence and charges
+  nobody; a late conflict sends back only the member it concerns. Which
+  member broke a shared suite is not inferred.
 - **Single host.** SQLite on a local filesystem.
