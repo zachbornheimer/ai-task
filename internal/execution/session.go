@@ -96,12 +96,29 @@ type Attempt struct {
 	Seq            int
 	StartedAt      time.Time
 	LeaseExpiresAt time.Time
-	EndedAt        *time.Time
-	EndReason      EndReason
+	// Lease is the duration granted at claim; renewals extend by it.
+	Lease     time.Duration
+	EndedAt   *time.Time
+	EndReason EndReason
 	// WorkspacePath/WorkspaceBranch name the attempt's private Git
 	// worktree when the project is a repository.
 	WorkspacePath   string
 	WorkspaceBranch string
+}
+
+// RenewedExpiry is the expiry a renewal at now grants: never earlier than
+// the current expiry (proof of life never shortens authority), and the
+// attempt's own lease length ahead of now otherwise.
+func (a Attempt) RenewedExpiry(now time.Time) time.Time {
+	lease := a.Lease
+	if lease <= 0 {
+		lease = DefaultLease
+	}
+	next := now.Add(lease)
+	if next.Before(a.LeaseExpiresAt) {
+		return a.LeaseExpiresAt
+	}
+	return next
 }
 
 // LeaseActive reports whether the attempt currently holds authority.

@@ -157,7 +157,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		if prev := r.Attempt; prev != nil && prev.EndedAt == nil {
 			quarantineSeq = prev.Seq
 		}
-		attempt, err = tx.StartAttempt(r.Task.ID, r.Attempt, token.Digest(), now, now.Add(lease))
+		attempt, err = tx.StartAttempt(r.Task.ID, r.Attempt, token.Digest(), now, lease)
 		if err != nil {
 			return err
 		}
@@ -335,8 +335,7 @@ func (e *Engine) touch(tx *sqlite.Tx, token execution.Token, now time.Time) (exe
 	if err != nil {
 		return a, err
 	}
-	expires := now.Add(execution.DefaultLease)
-	if expires.After(a.LeaseExpiresAt) {
+	if expires := a.RenewedExpiry(now); expires.After(a.LeaseExpiresAt) {
 		if err := tx.RenewLease(a.ID, expires); err != nil {
 			return a, err
 		}
@@ -345,16 +344,18 @@ func (e *Engine) touch(tx *sqlite.Tx, token execution.Token, now time.Time) (exe
 	return a, nil
 }
 
-// Renew extends the lease of a live session and returns the new expiry.
+// Renew extends the lease of a live session by the attempt's own lease
+// length and returns the new expiry. It never shortens a lease.
 func (e *Engine) Renew(ctx context.Context, token execution.Token) (time.Time, error) {
 	now := e.now()
-	expires := now.Add(execution.DefaultLease)
+	var expires time.Time
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		a, err := e.authorize(tx, token, now)
+		a, err := e.touch(tx, token, now)
 		if err != nil {
 			return err
 		}
-		return tx.RenewLease(a.ID, expires)
+		expires = a.LeaseExpiresAt
+		return nil
 	})
 	return expires, err
 }
@@ -455,26 +456,64 @@ func (e *Engine) Whoami(ctx context.Context, token execution.Token) (TaskView, e
 	return v, err
 }
 
-// heartbeat renews a session periodically while a long operation runs,
-// so an expired claim never finalises over a successor. It stops on the
-// first failure; the operation's own fenced writes then fail too.
-func (e *Engine) heartbeat(ctx context.Context, token execution.Token) (stop func()) {
+// heartbeat renews a session periodically while a long operation runs.
+// It returns the context the operation's external work (check processes)
+// must use: a terminal authority error (superseded, expired, finished)
+// cancels it at once so no process keeps running for a claim that is
+// gone, and a transient error (busy database) is retried sooner than the
+// normal interval. stop ends the heartbeat and returns the terminal error,
+// if any, so the caller can report why the work was aborted.
+func (e *Engine) heartbeat(ctx context.Context, token execution.Token) (context.Context, func() error) {
+	opCtx, cancelOp := context.WithCancel(ctx)
 	hctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	var terminal error
 	go func() {
 		defer close(done)
-		t := time.NewTicker(execution.HeartbeatInterval)
+		interval := e.heartbeatEvery
+		t := time.NewTimer(interval)
 		defer t.Stop()
+		var expiry time.Time
 		for {
 			select {
 			case <-hctx.Done():
 				return
 			case <-t.C:
-				if _, err := e.Renew(hctx, token); err != nil && !errors.Is(err, context.Canceled) {
+			}
+			err := e.fault("heartbeat:renew")
+			if err == nil {
+				expiry, err = e.Renew(hctx, token)
+			}
+			switch {
+			case err == nil:
+				t.Reset(interval)
+			case errors.Is(err, context.Canceled):
+				return
+			case terminalAuthority(err):
+				terminal = err
+				cancelOp()
+				return
+			default:
+				// Transient: retry sooner. If the lease really ran out
+				// meanwhile, the next fenced write refuses anyway; stop the
+				// external work now rather than let it outlive the claim.
+				if !expiry.IsZero() && !e.now().Before(expiry) {
+					terminal = fault.Wrap(err, fault.CodeLeaseExpired, "lease renewal kept failing until the lease expired")
+					cancelOp()
 					return
 				}
+				t.Reset(interval / 5)
 			}
 		}
 	}()
-	return func() { cancel(); <-done }
+	return opCtx, func() error { cancel(); <-done; cancelOp(); return terminal }
+}
+
+// terminalAuthority reports errors no retry can fix.
+func terminalAuthority(err error) bool {
+	switch fault.CodeOf(err) {
+	case fault.CodeSessionSuperseded, fault.CodeSessionFinished, fault.CodeLeaseExpired, fault.CodeInvalidSession:
+		return true
+	}
+	return false
 }

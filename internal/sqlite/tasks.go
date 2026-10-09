@@ -146,7 +146,7 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        t.completed_at, t.created_at, t.updated_at,
        (SELECT count(*) FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
          WHERE d.task_id = t.id AND r.completed_at IS NULL) AS unmet,
-       a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch,
+       a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch, a.lease_ms,
        s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
@@ -165,7 +165,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var constraints, policy string
 	var archived, completed sql.NullInt64
 	var created, updated, nextEligible int64
-	var aID, aSeq, aStarted, aExpires, aEnded sql.NullInt64
+	var aID, aSeq, aStarted, aExpires, aEnded, aLease sql.NullInt64
 	var aReason, aPath, aBranch sql.NullString
 	var sID, sAttempt, sAttemptSeq, sAt sql.NullInt64
 	var sRev, sCohort sql.NullString
@@ -175,7 +175,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Kind, &key, &parent, &r.Task.Description, &r.Task.Outcome, &constraints, &policy,
 		&r.Task.Cohort, &r.Task.ContractRev, &archived, &r.Task.ArchiveReason, &r.Failures, &nextEligible,
 		&completed, &created, &updated, &r.UnmetRequires,
-		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch,
+		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch, &aLease,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
 		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError)
@@ -203,6 +203,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 			StartedAt: fromMS(aStarted.Int64), LeaseExpiresAt: fromMS(aExpires.Int64),
 			EndedAt: nullMS(aEnded), EndReason: execution.EndReason(aReason.String),
 			WorkspacePath: aPath.String, WorkspaceBranch: aBranch.String,
+			Lease: time.Duration(aLease.Int64) * time.Millisecond,
 		}
 	}
 	if sID.Valid {

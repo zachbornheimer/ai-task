@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
@@ -39,6 +40,9 @@ type Config struct {
 	// when no in-process notification arrives (other processes may have
 	// changed the store). Zero means 2s.
 	PollInterval time.Duration
+	// HeartbeatInterval is how often a long operation renews its lease.
+	// Zero means execution.HeartbeatInterval.
+	HeartbeatInterval time.Duration
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -49,6 +53,8 @@ type Engine struct {
 	newID  func() task.ID
 	wsRoot string
 	poll   time.Duration
+	// heartbeatEvery is the lease renewal interval of long operations.
+	heartbeatEvery time.Duration
 
 	mu      sync.Mutex
 	changed chan struct{}
@@ -86,11 +92,15 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if poll <= 0 {
 		poll = 2 * time.Second
 	}
+	hb := cfg.HeartbeatInterval
+	if hb <= 0 {
+		hb = execution.HeartbeatInterval
+	}
 	// Storage keeps millisecond precision; truncating here keeps values the
 	// caller sees identical to what a later read returns.
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
-		newID: newID, wsRoot: wsRoot, poll: poll, changed: make(chan struct{}),
+		newID: newID, wsRoot: wsRoot, poll: poll, heartbeatEvery: hb, changed: make(chan struct{}),
 	}, nil
 }
 

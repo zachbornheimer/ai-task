@@ -118,10 +118,12 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	stop := e.heartbeat(ctx, token)
+	opCtx, stop := e.heartbeat(ctx, token)
 	fence := func(tx *sqlite.Tx) error { _, err := e.authorize(tx, token, e.now()); return err }
-	evidence, err := e.runChecks(ctx, p.dir, policy, runID, revision, fence)
-	stop()
+	evidence, err := e.runChecks(opCtx, p.dir, policy, runID, revision, fence)
+	if terr := stop(); terr != nil && err != nil {
+		err = fault.Wrap(terr, fault.CodeOf(terr), "verification aborted: claim authority was lost while checks ran")
+	}
 	res := VerifyResult{TaskID: p.rec.Task.ID, Mode: mode, RunID: runID, Revision: revision, Evidence: evidence}
 	if err != nil {
 		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(runID, sqlite.RunError, err.Error(), e.now()) })
@@ -236,6 +238,9 @@ type finalRun struct {
 	runID        int64
 	contractRev  int
 	regressionID string
+	// checkCtx is cancelled by the heartbeat when authority is lost, so
+	// check processes never outlive the claim.
+	checkCtx context.Context
 }
 
 func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (VerifyResult, error) {
@@ -292,9 +297,12 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		return VerifyResult{}, err
 	}
 	e.notify()
-	stop := e.heartbeat(ctx, token)
-	defer stop()
+	opCtx, stop := e.heartbeat(ctx, token)
+	fr.checkCtx = opCtx
 	res, err := e.executeFinal(ctx, fr)
+	if terr := stop(); terr != nil && err != nil && opCtx.Err() != nil && ctx.Err() == nil {
+		err = fault.Wrap(terr, fault.CodeOf(terr), "verification aborted: claim authority was lost while checks ran")
+	}
 	e.notify()
 	return res, err
 }
@@ -351,7 +359,11 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	if err != nil {
 		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
 	}
-	evidence, err := e.runChecks(ctx, dir, fr.policy, fr.runID, fr.revision, fence)
+	checkCtx := fr.checkCtx
+	if checkCtx == nil {
+		checkCtx = ctx
+	}
+	evidence, err := e.runChecks(checkCtx, dir, fr.policy, fr.runID, fr.revision, fence)
 	cleanup()
 	if err != nil {
 		res.Evidence = evidence
@@ -427,7 +439,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 				cand.Cleanup()
 				return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
 			}
-			more, err := e.runChecks(ctx, snap, fr.policy, fr.runID, cand.Revision, fence)
+			more, err := e.runChecks(checkCtx, snap, fr.policy, fr.runID, cand.Revision, fence)
 			snapCleanup()
 			if err != nil {
 				cand.Cleanup()

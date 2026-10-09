@@ -178,7 +178,7 @@ func (e *Engine) claimCohortJob(ctx context.Context, pid project.ID) (cohortJob,
 // runs each member's task checks and the regression checks fresh on it,
 // promotes when required, and finalises eligible members atomically.
 func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
-	stop := e.jobHeartbeat(ctx, job)
+	checkCtx, stop := e.jobHeartbeat(ctx, job)
 	defer stop()
 	fence := func(tx *sqlite.Tx) error {
 		j, err := tx.GetJob(job.id)
@@ -242,7 +242,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 			_ = finishAll(sqlite.RunError, err.Error(), false)
 			return err
 		}
-		outcome, err := e.judgeCohort(ctx, job, dir, candidate, evidence, fence)
+		outcome, err := e.judgeCohort(checkCtx, job, dir, candidate, evidence, fence)
 		cleanup()
 		if err != nil {
 			cand.Cleanup()
@@ -402,29 +402,41 @@ func (e *Engine) finalizeCohortDirect(ctx context.Context, job cohortJob, candid
 	return nil
 }
 
-// jobHeartbeat renews the verifier's job lease while checks run.
-func (e *Engine) jobHeartbeat(ctx context.Context, job cohortJob) (stop func()) {
+// jobHeartbeat renews the verifier's job lease while checks run. Like
+// heartbeat, it returns the context check processes must use: lost
+// ownership cancels it at once; a transient error is retried sooner.
+func (e *Engine) jobHeartbeat(ctx context.Context, job cohortJob) (context.Context, func()) {
+	opCtx, cancelOp := context.WithCancel(ctx)
 	hctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		t := time.NewTicker(execution.HeartbeatInterval)
+		interval := e.heartbeatEvery
+		t := time.NewTimer(interval)
 		defer t.Stop()
 		for {
 			select {
 			case <-hctx.Done():
 				return
 			case <-t.C:
-				err := e.store.Write(hctx, func(tx *sqlite.Tx) error {
-					return tx.RenewJob(job.id, job.owner.Digest(), e.now().Add(execution.DefaultLease))
-				})
-				if err != nil {
-					return
-				}
+			}
+			err := e.store.Write(hctx, func(tx *sqlite.Tx) error {
+				return tx.RenewJob(job.id, job.owner.Digest(), e.now().Add(execution.DefaultLease))
+			})
+			switch {
+			case err == nil:
+				t.Reset(interval)
+			case errors.Is(err, context.Canceled):
+				return
+			case terminalAuthority(err):
+				cancelOp()
+				return
+			default:
+				t.Reset(interval / 5)
 			}
 		}
 	}()
-	return func() { cancel(); <-done }
+	return opCtx, func() { cancel(); <-done; cancelOp() }
 }
 
 // judgeCohort runs every member's task checks and the shared regression
