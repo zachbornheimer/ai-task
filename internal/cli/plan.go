@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ func init() {
 	register("show", "show a task or group: at show REF [--full]", runShow)
 	register("list", "list the plan: at list [ready|blocked|all|archived]", runList)
 	register("status", "project summary: counts, claimable, active, done, stalled", runStatus)
+	register("prune", "remove worktrees of complete/archived tasks and quarantined directories of idle tasks", runPrune)
 }
 
 // stringList collects a repeatable flag.
@@ -198,11 +200,16 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	})
 }
 
-// parseCheck reads "[id:] command args..." into a CheckSpec.
+var checkIDPrefix = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// parseCheck reads "[id:] command args..." into a CheckSpec. A label is
+// recognised only as "<id>: " (an id followed by a colon and a space), so
+// a command such as "https://host/x" is never split at its colon.
 func parseCheck(raw string, n int, required bool) (verification.CheckSpec, error) {
 	id := fmt.Sprintf("check%d", n)
+	raw = strings.TrimSpace(raw)
 	cmd := raw
-	if i := strings.Index(raw, ":"); i > 0 && !strings.ContainsAny(raw[:i], " \t/\\") {
+	if i := strings.Index(raw, ":"); i > 0 && i+1 < len(raw) && (raw[i+1] == ' ' || raw[i+1] == '\t') && checkIDPrefix.MatchString(raw[:i]) {
 		id, cmd = raw[:i], raw[i+1:]
 	}
 	argv, err := splitWords(cmd)
@@ -248,6 +255,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
+		if len(checks)+len(optionalChecks)+len(requires)+len(blocks)+len(accept)+len(constraints) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" {
+			return usage("--group takes only --key and --parent; checks, prerequisites, blockers, cohort, outcome, acceptance and constraints belong to tasks")
+		}
 		op = plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent)}
 	} else {
 		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort}
@@ -352,6 +362,9 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	if *archive {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
+		}
+		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires) > 0 || *reset || *withdraw {
+			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
 	} else {
@@ -518,3 +531,27 @@ func runStatus(ctx context.Context, c *ctxt, args []string) error {
 }
 
 var _ = time.Second
+
+func runPrune(ctx context.Context, c *ctxt, args []string) error {
+	if err := c.parse(args); err != nil {
+		return err
+	}
+	pid, err := c.resolveProject(ctx)
+	if err != nil {
+		return err
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := e.PruneWorkspaces(ctx, pid)
+	if err != nil {
+		return err
+	}
+	return c.emit(res, func(w io.Writer) {
+		fmt.Fprintf(w, "✓ Pruned %d director%s\n", len(res.Removed), map[bool]string{true: "y", false: "ies"}[len(res.Removed) == 1])
+		for _, p := range res.Removed {
+			fmt.Fprintf(w, "  - %s\n", p)
+		}
+	})
+}

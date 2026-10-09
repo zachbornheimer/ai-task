@@ -88,10 +88,36 @@ func (c *ctxt) guardWorkspace(ctx context.Context, tok execution.Token) error {
 	return nil
 }
 
+// claimSubcommand finds "renew" or "release" among args, however flags
+// are interleaved (`at claim --json renew` dispatches like `at claim
+// renew --json`), and returns the remaining args.
+func claimSubcommand(args []string) (string, []string) {
+	valueFlags := map[string]bool{"--lease": true, "--session": true, "--note": true, "--db": true, "--project": true, "--output": true}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "renew" || a == "release" {
+			return a, append(append([]string{}, args[:i]...), args[i+1:]...)
+		}
+		if a == "--" {
+			return "", args
+		}
+		if strings.HasPrefix(a, "-") {
+			if valueFlags[strings.TrimPrefix(a, "-")] || valueFlags[a] {
+				if !strings.Contains(a, "=") {
+					i++ // skip the flag's value
+				}
+			}
+			continue
+		}
+		return "", args // the first positional is a task reference
+	}
+	return "", args
+}
+
 func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	// Subcommands renew/release take the token explicitly.
-	if len(args) > 0 && (args[0] == "renew" || args[0] == "release") {
-		return c.claimSub(ctx, args[0], args[1:])
+	if sub, rest := claimSubcommand(args); sub != "" {
+		return c.claimSub(ctx, sub, rest)
 	}
 	wait := c.fs.Bool("wait", false, "block until work is claimable, the project is done, or it is stalled")
 	lease := c.fs.Duration("lease", 0, "lease duration (default 30m, min 5m, max 4h; every authenticated command renews it)")

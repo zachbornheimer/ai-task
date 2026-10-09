@@ -14,6 +14,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
+	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -478,5 +479,33 @@ func TestCategoriesDoNotShareASnapshot(t *testing.T) {
 	f.commit(s.Workspace, "artifact.txt", "committed")
 	if res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete); err != nil || !res.Completed {
 		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+// A diagnostic run left `running` by a dead process is closed once its
+// attempt is gone, without any task failure.
+func TestOrphanedDiagnosticRunsAreReconciled(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	s := f.claim(string(a))
+	db, err := sql.Open("sqlite", f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var attemptID int64
+	if err := db.QueryRow(`SELECT id FROM execution_attempts WHERE task_id = ? ORDER BY seq DESC LIMIT 1`, a).Scan(&attemptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO verification_runs (task_id, attempt_id, mode, status, policy_digest, created_at, started_at) VALUES (?, ?, 'task', 'running', 'x', 1, 1)`, a, attemptID); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true); v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunRunning {
+		t.Fatal("setup: diagnostic run not visible as running")
+	}
+	f.e.Release(f.ctx, s.Token, app.ReleaseOptions{})
+	v, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true)
+	if v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunError || v.Failures != 0 {
+		t.Fatalf("orphaned diagnostic run: %+v failures=%d", v.Verification.Task, v.Failures)
 	}
 }

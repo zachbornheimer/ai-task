@@ -220,7 +220,12 @@ func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	if !errors.As(err, &fe) || fe.Details == nil {
 		t.Fatal("stall details missing")
 	}
-	f.apply(plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true, TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-x", "true", true)})})
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true}}}); !fault.Is(err, fault.CodePlanConflict) {
+		t.Fatalf("reset without planner authority: %v", err)
+	}
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true, TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-x", "true", true)})}}}); err != nil {
+		t.Fatal(err)
+	}
 	// The last judgement stays visible, but the task is claimable again.
 	if st := f.status(string(x)); !st.Claimable() || st != task.StatusVerificationFailed {
 		t.Fatalf("%s", st)

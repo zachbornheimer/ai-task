@@ -83,6 +83,9 @@ func Main(env Env) int {
 	}
 	rest := top.Args()
 	if len(rest) == 0 {
+		if c.jsonOut() {
+			return c.usageError(fmt.Errorf("a command is required; `at help` lists them"))
+		}
 		c.printHelp()
 		return ExitUsage
 	}
@@ -273,8 +276,25 @@ func register(name, summary string, run func(ctx context.Context, c *ctxt, args 
 
 func init() {
 	register("help", "show this help", func(_ context.Context, c *ctxt, _ []string) error {
-		c.printHelp()
-		return nil
+		type cmd struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		}
+		type help struct {
+			Usage       string   `json:"usage"`
+			Commands    []cmd    `json:"commands"`
+			Environment []string `json:"environment"`
+		}
+		names := make([]string, 0, len(commands))
+		for n := range commands {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		h := help{Usage: "at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]", Environment: []string{"AT_DB", "AT_PROJECT", "AT_OUTPUT=json", "AT_SESSION"}}
+		for _, n := range names {
+			h.Commands = append(h.Commands, cmd{n, commands[n].summary})
+		}
+		return c.emit(h, func(io.Writer) { c.printHelp() })
 	})
 	register("version", "print the version", func(_ context.Context, c *ctxt, _ []string) error {
 		return c.emit(map[string]string{"version": Version}, func(w io.Writer) { fmt.Fprintln(w, Version) })

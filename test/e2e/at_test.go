@@ -400,3 +400,52 @@ func TestDiscoveredBlockerFromWorktree(t *testing.T) {
 		t.Fatalf("release: %s %s", r.stdout, r.stderr)
 	}
 }
+
+// CLI corners: subcommand dispatch with leading global flags, check
+// labels versus colons in commands, JSON envelopes for help and a bare
+// invocation, incompatible flags refused, reset-attempts needs planner
+// authority, and prune.
+func TestCLICorners(t *testing.T) {
+	e := gitEnv(t)
+	// Check labels: "<id>: " is a label; a colon inside a command (a URL) is
+	// not; surrounding whitespace is ignored.
+	y := taskID(e.ok("add", "y", "--key", "y", "--check", "u: true", "--check", "https://example.com/health", "--check", "  spaced: true"))
+	checks := e.ok("show", y)["task_checks"].([]any)
+	ids := []string{}
+	for _, c := range checks {
+		ids = append(ids, c.(map[string]any)["id"].(string))
+	}
+	if strings.Join(ids, ",") != "u,check2,spaced" {
+		t.Fatalf("check ids: %v", ids)
+	}
+	if cmd := checks[1].(map[string]any)["command"].([]any); len(cmd) != 1 || cmd[0] != "https://example.com/health" {
+		t.Fatalf("url command split: %v", cmd)
+	}
+	x := taskID(e.ok("add", "x", "--key", "x", "--check", "u: true"))
+	s := e.ok("claim", x)
+	if r := e.run("claim", "--json", "renew", s["token"].(string)); r.code != 0 || r.env["result"].(map[string]any)["lease_until"] == nil {
+		t.Fatalf("claim --json renew: %s %s", r.stdout, r.stderr)
+	}
+	if r := e.run("help"); r.code != 0 || r.env["result"].(map[string]any)["commands"] == nil {
+		t.Fatalf("help envelope: %s", r.stdout)
+	}
+	if r := e.run(); r.code != 2 || r.env == nil || r.env["error"].(map[string]any)["code"] != "INVALID_INPUT" {
+		t.Fatalf("bare at envelope: code=%d %s", r.code, r.stdout)
+	}
+	if r := e.run("add", "G", "--group", "--check", "u: true"); r.code != 2 {
+		t.Fatalf("--group with --check accepted: %s", r.stdout)
+	}
+	if r := e.run("update", "x", "--archive", "--reason", "r", "--title", "nope"); r.code != 2 {
+		t.Fatalf("--archive with edits accepted: %s", r.stdout)
+	}
+	e.fails("PLAN_CONFLICT", "update", "x", "--reset-attempts")
+	e.ok("update", "x", "--reset-attempts", "--planner")
+	e.commit(s["workspace"].(string), "x.txt", "x")
+	if r := e.runIn(s["workspace"].(string), "", nil, "verify", "complete"); r.code != 0 {
+		t.Fatalf("%s %s", r.stdout, r.stderr)
+	}
+	pr := e.ok("prune")
+	if removed := pr["removed"].([]any); len(removed) != 1 || removed[0].(string) != s["workspace"].(string) {
+		t.Fatalf("prune: %v", pr)
+	}
+}

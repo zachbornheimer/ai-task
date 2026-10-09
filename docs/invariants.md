@@ -81,6 +81,14 @@ claimed, verifying, and submissions whose cohort can be verified.
   `TestCohortLateConflictBlamesOnlyThatMember`,
   `TestCohortRegressionFailureChargesNobody`,
   `TestCohortPromotionBackoffIsBounded`)
+- A diagnostic run left running by a dead process is closed by
+  reconciliation without a task failure.
+  (`TestOrphanedDiagnosticRunsAreReconciled`)
+- A group whose members are all complete can be archived; the members
+  keep their history and the group appears in `list archived`.
+  (`TestArchiveGroupWithCompletedMembers`)
+- Quarantined directories are removed on completion; prune never touches
+  a live claim's worktree or any branch. (`TestPruneWorkspaces`)
 - Glyphs reflect historical progress: ○ never started, ◐ started but not
   complete (including awaiting verification, failed, and a blocked task
   with a past attempt), ● complete; a group is ◐ as soon as one member

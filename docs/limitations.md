@@ -47,8 +47,10 @@
     database. A stale process whose attempt expired is contained by
     quarantine: the next claim moves its worktree aside, detached, so it
     keeps only its own expired token and its commits never reach the
-    branch. It still burns CPU and disk until the host stops it, and the
-    quarantined directories (`<path>.stale-<seq>`) are kept until pruned.
+    branch. It still burns CPU and disk until the host stops it; its
+    quarantined directory (`<path>.stale-<seq>`) is removed when the task
+    completes or by `at prune`, which is the operator's decision to stop
+    caring about that process.
     A lost token leaves the task claimed until the lease (at most 4
     hours) expires; that is accepted.
 

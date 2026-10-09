@@ -83,8 +83,12 @@ stale `--expect-rev`), a different request under the same key is
   and make a running verification fail closed.
 - `--archive --reason ".."` is soft deletion with a recorded reason
   (shown as `archive_reason`): rejected for claimed/completed tasks and
-  when live dependents or members remain unless the same batch repairs
-  them.
+  when live dependents or unfinished members remain unless the same batch
+  repairs them; a group whose members are all complete can be archived
+  and keeps their history (`list archived` shows it). `--archive` is not
+  combined with other edits, and `--group` takes only `--key`/`--parent`;
+  both are usage errors otherwise.
+- `--reset-attempts` restarts a retry budget and needs `--planner`.
 - `add`/`update` results may carry `warnings` (keyed by task reference):
   advisory planning hints such as a check that looks like a no-op.
 - There is no status flag of any kind. Status is derived.
@@ -200,8 +204,12 @@ at show REF [--full]        glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANC
                             TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
 at list                     hierarchy of open work (groups indented; blocked tasks show requires:)
 at list ready | blocked | all | archived
-at status                   counts, claimable, active, pending cohorts, done, stalled with reasons
+at status                   counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
+at prune                    remove worktrees of complete/archived tasks and quarantined directories of idle tasks
 ```
+
+`AT_OUTPUT=json at help` prints an envelope listing the commands; a bare
+`at` in JSON mode prints an `INVALID_INPUT` envelope (exit 2).
 
 Glyphs are progress, not liveness: `○` never started (ready or blocked
 work with no attempt yet), `◐` started but not complete (claimed,
@@ -244,6 +252,10 @@ commits lands on a detached HEAD. The claim reports the quarantine as
 `quarantined_workspace` (with `workspace_dirty` when uncommitted edits
 are in there) so the new attempt or a human can salvage them. A clean
 handoff (`release`, completion) reuses the worktree without quarantine.
+Quarantined directories are removed when the task completes; `at prune`
+removes them for idle tasks and removes the worktrees of complete and
+archived tasks (branches are kept; a live claim's worktree is never
+touched).
 A lost token is a stuck task until the lease expires; that is by design.
 
 ## The tiny agent prompt

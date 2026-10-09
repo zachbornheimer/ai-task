@@ -563,6 +563,8 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		if err := e.fault("final:after-complete"); err != nil {
 			return res, err
 		}
+		// The task is done: its quarantined directories are history.
+		_, _ = mgr.Prune(ctx, string(fr.rec.Task.ID), true)
 		return done(final)
 	}
 	return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, "target branch kept moving; verify again", evidence)

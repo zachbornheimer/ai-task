@@ -118,6 +118,29 @@ func (m Manager) BranchExists(ctx context.Context, branch string) bool {
 	return err == nil
 }
 
+// Prune removes a task's worktrees: every quarantined `<path>.stale-<n>`
+// directory, and the live worktree too unless keepLive. Branches are
+// kept. It is best-effort and reports the directories removed.
+func (m Manager) Prune(ctx context.Context, taskID string, keepLive bool) ([]string, error) {
+	live := filepath.Join(m.Root, taskID)
+	matches, _ := filepath.Glob(live + ".stale-*")
+	if !keepLive {
+		if _, err := os.Stat(live); err == nil {
+			matches = append(matches, live)
+		}
+	}
+	var removed []string
+	for _, path := range matches {
+		_, _ = git(ctx, m.Repo, "worktree", "remove", "--force", path)
+		if err := os.RemoveAll(path); err != nil {
+			return removed, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "remove %s", path)
+		}
+		removed = append(removed, path)
+	}
+	_, _ = git(ctx, m.Repo, "worktree", "prune")
+	return removed, nil
+}
+
 // Contains reports whether revision is an ancestor of (or equal to) the
 // tip of branch, i.e. whether a promotion of revision onto branch has
 // happened.

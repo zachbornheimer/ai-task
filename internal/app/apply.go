@@ -639,6 +639,9 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	if c.ResetAttempts {
+		if !a.cs.Planner {
+			return fault.New(fault.CodePlanConflict, "%s: resetting attempts restarts a retry budget and needs planner authority (--planner)", t.ID)
+		}
 		if err := a.tx.ResetAttempts(t.ID, a.now); err != nil {
 			return err
 		}
@@ -698,8 +701,16 @@ func (a *applier) checkArchives() error {
 		if err != nil {
 			return err
 		}
-		if len(children) > 0 {
-			return fault.New(fault.CodePlanConflict, "archiving group %s would orphan %d member(s); move or archive them in the same change set", id, len(children))
+		// Completed members keep their history attached to the archived
+		// group; only live, unfinished members would be orphaned.
+		live := 0
+		for _, c := range children {
+			if c.CompletedAt == nil {
+				live++
+			}
+		}
+		if live > 0 {
+			return fault.New(fault.CodePlanConflict, "archiving group %s would orphan %d unfinished member(s); move or archive them in the same change set", id, live)
 		}
 	}
 	return nil

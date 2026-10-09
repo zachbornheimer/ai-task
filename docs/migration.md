@@ -74,7 +74,13 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
 - `--archive` needs `--reason`; `--withdraw-submission` (with `--planner`)
   withdraws a cohort member's pending submission so its contract can
   change.
-- JSON output is compact by default (`--pretty` indents).
+- JSON output is compact by default (`--pretty` indents); `help` and a
+  bare `at` print envelopes in JSON mode.
+- `--reset-attempts` needs `--planner`; `--group` and `--archive` refuse
+  unrelated flags; a check label is only `<id>: ` (a colon in a command
+  is left alone).
+- `at prune` removes worktrees of complete/archived tasks and quarantined
+  directories; completion removes a task's own quarantines.
 - Completion re-checks prerequisites, contract revision, regression policy,
   and the run's own evidence in the finalising transaction.
 - Prerequisites cannot be added to completed tasks; completed tasks cannot

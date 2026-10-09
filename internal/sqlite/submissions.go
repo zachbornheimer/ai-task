@@ -249,6 +249,15 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 		return 0, wrapInternal(err, "reconcile final runs")
 	}
 	n, _ := res.RowsAffected()
+	// Diagnostic runs whose attempt ended or expired while they were
+	// recorded running: the process is gone; close them (no task failure).
+	resD, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the attempt ended or its lease expired before the diagnostic run finished'
+		WHERE status = 'running' AND mode IN ('task', 'regression') AND attempt_id IN (SELECT id FROM execution_attempts WHERE ended_at IS NOT NULL OR lease_expires_at <= ?)`, ms(now), ms(now))
+	if err != nil {
+		return 0, wrapInternal(err, "reconcile diagnostic runs")
+	}
+	nD, _ := resD.RowsAffected()
+	n += nD
 	res2, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'pending', summary = 'verifier interrupted; waiting for a new verifier'
 		WHERE status = 'running' AND mode = 'cohort' AND job_id IN (SELECT id FROM verification_jobs WHERE status = 'running' AND lease_expires_at <= ?)`, ms(now))
 	if err != nil {

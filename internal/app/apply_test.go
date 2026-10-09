@@ -277,3 +277,24 @@ func TestIdempotencyIsBoundToThePayload(t *testing.T) {
 		t.Fatal("revision moved")
 	}
 }
+
+// A group whose remaining members are all complete can be archived; the
+// completed members keep their history attached.
+func TestArchiveGroupWithCompletedMembers(t *testing.T) {
+	f := newFixture(t)
+	res := f.apply(plan.AddGroup{Key: "g", Title: "G"}, plan.AddTask{Key: "done", Title: "done", Parent: "g", TaskChecks: okChecks()}, plan.AddTask{Key: "open", Title: "open", Parent: "g", TaskChecks: okChecks()})
+	f.complete(f.claim(string(res.Created["done"])))
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "g", Reason: "reorg"}}})
+	wantCode(t, err, fault.CodePlanConflict) // "open" would be orphaned
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: "open", Parent: refptr("")}, plan.ArchiveTask{Target: "g", Reason: "reorg"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if f.status("g") != task.StatusArchived || f.status("done") != task.StatusComplete {
+		t.Fatalf("g=%s done=%s", f.status("g"), f.status("done"))
+	}
+	all, _ := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterAll})
+	archived, _ := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterArchived})
+	if len(all.Groups) != 0 || len(archived.Groups) != 1 || archived.Groups[0].ArchivedAt == nil {
+		t.Fatalf("all=%d archived=%d", len(all.Groups), len(archived.Groups))
+	}
+}

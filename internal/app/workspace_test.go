@@ -2,11 +2,13 @@ package app_test
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
@@ -94,5 +96,39 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	}
 	if f.status(string(z)) != task.StatusReady {
 		t.Fatalf("reset did not clear: %s", f.status(string(z)))
+	}
+}
+
+// Quarantined directories are removed when the task completes; `prune`
+// removes complete and archived tasks' worktrees and idle tasks'
+// quarantines, never a live claim's worktree.
+func TestPruneWorkspaces(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	sA := f.claim(string(a))
+	f.commit(sA.Workspace, "a.txt", "a")
+	f.c.Advance(execution.DefaultLease + time.Minute)
+	sB := f.claim(string(a)) // quarantines attempt 1
+	if _, err := os.Stat(sB.QuarantinedWorkspace); err != nil {
+		t.Fatal("no quarantine")
+	}
+	b := f.add("b")
+	sb := f.claim(string(b))
+	f.complete(sB)
+	if _, err := os.Stat(sB.QuarantinedWorkspace); !os.IsNotExist(err) {
+		t.Fatal("completion did not remove the quarantined directory")
+	}
+	res, err := f.e.PruneWorkspaces(f.ctx, f.proj.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sB.Workspace); !os.IsNotExist(err) {
+		t.Fatalf("complete task's worktree kept: %v", res.Removed)
+	}
+	if _, err := os.Stat(sb.Workspace); err != nil {
+		t.Fatal("live claim's worktree pruned")
+	}
+	if strings.TrimSpace(f.git(f.repo, "branch", "--list", "at/"+string(a))) == "" {
+		t.Fatal("branch deleted by prune")
 	}
 }
