@@ -20,17 +20,17 @@ go install github.com/zachbornheimer/ai-task/cmd/at@latest
 
 ```sh
 export AT_OUTPUT=json
-cd my-repo && at init                                  # Git project: target branch + promote policy
-at project --regression-check "test: go test ./..."    # trusted project gate
+cd my-repo && at init                                  # Git project (git init if needed): target branch, promote policy, post-commit hook
+at project --regression-check "test: go test ./..."    # trusted project gate (required before any claim)
 at add "Identity Core" --group --key identity
 at add "Confirm OAuth API compatibility" --key compat --parent identity --check "unit: go test ./auth/..."
 at add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
 at list                                                # ○ ◐ ● hierarchy
-S=$(at claim | jq -r .result.token)                    # atomic leased claim; private worktree on at/<task>/1
-AT_SESSION=$S at log --done "..." --next "..."
-AT_SESSION=$S at verify task                           # diagnostic
-# commit in the worktree, then:
-AT_SESSION=$S at verify complete                       # both suites fresh on a snapshot, promote, complete
+cd "$(at claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on at/<id>, token stored inside
+at log --done "..." --next "..."                       # inside the worktree no token is needed
+at verify task                                         # diagnostic
+# commit in the worktree (each commit renews the lease), then:
+at verify complete                                     # both suites fresh on a snapshot, promote, complete
 at claim --wait                                        # next eligible task, or DONE / STALLED
 ```
 
@@ -58,7 +58,10 @@ workers.
   groups that never imply edges.
 - One leased attempt per task; tokens stored as digests; stale tokens are
   inert; oldest-eligible deterministic claims; `DONE` / `STALLED` for
-  waiting workers.
+  waiting workers. One worktree per task (`at/<id>`), reused across
+  attempts, carrying the session token so commands run there need none.
+- Checks are mandatory: a task cannot be planned without task checks and
+  no work is handed out until the project has regression checks.
 - Completion only from `verify complete`: both check categories fresh on a
   detached snapshot of a clean commit, guarded promotion to the target
   branch, and a finalising transaction that re-checks everything. Nothing

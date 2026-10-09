@@ -22,7 +22,7 @@ import (
 func (e *Engine) submitForCohort(ctx context.Context, fr finalRun) (VerifyResult, error) {
 	now := e.now()
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		if _, err := e.authorize(tx, fr.token, now); err != nil {
+		if _, err := e.touch(tx, fr.token, now); err != nil {
 			return err
 		}
 		r, err := tx.GetRecord(fr.rec.Task.ID)
@@ -213,32 +213,26 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 	// Assemble the candidate, verify every member on it, and promote. If the
 	// target moves between assembly and promotion, rebuild on the new base
 	// (bounded) so stale content is never promoted.
-	mgr, hasGit := e.manager(job.proj)
+	mgr := e.manager(job.proj)
 	var cand workspace.Candidate
 	candidate := ""
 	evidence := map[int64][]verification.Evidence{}
 	for attempt := 0; attempt < 3; attempt++ {
-		dir, cleanup := job.proj.RootPath, func() {}
 		evidence = map[int64][]verification.Evidence{}
-		if hasGit {
-			var sources []string
-			for _, m := range job.members {
-				sources = append(sources, m.revision)
-			}
-			var err error
-			cand, err = mgr.PrepareMerge(ctx, job.proj.TargetBranch, sources, fmt.Sprintf("at: integrate cohort %s", job.cohort))
-			if err != nil {
-				_ = finishAll(sqlite.RunFailed, "cohort candidate could not be assembled: "+err.Error(), true)
-				return err
-			}
-			candidate = cand.Revision
-			if dir, cleanup, err = mgr.Snapshot(ctx, candidate); err != nil {
-				cand.Cleanup()
-				_ = finishAll(sqlite.RunError, err.Error(), false)
-				return err
-			}
-		} else if dir == "" {
-			err := fault.New(fault.CodeWorkspaceUnavailable, "project has no directory to verify in")
+		var sources []string
+		for _, m := range job.members {
+			sources = append(sources, m.revision)
+		}
+		var err error
+		cand, err = mgr.PrepareMerge(ctx, job.proj.TargetBranch, sources, fmt.Sprintf("at: integrate cohort %s", job.cohort))
+		if err != nil {
+			_ = finishAll(sqlite.RunFailed, "cohort candidate could not be assembled: "+err.Error(), true)
+			return err
+		}
+		candidate = cand.Revision
+		dir, cleanup, err := mgr.Snapshot(ctx, candidate)
+		if err != nil {
+			cand.Cleanup()
 			_ = finishAll(sqlite.RunError, err.Error(), false)
 			return err
 		}
@@ -252,7 +246,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 			cand.Cleanup()
 			return fault.New(fault.CodeVerificationFailed, "cohort %q verification failed", job.cohort)
 		}
-		if !hasGit || job.proj.Integration != project.IntegrationPromote {
+		if job.proj.Integration != project.IntegrationPromote {
 			cand.Cleanup()
 			break
 		}
@@ -322,7 +316,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 			if err := tx.MarkComplete(m.rec.Task.ID, m.submission, now); err != nil {
 				return err
 			}
-			if hasGit && job.proj.Integration == project.IntegrationPromote {
+			if job.proj.Integration == project.IntegrationPromote {
 				if err := tx.InsertIntegration(proj.ID, m.rec.Task.ID, job.id, proj.TargetBranch, cand.Base, m.revision, candidate, now); err != nil {
 					return err
 				}
@@ -346,7 +340,7 @@ func (e *Engine) jobHeartbeat(ctx context.Context, job cohortJob) (stop func()) 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		t := time.NewTicker(execution.DefaultLease / 6)
+		t := time.NewTicker(execution.HeartbeatInterval)
 		defer t.Stop()
 		for {
 			select {

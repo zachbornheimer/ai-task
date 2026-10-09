@@ -180,8 +180,12 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	if err := git(s.Workspace, "add", "."); err != nil {
 		return err
 	}
-	if err := git(s.Workspace, "commit", "-q", "-m", "implement "+s.Task.Key); err != nil {
-		return err
+	// The worktree persists across attempts, so a retry may find the work
+	// already committed by the previous attempt.
+	if git(s.Workspace, "diff", "--cached", "--quiet") != nil {
+		if err := git(s.Workspace, "commit", "-q", "-m", "implement "+s.Task.Key); err != nil {
+			return err
+		}
 	}
 	// Iterate with provisional checks (a failure here is information for
 	// the agent, not an error: cohort members cannot pass their end-to-end

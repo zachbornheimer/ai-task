@@ -45,6 +45,7 @@ type globals struct {
 	project string
 	json    bool
 	output  string
+	pretty  bool
 }
 
 type command struct {
@@ -108,6 +109,17 @@ func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
 	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env AT_PROJECT)")
 	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env AT_OUTPUT=json)")
 	fs.StringVar(&c.g.output, "output", c.g.output, "output format: text|json")
+	fs.BoolVar(&c.g.pretty, "pretty", c.g.pretty, "indent JSON output (default: compact, one line)")
+}
+
+// encoder writes JSON compactly unless --pretty is set: agents read it, and
+// a one-line envelope costs fewer tokens than an indented one.
+func (c *ctxt) encoder() *json.Encoder {
+	enc := json.NewEncoder(c.env.Stdout)
+	if c.g.pretty {
+		enc.SetIndent("", "  ")
+	}
+	return enc
 }
 
 func (c *ctxt) jsonOut() bool { return c.g.json || strings.EqualFold(c.g.output, "json") }
@@ -188,9 +200,7 @@ type errorOut struct {
 // emit renders a successful result: JSON envelope or the human renderer.
 func (c *ctxt) emit(result any, human func(w io.Writer)) error {
 	if c.jsonOut() {
-		enc := json.NewEncoder(c.env.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(envelope{OK: true, Result: result})
+		return c.encoder().Encode(envelope{OK: true, Result: result})
 	}
 	human(c.env.Stdout)
 	return nil
@@ -207,15 +217,14 @@ func (c *ctxt) fail(err error) int {
 	var fe *fault.Error
 	if asFault(err, &fe) {
 		msg = fe.Message
-		if fe.Err != nil && code == fault.CodeInternal {
+		// Tooling failures carry the tool's own words (git's stderr).
+		if fe.Err != nil && (code == fault.CodeInternal || code == fault.CodeWorkspaceUnavailable || code == fault.CodeIntegrationFailed) && !strings.Contains(msg, fe.Err.Error()) {
 			msg += ": " + fe.Err.Error()
 		}
 		details = fe.Details
 	}
 	if c.jsonOut() {
-		enc := json.NewEncoder(c.env.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(envelope{OK: false, Error: &errorOut{Code: code, Message: msg, Details: details}})
+		_ = c.encoder().Encode(envelope{OK: false, Error: &errorOut{Code: code, Message: msg, Details: details}})
 	} else {
 		fmt.Fprintf(c.env.Stderr, "error [%s]: %s\n", code, msg)
 		if vr, ok := details.(app.VerifyResult); ok {
@@ -232,9 +241,7 @@ func (c *ctxt) fail(err error) int {
 
 func (c *ctxt) usageError(err error) int {
 	if c.jsonOut() {
-		enc := json.NewEncoder(c.env.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(envelope{OK: false, Error: &errorOut{Code: fault.CodeInvalidInput, Message: "usage: " + err.Error()}})
+		_ = c.encoder().Encode(envelope{OK: false, Error: &errorOut{Code: fault.CodeInvalidInput, Message: "usage: " + err.Error()}})
 	} else {
 		fmt.Fprintf(c.env.Stderr, "usage error: %s\nRun `at help` for commands.\n", err)
 	}
@@ -244,7 +251,7 @@ func (c *ctxt) usageError(err error) int {
 func (c *ctxt) printHelp() {
 	w := c.env.Stderr
 	fmt.Fprintln(w, "at - agent task engine: atomic plans, leased claims, verified completion")
-	fmt.Fprintln(w, "\nUsage: at [--db PATH] [--project ID|NAME] [--json] <command> [args]")
+	fmt.Fprintln(w, "\nUsage: at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]")
 	fmt.Fprintln(w, "\nCommands:")
 	names := make([]string, 0, len(commands))
 	for n := range commands {
@@ -254,7 +261,7 @@ func (c *ctxt) printHelp() {
 	for _, n := range names {
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
-	fmt.Fprintln(w, "\nEnvironment: AT_DB, AT_PROJECT, AT_OUTPUT=json, AT_SESSION")
+	fmt.Fprintln(w, "\nEnvironment: AT_DB, AT_PROJECT, AT_OUTPUT=json, AT_SESSION (optional inside a task worktree: the token is stored there)")
 	fmt.Fprintln(w, "Agent verbs: claim, log, verify task|regression|complete, claim release|renew. Planning: add, update, show, list.")
 }
 

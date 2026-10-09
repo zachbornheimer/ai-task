@@ -25,28 +25,30 @@ func TestBareVerifyIsInvalid(t *testing.T) {
 
 func TestEmptyChecksFailClosed(t *testing.T) {
 	f := newGitFixture(t)
-	// No task checks.
-	noChecks := f.apply(plan.AddTask{Key: "nc", Title: "no checks"}).Created["nc"]
-	s := f.claim(string(noChecks))
-	f.commit(s.Workspace, "w.txt", "w")
-	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	// A task without checks cannot be planned, and checks cannot be removed.
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "nc", Title: "no checks"}}})
 	wantCode(t, err, fault.CodeMissingVerification)
-	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeTask)
-	wantCode(t, err, fault.CodeMissingVerification)
-	if f.status(string(noChecks)) != task.StatusClaimed {
-		t.Fatal("claim must survive a fail-closed refusal")
-	}
-	// No project regression checks.
-	f.setRegression()
 	a := f.add("a")
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{})}}})
+	wantCode(t, err, fault.CodeMissingVerification)
+	// A project without regression checks hands out no work.
+	f.setRegression()
+	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
+	wantCode(t, err, fault.CodeMissingVerification)
+	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
+	wantCode(t, err, fault.CodeMissingVerification)
+	// Regression checks removed under a live claim: verification still fails
+	// closed and the claim survives.
+	f.setRegression(check("regress", "true", true))
 	sa := f.claim(string(a))
+	f.setRegression()
 	f.commit(sa.Workspace, "a.txt", "a")
 	_, err = f.e.Verify(f.ctx, sa.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeMissingVerification)
 	_, err = f.e.Verify(f.ctx, sa.Token, verification.ModeRegression)
 	wantCode(t, err, fault.CodeMissingVerification)
 	if f.status(string(a)) != task.StatusClaimed {
-		t.Fatal("not complete")
+		t.Fatal("claim must survive a fail-closed refusal")
 	}
 }
 
@@ -235,11 +237,11 @@ func TestCompletedContractsCannotChangeSilently(t *testing.T) {
 	// A hard requirement on a complete task is rejected.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{plan.Ref(b)}}}})
 	wantCode(t, err, fault.CodePlanConflict)
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", Blocks: []plan.Ref{plan.Ref(a)}}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Title: strptr("renamed")}}})
 	wantCode(t, err, fault.CodePlanConflict)
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a)}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a), Reason: "test"}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	if f.status(string(a)) != task.StatusComplete {
 		t.Fatal("completion lost")
@@ -282,7 +284,7 @@ func TestVerifierCrashRecovery(t *testing.T) {
 	f := newGitFixture(t)
 	flag := filepath.Join(t.TempDir(), "go")
 	a := f.addWith("a", "while [ ! -f "+flag+" ]; do sleep 0.05; done")
-	s, _ := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a, Lease: 2 * time.Second})
+	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
 	// Simulate: the run was recorded running, then the process died.
 	err := f.interruptWhenVerifying(string(a), "verifying", func(ctx context.Context) error {

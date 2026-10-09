@@ -59,6 +59,19 @@ claimed, verifying, and submissions whose cohort can be verified.
   (`TestWaitingClaimDoneAndStalled`, `TestCoupledVerificationRecoversAfterVerifierCrash`)
 - Release keeps the handoff; `--failed` counts a failure and applies the
   cooldown; exhausted tasks need a planner reset. (`TestReleaseAndCooldown`)
+- No claim without a project regression suite; no task without task
+  checks; a check set cannot be emptied. (`TestEmptyChecksFailClosed`,
+  `e2e.TestPlanningCommands`)
+- One worktree per task on `at/<id>`, reused by every attempt; the claim
+  stores the token in the worktree's Git directory, never in the tree,
+  and commands run there need no token. Every authenticated command and
+  every commit (post-commit hook) renews the lease.
+  (`workspace.TestTaskWorktreesAndSnapshots`, `e2e.TestAgentLoopEndToEnd`)
+- The handoff carries prerequisites' learnings and the newest failed
+  run's evidence. (`TestHandoffCarriesPrerequisiteLearningsAndLastFailure`)
+- Concurrent promotions into a checked-out target: exactly one wins, the
+  rest see a moved target and rebuild, and the checkout stays clean.
+  (`workspace.TestConcurrentPromotionsIntoCheckout`)
 
 ## Verification and completion
 

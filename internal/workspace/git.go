@@ -8,10 +8,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
@@ -85,6 +87,39 @@ func RequireClean(ctx context.Context, dir string) (GitState, error) {
 		return st, fault.New(fault.CodeWorkspaceDirty, "working tree in %s has %d uncommitted change(s), e.g. %s; commit (or stash/remove) them so the submission names an immutable revision", dir, n, strings.Join(sample, ", "))
 	}
 	return st, nil
+}
+
+// gitRetry runs git and retries briefly when it lost a race for one of
+// Git's lock files: many `at` processes claiming at once each add a
+// worktree to the same repository, and `git worktree add` takes
+// repository-wide locks for a few milliseconds.
+func gitRetry(ctx context.Context, dir string, args ...string) (string, error) {
+	var out string
+	var err error
+	delay := 20 * time.Millisecond
+	for attempt := 0; attempt < 8; attempt++ {
+		out, err = git(ctx, dir, args...)
+		if err == nil || !isLockContention(err) {
+			return out, err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
+		}
+		delay *= 2
+	}
+	return out, err
+}
+
+func isLockContention(err error) bool {
+	msg := err.Error()
+	for _, s := range []string{".lock", "could not lock", "Unable to create", "File exists", "unable to write", "cannot lock ref"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {

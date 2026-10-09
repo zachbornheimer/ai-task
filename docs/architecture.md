@@ -19,7 +19,7 @@ prompts, or run a worker pool; the host does (see
 | `verification` | check specs, policy digest, modes, planner order, verdict (`Judge`), evidence shape | the verification contract changes |
 | `project` | project identity, trusted configuration, directory → project resolution | project configuration changes |
 | `checkexec` | running one argv command: cwd, timeout, bounded streams | execution mechanics change |
-| `workspace` | Git: attempt worktrees, detached snapshots, two-phase guarded promotion | Git interaction changes |
+| `workspace` | Git: per-task worktrees (`at/<id>`), worktree-resident session tokens, the post-commit hook, detached snapshots, two-phase guarded promotion | Git interaction changes |
 | `app` | use cases and transaction boundaries (`Apply`, `Claim`, `Verify`, cohorts, `List`/`Show`/`Summary`) | a use case coordinates domains differently |
 | `sqlite` | schema, migrations, typed queries | persistence changes |
 | `cli` | parsing, envelopes, glyph rendering | CLI surface changes |
@@ -80,15 +80,26 @@ a fact written only by the finalising transaction.
 
 ## Workspaces and integration
 
-Git projects give every attempt a private worktree on branch
-`at/<task>/<n>` (continuing the previous attempt's branch). Final checks
-run in a detached snapshot of the submitted commit, never in the editable
-worktree. Integration policy `promote` (default for Git projects) merges
+Every project is a Git repository (`at init` runs `git init` and makes an
+initial commit when the directory is not one). Every task has one
+worktree on branch `at/<task-id>`, created from the target branch at the
+first claim and reused by every later attempt, so retries continue from
+the previous attempt's commits. The claim stores the session token in the
+worktree's private Git directory (`.git/worktrees/<name>/at-session`);
+`at` commands run inside the worktree read it from there, and the
+post-commit hook that `init` installs renews the lease on every commit.
+Final checks run in a detached snapshot of the submitted commit, never in
+the editable worktree. Integration policy `promote` (the default) merges
 the verified revision onto the target branch in a scratch worktree,
 re-verifies the merge when it changed content, and advances the target
 with a compare-and-swap (fast-forwarding a clean checked-out target in
-place, or `update-ref` with the expected old value). Policy `none` skips
-promotion and is the default for projects without a repository.
+place, or `update-ref` with the expected old value). Fast-forwards into a
+checkout are serialized through a lock file in the Git directory
+(`at-promote.lock`), because Git updates the working tree before the ref
+and two at once would leave the loser's files ahead of HEAD. Concurrent
+`git worktree add` calls retry briefly on Git's lock files. Policy `none`
+skips promotion. Worktrees are never deleted by `at`; prune them with
+your worktree tooling.
 
 ## State location
 

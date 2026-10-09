@@ -171,36 +171,59 @@ func stateDir() (string, error) {
 
 // --- projects (bootstrap and trusted configuration) ---
 
-// InitProject registers a project. Dir may be empty for a project without
-// a directory. If dir is inside a Git repository, the repository's main
-// worktree root is registered, the current branch becomes the target
-// branch, and integration policy defaults to "promote".
+// InitResult reports what InitProject did to the directory.
+type InitResult struct {
+	Project       project.Project `json:"project"`
+	CreatedRepo   bool            `json:"created_repo"`
+	HookInstalled bool            `json:"hook_installed"`
+	HookSkipped   bool            `json:"hook_skipped,omitempty"`
+}
+
+// InitProject registers a Git project. Every project is a Git project: if
+// dir is not a repository one is created (with an initial commit); if it is
+// inside a repository, the main worktree root is registered. The current
+// branch becomes the target branch and integration policy is "promote".
+// The post-commit hook that renews leases is installed unless a foreign
+// hook already exists.
 func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Project, error) {
+	res, err := e.InitProjectResult(ctx, name, dir)
+	return res.Project, err
+}
+
+// InitProjectResult is InitProject with details about the directory.
+func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitResult, error) {
+	var res InitResult
+	if dir == "" {
+		return res, fault.New(fault.CodeInvalidInput, "a project needs a directory")
+	}
 	now := e.now()
-	p := project.Project{ID: project.NewID(), Name: strings.TrimSpace(name), Integration: project.IntegrationNone, MaxAttempts: project.DefaultMaxAttempts, CreatedAt: now, UpdatedAt: now}
-	if dir != "" {
-		root, err := project.LocateRoot(dir)
-		if err != nil {
-			return p, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
-		}
-		if root == "" {
-			if root, err = project.CanonicalRoot(dir); err != nil {
-				return p, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
-			}
-		}
-		p.RootPath = root
-		if p.Name == "" {
-			p.Name = filepath.Base(root)
-		}
-		if workspace.IsGitRepo(root) {
-			p.Integration = project.IntegrationPromote
-			p.TargetBranch = (workspace.Manager{Repo: root}).DefaultBranch(ctx)
+	p := project.Project{ID: project.NewID(), Name: strings.TrimSpace(name), Integration: project.IntegrationPromote, MaxAttempts: project.DefaultMaxAttempts, CreatedAt: now, UpdatedAt: now}
+	root, err := project.LocateRoot(dir)
+	if err != nil {
+		return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
+	}
+	if root == "" {
+		if root, err = project.CanonicalRoot(dir); err != nil {
+			return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
 		}
 	}
+	if res.CreatedRepo, err = workspace.InitRepo(ctx, root); err != nil {
+		return res, err
+	}
+	p.RootPath = root
+	if p.Name == "" {
+		p.Name = filepath.Base(root)
+	}
+	p.TargetBranch = (workspace.Manager{Repo: root}).DefaultBranch(ctx)
 	if err := p.Validate(); err != nil {
-		return p, err
+		return res, err
 	}
-	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+	installed, err := workspace.InstallHooks(ctx, root)
+	if err != nil {
+		return res, err
+	}
+	res.HookInstalled, res.HookSkipped = installed, !installed
+	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if p.RootPath != "" {
 			if existing, ok, err := tx.GetProjectByRoot(p.RootPath); err != nil {
 				return err
@@ -210,7 +233,8 @@ func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Pro
 		}
 		return tx.InsertProject(p)
 	})
-	return p, err
+	res.Project = p
+	return res, err
 }
 
 // Projects lists registered projects.
@@ -322,17 +346,13 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 	return out, err
 }
 
-// manager returns the Git workspace manager for a project, or false when
-// the project has no repository.
-func (e *Engine) manager(p project.Project) (workspace.Manager, bool) {
-	if p.RootPath == "" || !workspace.IsGitRepo(p.RootPath) {
-		return workspace.Manager{}, false
-	}
+// manager returns the Git workspace manager for a project.
+func (e *Engine) manager(p project.Project) workspace.Manager {
 	root := p.WorkspaceRoot
 	if root == "" {
 		root = filepath.Join(e.wsRoot, string(p.ID))
 	}
-	return workspace.Manager{Repo: p.RootPath, Root: root}, true
+	return workspace.Manager{Repo: p.RootPath, Root: root}
 }
 
 // reconcile closes runs and jobs whose owners' leases expired so that no

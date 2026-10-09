@@ -29,10 +29,10 @@ func TestLeaseDuration(t *testing.T) {
 	if d, _ := LeaseDuration(0); d != DefaultLease {
 		t.Fatal("default")
 	}
-	if _, err := LeaseDuration(500 * time.Millisecond); !fault.Is(err, fault.CodeInvalidInput) {
+	if _, err := LeaseDuration(time.Minute); !fault.Is(err, fault.CodeInvalidInput) {
 		t.Fatal("too short accepted")
 	}
-	if _, err := LeaseDuration(48 * time.Hour); !fault.Is(err, fault.CodeInvalidInput) {
+	if _, err := LeaseDuration(8 * time.Hour); !fault.Is(err, fault.CodeInvalidInput) {
 		t.Fatal("too long accepted")
 	}
 }

@@ -74,7 +74,8 @@ func gitEnv(t *testing.T) *env {
 func (e *env) git(dir string, args ...string) {
 	e.t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	// Hooks see the test environment and find the built `at` on PATH.
+	cmd.Env = append(append([]string{}, e.env...), "PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		e.t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -176,6 +177,22 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(e.cwd, tok+"\n", nil, "log", "-", "--note", "stdin works"); r.code != 0 {
 		t.Fatalf("stdin token: %s %s", r.stdout, r.stderr)
 	}
+	// Inside the worktree no token is needed: the claim stored it there.
+	if r := e.runIn(ws, "", nil, "log", "--note", "worktree token works"); r.code != 0 {
+		t.Fatalf("worktree token: %s %s", r.stdout, r.stderr)
+	}
+	if r := e.runIn(ws, "", nil, "whoami"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
+		t.Fatalf("whoami in worktree: %s %s", r.stdout, r.stderr)
+	}
+	if !strings.HasSuffix(sess["branch"].(string), "/"+a) || !strings.HasPrefix(sess["branch"].(string), "at/") {
+		t.Fatalf("branch %v", sess["branch"])
+	}
+	// A commit in the worktree renews the lease through the post-commit hook.
+	before := e.ok("show", a)["attempt"].(map[string]any)["lease_expires_at"]
+	e.commit(ws, "hook.txt", "h")
+	if after := e.ok("show", a)["attempt"].(map[string]any)["lease_expires_at"]; after == before {
+		t.Fatalf("post-commit hook did not renew the lease: %v == %v", before, after)
+	}
 	// Provisional checks run and never complete.
 	r := e.runIn(e.cwd, "", with, "verify", "task")
 	if r.env["ok"] != false || r.env["error"].(map[string]any)["code"] != "VERIFICATION_FAILED" {
@@ -202,10 +219,13 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(e.cwd, "", with, "log", "--done", "late"); r.env["error"].(map[string]any)["code"] != "SESSION_FINISHED" {
 		t.Fatalf("%s", r.stdout)
 	}
-	// Dependent is ready; claim renew/release require explicit tokens.
+	// Dependent is ready; outside a worktree, renew/release need a token.
 	e.fails("INVALID_INPUT", "claim", "renew")
 	sb := e.ok("claim", "reject")
 	e.ok("claim", "renew", sb["token"].(string))
+	if r := e.runIn(sb["workspace"].(string), "", nil, "claim", "renew"); r.code != 0 {
+		t.Fatalf("renew inside worktree: %s %s", r.stdout, r.stderr)
+	}
 	e.fails("INVALID_SESSION", "claim", "renew", "sess-0000000000000000000000000000000a")
 	e.fails("SESSION_FINISHED", "claim", "release", tok)
 	rel := e.ok("claim", "release", sb["token"].(string), "--note", "later")
@@ -235,24 +255,26 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 
 func TestPlanningCommands(t *testing.T) {
 	e := newEnv(t)
-	e.ok("init", "--name", "p", "--no-dir")
+	e.ok("init", "--name", "p") // not a repository yet: init creates one
 	g := taskID(e.ok("--project", "p", "add", "Identity Core", "--group", "--key", "identity"))
 	a := taskID(e.ok("--project", "p", "add", "Rotate creds", "--key", "rotate", "--check", "u: true"))
 	b := taskID(e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--check", "u: true"))
-	e.fails("DUPLICATE_KEY", "--project", "p", "add", "Token store v2", "--key", "store")
+	e.fails("DUPLICATE_KEY", "--project", "p", "add", "Token store v2", "--key", "store", "--check", "u: true")
+	e.fails("MISSING_VERIFICATION", "--project", "p", "add", "No checks", "--key", "nochecks")
 	rep := e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--check", "u: true")
 	if rep["changed"].(float64) != 0 {
 		t.Fatalf("identical replay changed the plan: %v", rep)
 	}
 	e.fails("PLAN_CONFLICT", "--project", "p", "update", "store", "--title", "x", "--expect-rev", "1")
-	e.fails("PLAN_CONFLICT", "--project", "p", "update", "rotate", "--archive") // store requires it
+	e.fails("INVALID_INPUT", "--project", "p", "update", "rotate", "--archive")                               // reason required
+	e.fails("PLAN_CONFLICT", "--project", "p", "update", "rotate", "--archive", "--reason", "done elsewhere") // store requires it
 	up := e.ok("--project", "p", "update", "store", "--remove-requires", "rotate", "--accept", "works")
 	if up["changed"].(float64) != 1 {
 		t.Fatalf("%v", up)
 	}
-	e.ok("--project", "p", "update", "rotate", "--archive")
-	if e.ok("--project", "p", "show", a)["status"] != "archived" {
-		t.Fatal("not archived")
+	e.ok("--project", "p", "update", "rotate", "--archive", "--reason", "done elsewhere")
+	if sh := e.ok("--project", "p", "show", a); sh["status"] != "archived" || sh["archive_reason"] != "done elsewhere" {
+		t.Fatalf("not archived with reason: %v", sh)
 	}
 	snap := e.ok("--project", "p", "list", "all")
 	if len(snap["groups"].([]any)) != 1 || len(snap["tasks"].([]any)) != 1 {
@@ -278,6 +300,8 @@ func TestPlanningCommands(t *testing.T) {
 func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	e := newEnv(t)
 	e.ok("init", "--name", "c")
+	e.fails("MISSING_VERIFICATION", "claim") // no regression checks yet
+	e.ok("project", "--regression-check", "regress: true")
 	const n = 6
 	ids := map[string]bool{}
 	for i := 0; i < n; i++ {

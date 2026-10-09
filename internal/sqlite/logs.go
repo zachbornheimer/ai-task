@@ -56,6 +56,24 @@ func (t *Tx) LogCount(id task.ID) (int, error) {
 	return n, wrapInternal(err, "count logs")
 }
 
+// Learnings returns the newest `limit` learnings recorded on a task.
+func (t *Tx) Learnings(id task.ID, limit int) ([]string, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT learned FROM task_log_entries WHERE task_id = ? AND learned <> '' ORDER BY id DESC LIMIT ?`, id, limit)
+	if err != nil {
+		return nil, wrapInternal(err, "learnings")
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, wrapInternal(err, "scan learning")
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // Handoff assembles the bounded context a new attempt starts from, using
 // three indexed queries instead of loading the whole history.
 func (t *Tx) Handoff(id task.ID) (execution.Handoff, error) {

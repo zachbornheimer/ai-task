@@ -127,7 +127,7 @@ func (r Record) Status(now time.Time, maxAttempts int) task.Status {
 // correlated subqueries are index-backed.
 const recordSelect = `
 SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome, t.constraints_json, t.policy_json,
-       t.cohort, t.contract_rev, t.archived_at, t.failures, t.next_eligible_at,
+       t.cohort, t.contract_rev, t.archived_at, t.archive_reason, t.failures, t.next_eligible_at,
        t.completed_at, t.created_at, t.updated_at,
        (SELECT count(*) FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
          WHERE d.task_id = t.id AND r.completed_at IS NULL) AS unmet,
@@ -156,7 +156,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var run runScan
 	var completedRev sql.NullString
 	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Kind, &key, &parent, &r.Task.Description, &r.Task.Outcome, &constraints, &policy,
-		&r.Task.Cohort, &r.Task.ContractRev, &archived, &r.Failures, &nextEligible,
+		&r.Task.Cohort, &r.Task.ContractRev, &archived, &r.Task.ArchiveReason, &r.Failures, &nextEligible,
 		&completed, &created, &updated, &r.UnmetRequires,
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
@@ -292,8 +292,8 @@ func (t *Tx) UpdateTaskContract(tk task.Task, now time.Time) error {
 }
 
 // ArchiveTask soft-deletes a task.
-func (t *Tx) ArchiveTask(id task.ID, now time.Time) error {
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`, ms(now), ms(now), id)
+func (t *Tx) ArchiveTask(id task.ID, reason string, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET archived_at = ?, archive_reason = ?, updated_at = ? WHERE id = ?`, ms(now), reason, ms(now), id)
 	return wrapInternal(err, "archive task")
 }
 

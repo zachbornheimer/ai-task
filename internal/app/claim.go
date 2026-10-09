@@ -10,6 +10,8 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
+	"github.com/zachbornheimer/ai-task/internal/verification"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 // Typed outcomes of a waiting Claim.
@@ -109,12 +111,18 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
 				return err
 			}
+			if len(proj.Regression) == 0 {
+				return fault.New(fault.CodeMissingVerification, "project %s has no regression checks; define them with `at project --regression-check` before claiming work", proj.ID)
+			}
 			if err := notClaimable(r, proj, now); err != nil {
 				return err
 			}
 		} else {
 			if proj, err = tx.GetProject(req.ProjectID); err != nil {
 				return err
+			}
+			if len(proj.Regression) == 0 {
+				return fault.New(fault.CodeMissingVerification, "project %s has no regression checks; define them with `at project --regression-check` before claiming work", proj.ID)
 			}
 			cand, ok, err := tx.ClaimCandidate(req.ProjectID, now, proj.MaxAttempts)
 			if err != nil {
@@ -144,6 +152,9 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		}
 		handoff := *view.Handoff
 		view.Handoff = nil
+		if err := e.inheritContext(tx, r2, &handoff); err != nil {
+			return err
+		}
 		sess = Session{Task: view, Token: token, AttemptSeq: attempt.Seq, LeaseUntil: attempt.LeaseExpiresAt, Resumed: attempt.Seq > 1, Handoff: handoff}
 		return nil
 	})
@@ -151,36 +162,70 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
-	if mgr, ok := e.manager(proj); ok {
-		// Continue from the previous attempt's branch when it exists so
-		// committed work carries over; otherwise branch from the target.
-		base := proj.TargetBranch
-		var prev string
-		_ = e.store.Read(ctx, func(tx *sqlite.Tx) error {
-			var err error
-			prev, err = tx.PreviousWorkspaceBranch(sess.Task.ID)
-			return err
-		})
-		if prev != "" && mgr.BranchExists(ctx, prev) {
-			base = prev
-		}
-		info, werr := mgr.CreateAttempt(ctx, string(sess.Task.ID), attempt.Seq, base)
-		if werr != nil {
-			_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.EndAttempt(attempt.ID, execution.EndReleased, e.now()) })
-			e.notify()
-			return Session{}, werr
-		}
-		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.SetWorkspace(attempt.ID, info.Path, info.Branch) }); err != nil {
-			return Session{}, err
-		}
-		sess.Workspace, sess.Branch = info.Path, info.Branch
-		if sess.Task.Attempt != nil {
-			sess.Task.Attempt.Workspace, sess.Task.Attempt.Branch = info.Path, info.Branch
-		}
-	} else if proj.RootPath != "" {
-		sess.Workspace = proj.RootPath
+	// One branch and worktree per task, reused across attempts so committed
+	// and uncommitted work survives a crash; the token lives in the
+	// worktree's private git dir so commands run there need no AT_SESSION.
+	mgr := e.manager(proj)
+	info, werr := mgr.EnsureTask(ctx, string(sess.Task.ID), proj.TargetBranch)
+	if werr == nil {
+		werr = workspace.StoreToken(ctx, info.Path, string(token))
+	}
+	if werr != nil {
+		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.EndAttempt(attempt.ID, execution.EndReleased, e.now()) })
+		e.notify()
+		return Session{}, werr
+	}
+	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.SetWorkspace(attempt.ID, info.Path, info.Branch) }); err != nil {
+		return Session{}, err
+	}
+	sess.Workspace, sess.Branch, sess.WorkspaceDirty = info.Path, info.Branch, info.Dirty
+	if sess.Task.Attempt != nil {
+		sess.Task.Attempt.Workspace, sess.Task.Attempt.Branch = info.Path, info.Branch
 	}
 	return sess, nil
+}
+
+// inheritContext adds prerequisite learnings and the last failure to a
+// handoff, bounded so the claim payload stays small.
+func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Handoff) error {
+	ids, err := tx.RequirementIDs(r.Task.ID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if len(h.Inherited) >= execution.InheritedLearningLimit {
+			break
+		}
+		learned, err := tx.Learnings(id, execution.InheritedLearningLimit-len(h.Inherited))
+		if err != nil {
+			return err
+		}
+		if len(learned) == 0 {
+			continue
+		}
+		key := ""
+		if rec, err := tx.GetRecord(id); err == nil {
+			key = rec.Task.Key
+		}
+		for _, l := range learned {
+			h.Inherited = append(h.Inherited, execution.InheritedLearning{TaskID: string(id), Key: key, Learned: l})
+		}
+	}
+	if s := r.Submission; s != nil && s.Run != nil && (s.Run.Status == sqlite.RunFailed || s.Run.Status == sqlite.RunError) {
+		ev, err := tx.EvidenceForRun(s.Run.ID)
+		if err != nil {
+			return err
+		}
+		f := &execution.Failure{RunID: s.Run.ID, Mode: string(s.Run.Mode), Summary: s.Run.Summary}
+		for _, row := range ev {
+			if row.Outcome == verification.OutcomePassed || row.Outcome == verification.OutcomeSkipped {
+				continue
+			}
+			f.Checks = append(f.Checks, execution.FailedCheck{CheckID: row.CheckID, Outcome: string(row.Outcome), Message: row.Message, StderrTail: execution.Tail(row.Stderr, execution.FailureTailBytes), StdoutTail: execution.Tail(row.Stdout, execution.FailureTailBytes)})
+		}
+		h.LastFailure = f
+	}
+	return nil
 }
 
 // notClaimable maps a non-claimable status to the error an agent sees.
@@ -224,6 +269,23 @@ func (e *Engine) authorize(tx *sqlite.Tx, token execution.Token, now time.Time) 
 		return execution.Attempt{}, err
 	}
 	return auth.Attempt, nil
+}
+
+// touch authorises and renews the lease: every session-authenticated write
+// is proof of life, so an active agent never has to renew by hand.
+func (e *Engine) touch(tx *sqlite.Tx, token execution.Token, now time.Time) (execution.Attempt, error) {
+	a, err := e.authorize(tx, token, now)
+	if err != nil {
+		return a, err
+	}
+	expires := now.Add(execution.DefaultLease)
+	if expires.After(a.LeaseExpiresAt) {
+		if err := tx.RenewLease(a.ID, expires); err != nil {
+			return a, err
+		}
+		a.LeaseExpiresAt = expires
+	}
+	return a, nil
 }
 
 // Renew extends the lease of a live session and returns the new expiry.
@@ -299,7 +361,7 @@ func (e *Engine) Log(ctx context.Context, token execution.Token, entry execution
 	now := e.now()
 	var rec execution.RecordedLog
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		a, err := e.authorize(tx, token, now)
+		a, err := e.touch(tx, token, now)
 		if err != nil {
 			return err
 		}
@@ -344,7 +406,7 @@ func (e *Engine) heartbeat(ctx context.Context, token execution.Token) (stop fun
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		t := time.NewTicker(execution.DefaultLease / 6)
+		t := time.NewTicker(execution.HeartbeatInterval)
 		defer t.Stop()
 		for {
 			select {

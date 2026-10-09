@@ -58,7 +58,6 @@ type prepared struct {
 	proj    project.Project
 	policy  verification.Policy
 	dir     string
-	git     bool
 }
 
 func (e *Engine) prepare(ctx context.Context, token execution.Token) (prepared, error) {
@@ -84,11 +83,7 @@ func (e *Engine) prepare(ctx context.Context, token execution.Token) (prepared, 
 	p.policy = effectivePolicy(p.rec.Task, p.proj)
 	p.dir = p.attempt.WorkspacePath
 	if p.dir == "" {
-		p.dir = p.proj.RootPath
-	}
-	_, p.git = e.manager(p.proj)
-	if p.dir == "" {
-		return p, fault.New(fault.CodeWorkspaceUnavailable, "project %s has no directory to run checks in; register one with `at init --path`", p.proj.ID)
+		return p, fault.New(fault.CodeWorkspaceUnavailable, "attempt has no worktree; claim the task again")
 	}
 	return p, nil
 }
@@ -103,15 +98,13 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "no %s checks are defined for %s; `verify complete` will fail closed", mode, p.rec.Task.ID)
 	}
 	revision, dirty := "", false
-	if p.git && p.attempt.WorkspacePath != "" {
-		if st, err := workspace.Inspect(ctx, p.dir); err == nil {
-			revision, dirty = st.Revision, !st.Clean()
-		}
+	if st, err := workspace.Inspect(ctx, p.dir); err == nil {
+		revision, dirty = st.Revision, !st.Clean()
 	}
 	now := e.now()
 	var runID int64
 	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		if _, err := e.authorize(tx, token, now); err != nil {
+		if _, err := e.touch(tx, token, now); err != nil {
 			return err
 		}
 		var err error
@@ -259,24 +252,18 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 	if p.rec.UnmetRequires > 0 {
 		return VerifyResult{}, fault.New(fault.CodeTaskBlocked, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
 	}
-	revision := ""
-	if p.git {
-		if p.attempt.WorkspacePath == "" {
-			return VerifyResult{}, fault.New(fault.CodeWorkspaceUnavailable, "attempt has no worktree; claim the task again")
-		}
-		st, err := workspace.RequireClean(ctx, p.dir)
-		if err != nil {
-			return VerifyResult{}, err
-		}
-		revision = st.Revision
+	st, err := workspace.RequireClean(ctx, p.dir)
+	if err != nil {
+		return VerifyResult{}, err
 	}
+	revision := st.Revision
 	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.proj.Regression}).Digest()}
 	if p.rec.Task.Cohort != "" {
 		return e.submitForCohort(ctx, fr)
 	}
 	now := e.now()
 	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		if _, err := e.authorize(tx, token, now); err != nil {
+		if _, err := e.touch(tx, token, now); err != nil {
 			return err
 		}
 		r, err := tx.GetRecord(p.rec.Task.ID)
@@ -334,13 +321,10 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("%s: %s", fr.rec.Task.ID, summary), Details: res}
 	}
 	// Immutable inputs: a detached snapshot of the submitted revision.
-	dir, cleanup := fr.dir, func() {}
-	mgr, hasGit := e.manager(fr.proj)
-	if hasGit {
-		var err error
-		if dir, cleanup, err = mgr.Snapshot(ctx, fr.revision); err != nil {
-			return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
-		}
+	mgr := e.manager(fr.proj)
+	dir, cleanup, err := mgr.Snapshot(ctx, fr.revision)
+	if err != nil {
+		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
 	}
 	evidence, err := e.runChecks(ctx, dir, fr.policy, fr.runID, fr.revision, fence)
 	cleanup()
@@ -355,7 +339,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	}
 	final := fr.revision
 	var cand workspace.Candidate
-	if hasGit && fr.proj.Integration == project.IntegrationPromote {
+	if fr.proj.Integration == project.IntegrationPromote {
 		// Guarded promotion: build the candidate on the current target,
 		// verify it when the merge changed content, then compare-and-swap
 		// the target. If the target moved meanwhile, rebuild on the new
@@ -453,7 +437,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		if err := tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now); err != nil {
 			return err
 		}
-		if hasGit && fr.proj.Integration == project.IntegrationPromote {
+		if fr.proj.Integration == project.IntegrationPromote {
 			if err := tx.InsertIntegration(proj.ID, r.Task.ID, 0, proj.TargetBranch, cand.Base, fr.revision, final, now); err != nil {
 				return err
 			}

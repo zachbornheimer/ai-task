@@ -24,8 +24,8 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 	a := f.add("a")
 	// Unknown prerequisite: the whole set is rejected.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "b", Title: "b"},
-		plan.AddTask{Key: "c", Title: "c", Requires: []plan.Ref{"nope"}},
+		plan.AddTask{Key: "b", Title: "b", TaskChecks: okChecks()},
+		plan.AddTask{Key: "c", Title: "c", Requires: []plan.Ref{"nope"}, TaskChecks: okChecks()},
 	}})
 	wantCode(t, err, fault.CodeNotFound)
 	if count(f, app.FilterAll) != 1 {
@@ -33,8 +33,8 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 	}
 	// Cycle inside the set: nothing changes.
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "y", Title: "y", Requires: []plan.Ref{plan.Ref(a)}},
-		plan.AddTask{Key: "x", Title: "x", Requires: []plan.Ref{"y"}},
+		plan.AddTask{Key: "y", Title: "y", Requires: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()},
+		plan.AddTask{Key: "x", Title: "x", Requires: []plan.Ref{"y"}, TaskChecks: okChecks()},
 		plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{"x"}},
 	}})
 	wantCode(t, err, fault.CodeDependencyCycle)
@@ -52,7 +52,7 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 	}
 	// Groups cannot be prerequisites or claim targets.
 	g := f.apply(plan.AddGroup{Key: "g", Title: "G"}).Created["g"]
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "t", Requires: []plan.Ref{"g"}}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "t", Requires: []plan.Ref{"g"}, TaskChecks: okChecks()}}})
 	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &g})
 	wantCode(t, err, fault.CodeInvalidInput)
@@ -84,7 +84,7 @@ func TestStableKeysAndIdempotency(t *testing.T) {
 		t.Fatal("overwritten")
 	}
 	// Keys resolve within the same set and from the store.
-	r4 := f.apply(plan.AddTask{Key: "dep", Title: "dep", Requires: []plan.Ref{"oauth"}}, plan.AddTask{Key: "dep2", Title: "dep2", Requires: []plan.Ref{"dep"}})
+	r4 := f.apply(plan.AddTask{Key: "dep", Title: "dep", Requires: []plan.Ref{"oauth"}, TaskChecks: okChecks()}, plan.AddTask{Key: "dep2", Title: "dep2", Requires: []plan.Ref{"dep"}, TaskChecks: okChecks()})
 	if len(r4.Created) != 2 || f.status("dep2") != task.StatusBlocked {
 		t.Fatalf("%+v", r4)
 	}
@@ -99,7 +99,7 @@ func TestReviewMutationIsOneRevisionWithOptimisticConcurrency(t *testing.T) {
 		plan.AddTask{Key: "a1", Title: "a part 1", TaskChecks: []verification.CheckSpec{check("u1", "true", true)}},
 		plan.AddTask{Key: "a2", Title: "a part 2", Requires: []plan.Ref{"a1"}, TaskChecks: []verification.CheckSpec{check("u2", "true", true)}},
 		plan.UpdateTask{Target: plan.Ref(b), Requires: plan.Replace([]plan.Ref{"a2"})},
-		plan.ArchiveTask{Target: plan.Ref(a)},
+		plan.ArchiveTask{Target: plan.Ref(a), Reason: "test"},
 	}})
 	if err != nil || res.Changed != 4 || res.PlanRev != snap.Revision+1 {
 		t.Fatalf("%+v %v", res, err)
@@ -111,18 +111,18 @@ func TestReviewMutationIsOneRevisionWithOptimisticConcurrency(t *testing.T) {
 		t.Fatal("a not archived")
 	}
 	// Stale revision is rejected and nothing changes.
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, ExpectedPlanRev: snap.Revision, Operations: []plan.Change{plan.AddTask{Key: "late", Title: "late"}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, ExpectedPlanRev: snap.Revision, Operations: []plan.Change{plan.AddTask{Key: "late", Title: "late", TaskChecks: okChecks()}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	if _, err := f.e.Show(f.ctx, f.proj.ID, "late", false); !fault.Is(err, fault.CodeNotFound) {
 		t.Fatal("late created despite conflict")
 	}
 	// Archiving a task that others require, without repairing, is rejected.
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "a2"}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "a2", Reason: "test"}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	// Repairing in the same set works.
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.UpdateTask{Target: plan.Ref(b), RemoveRequires: []plan.Ref{"a2"}},
-		plan.ArchiveTask{Target: "a2"},
+		plan.ArchiveTask{Target: "a2", Reason: "test"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestGroupsAreOrganizationalOnly(t *testing.T) {
 		plan.AddTask{Key: "t1", Title: "t1", Parent: "identity", TaskChecks: []verification.CheckSpec{check("u", "true", true)}},
 		plan.AddTask{Key: "t2", Title: "t2", Parent: "identity", Requires: []plan.Ref{"t1"}, TaskChecks: []verification.CheckSpec{check("u", "true", true)}},
 		plan.AddGroup{Key: "sub", Title: "Sub", Parent: "identity"},
-		plan.AddTask{Key: "t3", Title: "t3", Parent: "sub"},
+		plan.AddTask{Key: "t3", Title: "t3", Parent: "sub", TaskChecks: okChecks()},
 	)
 	g := f.show(string(res.Created["identity"]))
 	if g.Kind != task.KindGroup || g.Status != task.StatusGroup || g.Progress == nil || g.Progress.Total != 3 || g.Progress.Complete != 0 {
@@ -170,7 +170,7 @@ func TestGroupsAreOrganizationalOnly(t *testing.T) {
 	// archived without them.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: "identity", Parent: refptr("sub")}}})
 	wantCode(t, err, fault.CodeDependencyCycle)
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "sub"}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "sub", Reason: "test"}}})
 	wantCode(t, err, fault.CodePlanConflict)
 }
 
@@ -192,11 +192,11 @@ func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 	c := f.add("c")
 	s := f.claim(string(c))
 	// Without authority: the claimed task's eligibility cannot change.
-	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}}}})
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks()}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	// With the holder's session: allowed; c stays claimed (claim outranks
 	// blocked) and becomes blocked once released.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks()}}}); err != nil {
 		t.Fatal(err)
 	}
 	if f.status(string(c)) != task.StatusClaimed {

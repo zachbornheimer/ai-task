@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/dependency"
@@ -215,6 +216,11 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err := spec.Validate(); err != nil {
 		return err
 	}
+	// A task is implementable only with its own checks: completion fails
+	// closed without them, so planning fails closed too.
+	if len(spec.Verification.TaskChecks) == 0 {
+		return fault.New(fault.CodeMissingVerification, "task %q needs at least one task check (--check); a task without checks can never complete", c.Title)
+	}
 	var requires []task.ID
 	for _, r := range c.Requires {
 		rec, err := a.resolve(r)
@@ -264,6 +270,12 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	}
 	a.result.Created[a.createdName(i, c.Key)] = id
 	a.result.Changed++
+	if w := spec.Warnings(); len(w) > 0 {
+		if a.result.Warnings == nil {
+			a.result.Warnings = map[string][]string{}
+		}
+		a.result.Warnings[a.createdName(i, c.Key)] = w
+	}
 	return nil
 }
 
@@ -415,6 +427,9 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		t.Cohort, changed = *c.Cohort, true
 	}
 	if c.TaskChecks.Set {
+		if t.Kind == task.KindTask && len(c.TaskChecks.Value) == 0 {
+			return fault.New(fault.CodeMissingVerification, "%s needs at least one task check; archive it instead of removing its checks", t.ID)
+		}
 		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value}
 		changed = true
 	}
@@ -545,7 +560,7 @@ func (a *applier) archive(c plan.ArchiveTask) error {
 	if rec.Submission != nil && rec.Submission.RunStatus() == sqlite.RunPending {
 		return fault.New(fault.CodePlanConflict, "%s has a submission awaiting verification; it cannot be archived", t.ID)
 	}
-	if err := a.tx.ArchiveTask(t.ID, a.now); err != nil {
+	if err := a.tx.ArchiveTask(t.ID, strings.TrimSpace(c.Reason), a.now); err != nil {
 		return err
 	}
 	a.archived = append(a.archived, t.ID)

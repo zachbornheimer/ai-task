@@ -1,11 +1,12 @@
 # Explicit limitations and unsolved risks
 
 1. **Stale processes and files.** A lease proves authority over the task
-   record, and per-attempt worktrees keep attempts' files apart, but the
-   engine cannot stop an expired agent process from editing its old
-   worktree. The host must cancel the agent when `Renew` fails. Final
-   checks run on a detached snapshot, so a stale editor cannot change what
-   is verified.
+   record, and per-task worktrees keep tasks' files apart, but the engine
+   cannot stop an expired agent process from editing the worktree that the
+   next attempt reuses. The host must cancel the agent when `Renew` fails;
+   the next claim reports `workspace_dirty` when uncommitted edits are
+   present. Final checks run on a detached snapshot, so a stale editor
+   cannot change what is verified.
 
 2. **Local-user trust.** `--planner` and `AT_SESSION` are conventions. The
    same OS user can edit the SQLite file, the repository, or the checks.
@@ -33,10 +34,17 @@
    member back; a failing member check sends that member back.
 
 8. **Worktrees and branches are not pruned.** An agent's shell may still
-   be inside one.
+   be inside one, and the worktree is the next attempt's starting point.
+   Prune `at/<id>` worktrees and branches with your worktree tooling once
+   the task is complete.
 
-9. **Non-Git projects** record no revision; evidence binds to the policy
-   digest only.
+9. **Git only.** A project must be a repository (`at init` creates one).
+   Evidence is bound to the verified revision; a trivial check (`true`)
+   satisfies the mandatory-check rule and is the planner's own risk.
+
+12. **Worktree-resident tokens** are readable by the same OS user, like
+    the database. A lost token with no worktree leaves the task claimed
+    until the lease (at most 4 hours) expires; that is accepted.
 
 10. **Single host, local filesystem.** WAL-mode SQLite on a network
     filesystem is unsafe.

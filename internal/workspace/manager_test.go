@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -55,24 +57,51 @@ func (r *repo) commit(dir, file, content string) string {
 	return r.git(dir, "rev-parse", "HEAD")
 }
 
-func TestAttemptWorktreesAndSnapshots(t *testing.T) {
+func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	r := newRepo(t)
-	w1, err := r.mgr.CreateAttempt(r.ctx, "at-aaaaaa", 1, "main")
+	w1, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.git(w1.Path, "rev-parse", "--abbrev-ref", "HEAD") != "at/at-aaaaaa/1" {
+	if r.git(w1.Path, "rev-parse", "--abbrev-ref", "HEAD") != "at/at-aaaaaa" {
 		t.Fatal("branch")
 	}
-	// Reuse is idempotent.
-	if again, err := r.mgr.CreateAttempt(r.ctx, "at-aaaaaa", 1, "main"); err != nil || again != w1 {
+	// Reuse is idempotent and reports uncommitted work left behind.
+	if again, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main"); err != nil || again != w1 {
 		t.Fatalf("%+v %v", again, err)
 	}
+	os.WriteFile(filepath.Join(w1.Path, "wip.txt"), []byte("wip"), 0o644)
+	if again, _ := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main"); !again.Dirty {
+		t.Fatal("dirty worktree not reported")
+	}
+	os.Remove(filepath.Join(w1.Path, "wip.txt"))
 	rev := r.commit(w1.Path, "g.txt", "work")
-	// A second attempt continues from the first attempt's branch.
-	w2, err := r.mgr.CreateAttempt(r.ctx, "at-aaaaaa", 2, w1.Branch)
+	// A pruned worktree is re-attached to the existing branch.
+	r.git(r.dir, "worktree", "remove", "--force", w1.Path)
+	w2, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main")
 	if err != nil || r.git(w2.Path, "rev-parse", "HEAD") != rev {
 		t.Fatalf("%+v %v", w2, err)
+	}
+	// Tokens live in the worktree's private git dir, never in the tree.
+	if err := StoreToken(r.ctx, w2.Path, "sess-test"); err != nil {
+		t.Fatal(err)
+	}
+	if LoadToken(r.ctx, filepath.Join(w2.Path)) != "sess-test" || LoadToken(r.ctx, r.dir) != "" {
+		t.Fatal("token discovery")
+	}
+	if out := r.git(w2.Path, "status", "--porcelain"); out != "" {
+		t.Fatalf("token file leaked into the tree: %s", out)
+	}
+	ok, err := InstallHooks(r.ctx, r.dir)
+	if err != nil || !ok {
+		t.Fatalf("hooks: %v %v", ok, err)
+	}
+	if ok, _ := InstallHooks(r.ctx, r.dir); !ok {
+		t.Fatal("reinstalling our own hook must succeed")
+	}
+	created, err := InitRepo(r.ctx, t.TempDir())
+	if err != nil || !created {
+		t.Fatalf("InitRepo: %v %v", created, err)
 	}
 	snap, cleanup, err := r.mgr.Snapshot(r.ctx, rev)
 	if err != nil {
@@ -97,7 +126,7 @@ func TestAttemptWorktreesAndSnapshots(t *testing.T) {
 
 func TestPrepareMergeAndPromote(t *testing.T) {
 	r := newRepo(t)
-	w, _ := r.mgr.CreateAttempt(r.ctx, "at-bbbbbb", 1, "main")
+	w, _ := r.mgr.EnsureTask(r.ctx, "at-bbbbbb", "main")
 	rev := r.commit(w.Path, "b.txt", "b")
 	// Fast-forward candidate: main is checked out in the main worktree and
 	// clean, so promotion fast-forwards it in place.
@@ -118,7 +147,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	// Diverged: main moves on, a second attempt branch merges with a
 	// real merge commit; the candidate is verified before the target moves.
 	mainRev := r.commit(r.dir, "m.txt", "main work")
-	w2, _ := r.mgr.CreateAttempt(r.ctx, "at-cccccc", 1, rev)
+	w2, _ := r.mgr.EnsureTask(r.ctx, "at-cccccc", rev)
 	rev2 := r.commit(w2.Path, "c.txt", "c")
 	cand2, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev2}, "promote c")
 	if err != nil || cand2.Base != mainRev || cand2.Revision == rev2 || cand2.Revision == mainRev {
@@ -135,7 +164,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatal("main not at merge")
 	}
 	// Conflict: two branches edit the same file.
-	w3, _ := r.mgr.CreateAttempt(r.ctx, "at-dddddd", 1, "main")
+	w3, _ := r.mgr.EnsureTask(r.ctx, "at-dddddd", "main")
 	r.commit(w3.Path, "m.txt", "conflict A")
 	r.commit(r.dir, "m.txt", "conflict B")
 	rev3 := r.git(w3.Path, "rev-parse", "HEAD")
@@ -144,7 +173,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatalf("conflict: %v", err)
 	}
 	// Target moved between prepare and promote: compare-and-swap refuses.
-	w4, _ := r.mgr.CreateAttempt(r.ctx, "at-eeeeee", 1, "main")
+	w4, _ := r.mgr.EnsureTask(r.ctx, "at-eeeeee", "main")
 	rev4 := r.commit(w4.Path, "e.txt", "e")
 	cand4, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev4}, "x")
 	if err != nil {
@@ -157,7 +186,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatalf("moved target: %v", err)
 	}
 	// Dirty target worktree refuses promotion.
-	w5, _ := r.mgr.CreateAttempt(r.ctx, "at-ffffff", 1, "main")
+	w5, _ := r.mgr.EnsureTask(r.ctx, "at-ffffff", "main")
 	rev5 := r.commit(w5.Path, "f5.txt", "f5")
 	cand5, _ := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
 	os.WriteFile(filepath.Join(r.dir, "dirty.txt"), []byte("x"), 0o644)
@@ -179,5 +208,53 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	}
 	if r.mgr.DefaultBranch(r.ctx) != "other" {
 		t.Fatal("default branch")
+	}
+}
+
+// Two promotions into a checked-out target at once: exactly one wins, the
+// other reports a moved target, and the checkout is never left dirty.
+func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
+	r := newRepo(t)
+	const n = 6
+	cands := make([]Candidate, n)
+	for i := 0; i < n; i++ {
+		w, err := r.mgr.EnsureTask(r.ctx, fmt.Sprintf("at-conc%02d", i), "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rev := r.commit(w.Path, fmt.Sprintf("c%d.txt", i), "c")
+		cands[i], err = r.mgr.PrepareMerge(r.ctx, "main", []string{rev}, "x")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cands[i].Cleanup()
+	}
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range cands {
+		wg.Add(1)
+		go func(i int) { defer wg.Done(); errs[i] = r.mgr.Promote(r.ctx, "main", cands[i]) }(i)
+	}
+	wg.Wait()
+	won, moved := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			won++
+		case errors.Is(err, ErrTargetMoved):
+			moved++
+		default:
+			t.Fatalf("unexpected promotion error: %v", err)
+		}
+	}
+	if won != 1 || moved != n-1 {
+		t.Fatalf("won=%d moved=%d", won, moved)
+	}
+	st, err := Inspect(r.ctx, r.dir)
+	if err != nil || !st.Clean() {
+		t.Fatalf("checkout dirty after concurrent promotion: %+v %v", st, err)
+	}
+	if _, err := os.Stat(filepath.Join(r.git(r.dir, "rev-parse", "--path-format=absolute", "--git-common-dir"), "at-promote.lock")); err == nil {
+		t.Fatal("promotion lock left behind")
 	}
 }

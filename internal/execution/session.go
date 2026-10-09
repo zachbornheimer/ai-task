@@ -42,13 +42,18 @@ func (t Token) Digest() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Lease bounds. The default is long enough for an interactive agent to work
-// without renewing on every step, short enough that a crashed agent frees the
-// task within a working session.
+// Lease bounds. A lease is the maximum silence before the engine assumes
+// the agent is dead: every session-authenticated command renews it, commits
+// renew it through the post-commit hook, and verification heart-beats
+// itself, so the default only has to cover a normal quiet stretch. Expiry
+// is cheap to recover from (the next attempt reuses the task worktree), a
+// stuck task is not.
 const (
-	DefaultLease = time.Hour
-	MinLease     = time.Second
-	MaxLease     = 24 * time.Hour
+	DefaultLease = 30 * time.Minute
+	MinLease     = 5 * time.Minute
+	MaxLease     = 4 * time.Hour
+	// HeartbeatInterval is how often a long operation renews its lease.
+	HeartbeatInterval = 5 * time.Minute
 )
 
 // LeaseDuration resolves a requested lease length against the bounds.

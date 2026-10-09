@@ -8,11 +8,12 @@ The CLI is a thin adapter over the Go engine; both apply the same rules.
 ## Output and exit codes
 
 `AT_OUTPUT=json` (or `--json`) makes every command print exactly one JSON
-envelope on stdout and nothing else there:
+envelope on stdout and nothing else there, compact on one line (`--pretty`
+indents it):
 
 ```json
-{"ok": true,  "result": {...}}
-{"ok": false, "error": {"code": "TASK_BLOCKED", "message": "...", "details": {...}}}
+{"ok":true,"result":{...}}
+{"ok":false,"error":{"code":"TASK_BLOCKED","message":"...","details":{...}}}
 ```
 
 Human mode prints an acknowledgement on stdout after commit and
@@ -36,10 +37,10 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 | `DONE` | every executable task is complete (waiting claim) |
 | `STALLED` | open tasks remain, nothing claimable, nothing in flight; `details` carries the summary with reasons |
 | `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED` | authority failures |
-| `MISSING_VERIFICATION` | a required category has no checks; completion fails closed |
+| `MISSING_VERIFICATION` | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim |
 | `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence |
 | `INTEGRATION_FAILED` | merge conflict, moved target that kept moving, or dirty target checkout |
-| `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes / no repository or worktree |
+| `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes at `verify complete` / the worktree is gone |
 | `INTERNAL` | bug or I/O failure |
 
 ## Planning (planner authority)
@@ -50,13 +51,16 @@ at add "title" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks RE
        [--expect-rev N] [--idempotency-key K] [--planner]
 at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
        [--requires REF]* [--remove-requires REF]* [--set-requires REF]*
-       [--accept ..]* [--constraint ..]* [--check ..]* [--clear-checks]
-       [--archive] [--reset-attempts] [--expect-rev N] [--planner]
+       [--accept ..]* [--constraint ..]* [--check ..]*
+       [--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
 ```
 
 `REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
 plan revision; the Go `Apply` takes a whole batch. Rules:
 
+- Every task carries at least one task check (`--check`). `add` without
+  one is `MISSING_VERIFICATION`; `update --check` replaces the set but
+  cannot empty it. A trivial check (`true`) is the planner's own risk.
 - `B --requires A` means B cannot be claimed until A is complete. Hard
   edges form a DAG; cycles, self-edges, and cross-project edges are
   rejected and nothing is written.
@@ -69,27 +73,52 @@ plan revision; the Go `Apply` takes a whole batch. Rules:
 - Completed tasks cannot be edited or archived. Claimed tasks accept
   prerequisite changes with authority; contract changes need `--planner`
   and make a running verification fail closed.
-- `--archive` is soft deletion: rejected for claimed/completed tasks and
+- `--archive --reason ".."` is soft deletion with a recorded reason
+  (shown as `archive_reason`): rejected for claimed/completed tasks and
   when live dependents or members remain unless the same batch repairs
   them.
+- `add`/`update` results may carry `warnings` (keyed by task reference):
+  advisory planning hints such as a check that looks like a no-op.
 - There is no status flag of any kind. Status is derived.
 
 ## Execution (session authority)
 
 ```
-at claim [REF] [--wait] [--lease 1h]     one atomic leased attempt; prints the token once
-at claim renew <token|->                  token mandatory
-at claim release <token|-> [--note ..] [--failed]
-at log --done .. --next .. --learned .. --note ..     (AT_SESSION, --session, positional, or -)
+at claim [REF] [--wait] [--lease 30m]    one atomic leased attempt; prints the token once
+at claim renew [token|-]                 extend the lease (inside the worktree no token is needed)
+at claim release [token|-] [--note ..] [--failed]
+at log --done .. --next .. --learned .. --note ..     (token: see Token transport)
 at verify task | regression | complete               (same token sources)
 ```
 
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;
-cooldowns and exhausted tasks excluded). `--wait` blocks until work is
+cooldowns and exhausted tasks excluded). It refuses with
+`MISSING_VERIFICATION` while the project has no regression checks: work
+that can never complete is never handed out. `--wait` blocks until work is
 claimable, `DONE`, `STALLED`, or interrupted; while waiting the process
-runs any pending cohort verification job it finds. A claim in a Git
-project gets a private worktree on branch `at/<task>/<n>` (continuing the
-previous attempt's branch when one exists).
+runs any pending cohort verification job it finds.
+
+Every claim gets the task's own worktree on branch `at/<task-id>`, created
+from the project's target branch on the first attempt and reused by every
+later attempt, so the next attempt starts from the previous one's commits
+(and sees its uncommitted edits: the claim reports `workspace_dirty`).
+Worktrees are not deleted by `at`; prune them with your worktree tooling
+once the task is complete.
+
+**Lease.** The default lease is 30 minutes (minimum 5, maximum 4 hours).
+Every authenticated command (`log`, `verify`, `claim renew`, a session
+`add --blocks`) renews it, and the post-commit hook `init` installs runs
+`at claim renew` after every commit in the worktree, so an agent that
+commits or logs at least every half hour never loses its claim. Hosts
+that run the engine in-process get the same from `Renew`. When a lease
+does expire the task becomes claimable again; the old token answers
+`LEASE_EXPIRED` and the holder must stop editing.
+
+**Handoff.** The claim result carries the previous attempts' `latest_next`,
+learnings and recent log, plus `inherited` learnings recorded on the
+task's direct prerequisites and `last_failure`: the failed checks of the
+newest failed verification run with the tail of their output. Read it
+before touching the code.
 
 `verify task` and `verify regression` run that category fresh in the
 attempt's worktree. They are diagnostic: they never complete, release, or
@@ -136,10 +165,17 @@ complete. Tokens never appear in any read view.
 
 ## Token transport
 
-`claim` is the only command that prints a token. A `claim` subprocess
-cannot set `AT_SESSION` in its parent shell: the host captures the JSON
-and injects the token into the agent's environment. `-` reads one line
-from stdin so secrets stay out of process listings.
+`claim` is the only command that prints a token, and it also stores the
+token inside the task worktree's private Git directory
+(`.git/worktrees/<name>/at-session`, never in the tree). Any `at` command
+run with the worktree as its working directory finds it automatically, so
+an agent started inside the worktree needs no token at all. Explicit
+sources win when present, in this order: a positional token, `-` (one
+line of stdin, so secrets stay out of process listings), `--session`,
+`AT_SESSION`, then the worktree file. A `claim` subprocess cannot set
+`AT_SESSION` in its parent shell: hosts that run the agent elsewhere
+capture the JSON and inject the token. A lost token with no worktree is a
+stuck task until the lease expires; that is by design.
 
 ## The tiny agent prompt
 
@@ -152,6 +188,7 @@ When ready, commit the final code revision and call `at verify complete`.
 It runs BOTH suites again and establishes completion only if all gates pass.
 If new prerequisite work is needed, add it as a blocker of the current
 claimed task (`at add "..." --blocks <task>`), log the handoff, and
-release the claim with its token (`at claim release -`).
+release the claim (`at claim release`).
+Commit often: every commit and every `at` command renews your lease.
 Stop editing immediately if claim renewal/authorization fails.
 ```

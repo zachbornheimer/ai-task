@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
@@ -16,51 +18,57 @@ import (
 // base and verifies again.
 var ErrTargetMoved = errors.New("target branch moved")
 
-// Manager performs Git worktree operations for one repository. Every
-// execution attempt gets a private worktree on its own branch; final
-// verification runs in a detached snapshot of the exact revision; promotion
-// is a two-phase merge (prepare a candidate, then compare-and-swap the
-// target branch) so a failing candidate never moves the target.
+// Manager performs Git worktree operations for one repository. Every task
+// gets one branch (`at/<id>`) and one worktree, reused across attempts so
+// uncommitted work survives a crash; final verification runs in a detached
+// snapshot of the exact revision; promotion is a two-phase merge (prepare a
+// candidate, then compare-and-swap the target) so a failing candidate never
+// moves the target.
 type Manager struct {
 	// Repo is the main worktree root of the repository.
 	Repo string
-	// Root is the directory that holds attempt worktrees and snapshots.
+	// Root is the directory that holds task worktrees and snapshots.
 	Root string
 }
 
-// Info describes an attempt worktree.
+// Info describes a task worktree.
 type Info struct {
 	Path   string
 	Branch string
+	// Dirty reports uncommitted changes left by an earlier attempt.
+	Dirty bool
 }
 
-// AttemptBranch names the branch of an attempt.
-func AttemptBranch(taskID string, seq int) string { return fmt.Sprintf("at/%s/%d", taskID, seq) }
+// TaskBranch names the branch of a task.
+func TaskBranch(taskID string) string { return "at/" + taskID }
 
-// CreateAttempt creates the worktree for an attempt, branching from base
-// (a branch name or revision). If the worktree already exists on the right
-// branch it is reused.
-func (m Manager) CreateAttempt(ctx context.Context, taskID string, seq int, base string) (Info, error) {
-	info := Info{Path: filepath.Join(m.Root, fmt.Sprintf("%s-%d", taskID, seq)), Branch: AttemptBranch(taskID, seq)}
+// EnsureTask creates the task's worktree on branch at/<id> from base (a
+// branch name or revision) or reuses it when it already exists.
+func (m Manager) EnsureTask(ctx context.Context, taskID string, base string) (Info, error) {
+	info := Info{Path: filepath.Join(m.Root, taskID), Branch: TaskBranch(taskID)}
 	if err := os.MkdirAll(m.Root, 0o755); err != nil {
 		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create workspace root")
 	}
 	if _, err := os.Stat(filepath.Join(info.Path, ".git")); err == nil {
 		head, err := git(ctx, info.Path, "rev-parse", "--abbrev-ref", "HEAD")
-		if err == nil && strings.TrimSpace(head) == info.Branch {
-			return info, nil
+		if err != nil || strings.TrimSpace(head) != info.Branch {
+			return info, fault.New(fault.CodeWorkspaceUnavailable, "%s exists but is not the worktree for %s", info.Path, info.Branch)
 		}
-		return info, fault.New(fault.CodeWorkspaceUnavailable, "%s exists but is not the worktree for %s", info.Path, info.Branch)
+		if st, err := Inspect(ctx, info.Path); err == nil {
+			info.Dirty = !st.Clean()
+		}
+		return info, nil
 	}
-	if _, err := git(ctx, m.Repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+info.Branch); err == nil {
+	if m.BranchExists(ctx, info.Branch) {
 		// Branch exists (a previous crash between branch creation and
-		// worktree registration); attach a worktree to it.
-		if _, err := git(ctx, m.Repo, "worktree", "add", info.Path, info.Branch); err != nil {
+		// worktree registration, or a pruned worktree); attach to it.
+		_, _ = git(ctx, m.Repo, "worktree", "prune")
+		if _, err := gitRetry(ctx, m.Repo, "worktree", "add", info.Path, info.Branch); err != nil {
 			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "attach worktree for %s", info.Branch)
 		}
 		return info, nil
 	}
-	if _, err := git(ctx, m.Repo, "worktree", "add", "-b", info.Branch, info.Path, base); err != nil {
+	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", "-b", info.Branch, info.Path, base); err != nil {
 		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create worktree for %s from %s", info.Branch, base)
 	}
 	return info, nil
@@ -92,7 +100,7 @@ func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cl
 		return "", nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create snapshot dir")
 	}
 	os.Remove(path) // git worktree add wants to create it
-	if _, err := git(ctx, m.Repo, "worktree", "add", "--detach", path, revision); err != nil {
+	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", "--detach", path, revision); err != nil {
 		return "", nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "snapshot %s", revision)
 	}
 	cleanup = func() {
@@ -160,10 +168,10 @@ func (m Manager) PrepareMerge(ctx context.Context, target string, sources []stri
 
 // Promote advances the target branch from candidate.Base to
 // candidate.Revision. If another promotion moved the target first, it
-// fails with INTEGRATION_FAILED and nothing changes. When the target is
-// checked out in a worktree, that worktree must be clean and is
-// fast-forwarded in place; otherwise the ref is updated with a
-// compare-and-swap.
+// fails with INTEGRATION_FAILED wrapping ErrTargetMoved and nothing
+// changes. When the target is checked out in a worktree, that worktree
+// must be clean and is fast-forwarded in place; otherwise the ref is
+// updated with a compare-and-swap.
 func (m Manager) Promote(ctx context.Context, target string, cand Candidate) error {
 	if cand.Revision == cand.Base {
 		return nil
@@ -173,6 +181,14 @@ func (m Manager) Promote(ctx context.Context, target string, cand Candidate) err
 		return err
 	}
 	if wt != "" {
+		// A fast-forward of a checked-out branch updates the index and
+		// working tree before the ref; two at once leave the loser's
+		// files ahead of HEAD. Serialize promotions into a checkout.
+		unlock, err := m.promoteLock(ctx)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		st, err := Inspect(ctx, wt)
 		if err != nil {
 			return err
@@ -193,6 +209,44 @@ func (m Manager) Promote(ctx context.Context, target string, cand Candidate) err
 	}
 	return nil
 }
+
+// promoteLock takes a repository-wide lock for promotions into a checked
+// out target: a lock file in the common Git directory, created
+// exclusively, held for the few milliseconds a fast-forward takes. A lock
+// older than promoteLockStale is treated as left behind by a dead process.
+func (m Manager) promoteLock(ctx context.Context) (func(), error) {
+	common, err := git(ctx, m.Repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "locate git directory")
+	}
+	path := filepath.Join(strings.TrimSpace(common), "at-promote.lock")
+	delay := 10 * time.Millisecond
+	for {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			fmt.Fprintf(f, "%d\n", os.Getpid())
+			f.Close()
+			return func() { os.Remove(path) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "take promotion lock")
+		}
+		if st, err := os.Stat(path); err == nil && time.Since(st.ModTime()) > promoteLockStale {
+			os.Remove(path)
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fault.Wrap(ctx.Err(), fault.CodeIntegrationFailed, "waiting for the promotion lock %s", path)
+		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
+		}
+		if delay < 200*time.Millisecond {
+			delay *= 2
+		}
+	}
+}
+
+const promoteLockStale = 5 * time.Minute
 
 // worktreeFor returns the path of the worktree that has branch checked
 // out, or "".
@@ -221,6 +275,31 @@ func (m Manager) DefaultBranch(ctx context.Context) string {
 		return "main"
 	}
 	return strings.TrimSpace(out)
+}
+
+// InitRepo turns dir into a Git repository with an initial commit when it
+// is not one yet, so every project is a Git project. It returns true when
+// it created the repository.
+func InitRepo(ctx context.Context, dir string) (bool, error) {
+	if IsGitRepo(dir) {
+		if _, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD"); err == nil {
+			return false, nil
+		}
+		// Repository without commits: give it a root so branches can start.
+		if _, err := git(ctx, dir, "-c", "user.name=at", "-c", "user.email=at@localhost", "commit", "-q", "--allow-empty", "-m", "at: initialize repository"); err != nil {
+			return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create initial commit in %s", dir)
+		}
+		return false, nil
+	}
+	if _, err := git(ctx, dir, "init", "-q", "-b", "main"); err != nil {
+		if _, err2 := git(ctx, dir, "init", "-q"); err2 != nil {
+			return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "git init in %s", dir)
+		}
+	}
+	if _, err := git(ctx, dir, "-c", "user.name=at", "-c", "user.email=at@localhost", "commit", "-q", "--allow-empty", "-m", "at: initialize repository"); err != nil {
+		return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create initial commit in %s", dir)
+	}
+	return true, nil
 }
 
 func short(rev string) string {

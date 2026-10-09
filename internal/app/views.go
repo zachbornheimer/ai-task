@@ -110,6 +110,7 @@ type TaskView struct {
 	CompletedAt       *time.Time                 `json:"completed_at,omitempty"`
 	CompletedRevision string                     `json:"completed_revision,omitempty"`
 	ArchivedAt        *time.Time                 `json:"archived_at,omitempty"`
+	ArchiveReason     string                     `json:"archive_reason,omitempty"`
 	CreatedAt         time.Time                  `json:"created_at"`
 	History           *History                   `json:"history,omitempty"`
 }
@@ -160,14 +161,17 @@ type PlanSnapshot struct {
 
 // Session is what Claim returns: the only place a token is ever emitted.
 type Session struct {
-	Task       TaskView          `json:"task"`
-	Token      execution.Token   `json:"token"`
-	AttemptSeq int               `json:"attempt"`
-	LeaseUntil time.Time         `json:"lease_until"`
-	Workspace  string            `json:"workspace,omitempty"`
-	Branch     string            `json:"branch,omitempty"`
-	Resumed    bool              `json:"resumed"`
-	Handoff    execution.Handoff `json:"handoff"`
+	Task       TaskView        `json:"task"`
+	Token      execution.Token `json:"token"`
+	AttemptSeq int             `json:"attempt"`
+	LeaseUntil time.Time       `json:"lease_until"`
+	Workspace  string          `json:"workspace,omitempty"`
+	Branch     string          `json:"branch,omitempty"`
+	// WorkspaceDirty reports uncommitted changes left by an earlier attempt
+	// in the reused worktree.
+	WorkspaceDirty bool              `json:"workspace_dirty,omitempty"`
+	Resumed        bool              `json:"resumed"`
+	Handoff        execution.Handoff `json:"handoff"`
 }
 
 // VerifyResult reports one verification invocation.
@@ -255,7 +259,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
 		Checks: t.Verification.TaskChecks, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
-		Failures: r.Failures, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, CreatedAt: t.CreatedAt,
+		Failures: r.Failures, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
 	}
 	if !r.NextEligibleAt.IsZero() && r.NextEligibleAt.After(now) {
 		ne := r.NextEligibleAt

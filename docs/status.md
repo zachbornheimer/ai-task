@@ -10,7 +10,7 @@ documented limitations, not silent gaps.
 |---|---|
 | M0 preserve/correct the engine | done: fail-closed completion, no evidence reuse, prerequisite/contract/policy recheck at finalisation, regression namespace separation, token fencing and replay, CI workflow |
 | M1 planning/import API | done: keys, groups, atomic `Apply` with optimistic revision and idempotency, typed `List`/`Show`, deterministic selector, planner authority rules, `at add/update/show/list` with the circle glyphs |
-| M2 execution/verification contract | done: `claim`/`claim renew`/`claim release`/`log`/`verify task\|regression\|complete`, per-attempt worktrees, detached snapshots, finalisation transaction, stable JSON, `Claim(wait)` with `DONE`/`STALLED`/cancel, persistent failures and cooldowns |
+| M2 execution/verification contract | done: `claim`/`claim renew`/`claim release`/`log`/`verify task\|regression\|complete`, per-task worktrees (`at/<id>`, reused across attempts) with worktree-resident tokens and a lease-renewing post-commit hook, mandatory checks at `add` and `claim`, prerequisite learnings and last-failure evidence in the handoff, detached snapshots, finalisation transaction, stable JSON, `Claim(wait)` with `DONE`/`STALLED`/cancel, persistent failures and cooldowns |
 | M3 integration and coupled verification | done: guarded two-phase promotion with compare-and-swap and bounded retry on a moved base; durable leased cohort jobs with crash recovery; no DAG cycles for cohorts |
 | M4 reference example | done: `examples/embedded_runner` with fake planner, reviewer and coding agent; its test drains a seven-task graph (including a cohort) with four workers |
 
@@ -31,7 +31,7 @@ documented limitations, not silent gaps.
 | Empty checks | `TestEmptyChecksFailClosed` |
 | Provisional checks | `TestProvisionalChecksRunFreshAndNeverComplete` |
 | No evidence reuse | `TestNoEvidenceReuseAndSameSnapshot`, `TestGoTestCacheDisabledInCheckEnvironment` |
-| Same snapshot | `TestNoEvidenceReuseAndSameSnapshot`, `workspace.TestAttemptWorktreesAndSnapshots` |
+| Same snapshot | `TestNoEvidenceReuseAndSameSnapshot`, `workspace.TestTaskWorktreesAndSnapshots` |
 | Parallel isolation | not implemented: suites run sequentially on one snapshot (see "Unsupported") |
 | Final success | `TestFinalSuccessIsAtomicAndPromotes` |
 | Final failure | `TestFinalFailureKeepsClaimAndBlocksDownstream` |
@@ -43,7 +43,7 @@ documented limitations, not silent gaps.
 | Integration conflict | `TestIntegrationConflictDoesNotComplete`, `workspace.TestPrepareMergeAndPromote` |
 | Idempotent completion ack | `TestFinalSuccessIsAtomicAndPromotes` (replay section) |
 | CLI rendering | `cli.TestListGolden`, `cli.TestShowGolden`, `cli.TestAckAndVerifyRendering` (`internal/cli/testdata/*.txt`), `e2e.TestAgentLoopEndToEnd` |
-| CLI security | `e2e.TestAgentLoopEndToEnd` (no tokens in read views; renew/release reject missing and stale tokens; JSON parseable) |
+| CLI security | `e2e.TestAgentLoopEndToEnd` (no tokens in read views; renew/release reject missing and stale tokens outside a worktree and need none inside it; the post-commit hook renews the lease; JSON parseable) |
 
 ## Invariants (handoff section 2)
 
@@ -63,10 +63,11 @@ documented limitations, not silent gaps.
   the same snapshot. Nothing can prove two arbitrary suites are isolated,
   so the safe default is sequential; a declared-isolation flag is a future
   addition.
-- **Host-side process control.** The engine renews the lease itself while
-  it runs checks, but it cannot stop a stale agent process from editing
-  files. Per-attempt worktrees limit the blast radius; the host must cancel
-  the agent when `Renew` fails (shown in the example).
+- **Host-side process control.** The engine renews the lease on every
+  authenticated command and on every commit (post-commit hook), but it
+  cannot stop a stale agent process from editing files. Per-task worktrees
+  limit the blast radius; the host must cancel the agent when `Renew`
+  fails (shown in the example).
 - **Human gates.** No human attestation path; a task without runnable
   checks cannot complete. Model such work as a task whose check verifies
   the artefact of the human action (a file, a config value).
@@ -75,11 +76,11 @@ documented limitations, not silent gaps.
 - **Check side effects.** Checks run in a disposable snapshot with
   `GOFLAGS=-count=1`; the engine cannot prove a check does not touch
   shared services or write outside the snapshot.
-- **Worktree cleanup.** Attempt worktrees and `at/<task>/<n>` branches are
-  kept (an agent's shell may still be inside one). No automatic pruning.
-- **Non-Git projects.** Checks run in the project directory without a
-  revision; completion is allowed but evidence is bound to the policy
-  digest only.
+- **Worktree cleanup.** Task worktrees and `at/<id>` branches are kept
+  (the next attempt reuses them; an agent's shell may still be inside
+  one). No automatic pruning.
+- **Git only.** Non-Git projects were removed; `at init` creates a
+  repository when needed.
 - **Regression policy edits do not re-judge completed tasks**; they apply
   to future runs. Task-contract edits on completed tasks are rejected.
 - **Cohort failure attribution.** A failing shared regression sends every

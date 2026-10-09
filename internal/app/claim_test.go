@@ -3,6 +3,9 @@ package app_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +17,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 func TestClaimIsDeterministicOldestFirst(t *testing.T) {
@@ -258,4 +262,48 @@ func TestReleaseAndCooldown(t *testing.T) {
 	}
 	_, err = f.e.Release(f.ctx, s2.Token, app.ReleaseOptions{})
 	wantCode(t, err, fault.CodeSessionSuperseded)
+}
+
+func TestHandoffCarriesPrerequisiteLearningsAndLastFailure(t *testing.T) {
+	f := newFixture(t)
+	a := f.add("a")
+	b := f.add("b", plan.Ref(a))
+	sa := f.claim(string(a))
+	if _, err := f.e.Log(f.ctx, sa.Token, execution.LogEntry{Learned: "the API returns 204 on success"}); err != nil {
+		t.Fatal(err)
+	}
+	f.complete(sa)
+	sb := f.claim(string(b))
+	if len(sb.Handoff.Inherited) != 1 || sb.Handoff.Inherited[0].TaskID != string(a) || sb.Handoff.Inherited[0].Key != "a" || sb.Handoff.Inherited[0].Learned != "the API returns 204 on success" {
+		t.Fatalf("inherited: %+v", sb.Handoff.Inherited)
+	}
+	if sb.Handoff.LastFailure != nil {
+		t.Fatalf("no failure yet: %+v", sb.Handoff.LastFailure)
+	}
+	// A failed verification shows up in the next attempt's handoff with the
+	// failing checks and their output.
+	c := f.addWith("c", "echo boom >&2; exit 3")
+	sc := f.claim(string(c))
+	f.commit(sc.Workspace, "c.txt", "c")
+	_, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeVerificationFailed)
+	if _, err := f.e.Release(f.ctx, sc.Token, app.ReleaseOptions{Note: "stuck"}); err != nil {
+		t.Fatal(err)
+	}
+	sc2 := f.claim(string(c))
+	lf := sc2.Handoff.LastFailure
+	if lf == nil || lf.Mode != string(verification.ModeComplete) || len(lf.Checks) != 1 || lf.Checks[0].CheckID != "unit-c" || !strings.Contains(lf.Checks[0].StderrTail, "boom") {
+		t.Fatalf("last failure: %+v", lf)
+	}
+	// Worktree reuse: the previous attempt's commit is still there and the
+	// token stored in the worktree is the new attempt's.
+	if _, err := os.Stat(filepath.Join(sc2.Workspace, "c.txt")); err != nil {
+		t.Fatal("work not carried over")
+	}
+	if tok := workspace.LoadToken(f.ctx, sc2.Workspace); tok != string(sc2.Token) {
+		t.Fatalf("stored token %q != %q", tok, sc2.Token)
+	}
+	if _, err := os.Stat(filepath.Join(sc2.Workspace, "at-session")); err == nil {
+		t.Fatal("token stored inside the tree")
+	}
 }

@@ -91,21 +91,22 @@ type Spec struct {
 
 // Task is the stored contract.
 type Task struct {
-	ID           ID                    `json:"id"`
-	ProjectID    project.ID            `json:"project_id"`
-	Kind         Kind                  `json:"kind"`
-	Key          string                `json:"key,omitempty"`
-	ParentID     ID                    `json:"parent_id,omitempty"`
-	Description  string                `json:"title"`
-	Outcome      string                `json:"outcome"`
-	Constraints  []string              `json:"constraints,omitempty"`
-	Acceptance   []AcceptanceCriterion `json:"acceptance,omitempty"`
-	Verification verification.Policy   `json:"verification"`
-	Cohort       string                `json:"cohort,omitempty"`
-	ContractRev  int                   `json:"contract_rev"`
-	ArchivedAt   *time.Time            `json:"archived_at,omitempty"`
-	CreatedAt    time.Time             `json:"created_at"`
-	UpdatedAt    time.Time             `json:"updated_at"`
+	ID            ID                    `json:"id"`
+	ProjectID     project.ID            `json:"project_id"`
+	Kind          Kind                  `json:"kind"`
+	Key           string                `json:"key,omitempty"`
+	ParentID      ID                    `json:"parent_id,omitempty"`
+	Description   string                `json:"title"`
+	Outcome       string                `json:"outcome"`
+	Constraints   []string              `json:"constraints,omitempty"`
+	Acceptance    []AcceptanceCriterion `json:"acceptance,omitempty"`
+	Verification  verification.Policy   `json:"verification"`
+	Cohort        string                `json:"cohort,omitempty"`
+	ContractRev   int                   `json:"contract_rev"`
+	ArchivedAt    *time.Time            `json:"archived_at,omitempty"`
+	ArchiveReason string                `json:"archive_reason,omitempty"`
+	CreatedAt     time.Time             `json:"created_at"`
+	UpdatedAt     time.Time             `json:"updated_at"`
 }
 
 // Archived reports whether the task has been soft-deleted.

@@ -286,7 +286,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 		}
 		fmt.Fprintln(w)
 	}
-	if v.Handoff != nil && v.Handoff.TotalLogs > 0 {
+	if v.Handoff != nil && !v.Handoff.Empty() {
 		fmt.Fprintln(w)
 		renderHandoff(w, *v.Handoff)
 	}
@@ -338,7 +338,7 @@ func short(rev string) string {
 }
 
 func renderHandoff(w io.Writer, h execution.Handoff) {
-	if h.TotalLogs == 0 {
+	if h.Empty() {
 		return
 	}
 	fmt.Fprintln(w, "HANDOFF")
@@ -348,12 +348,52 @@ func renderHandoff(w io.Writer, h execution.Handoff) {
 	for _, l := range h.Learnings {
 		fmt.Fprintf(w, "Learned:  %s\n", l)
 	}
-	fmt.Fprintf(w, "Recent log (%d of %d, newest first):\n", len(h.RecentLogs), h.TotalLogs)
-	for _, l := range h.RecentLogs {
-		renderLog(w, l)
+	for _, l := range h.Inherited {
+		ref := string(l.TaskID)
+		if l.Key != "" {
+			ref = l.Key
+		}
+		fmt.Fprintf(w, "From %s: %s\n", ref, l.Learned)
+	}
+	if f := h.LastFailure; f != nil {
+		fmt.Fprintf(w, "Last failure (%s run #%d): %s\n", f.Mode, f.RunID, f.Summary)
+		for _, c := range f.Checks {
+			fmt.Fprintf(w, "  ✗ %s (%s)", c.CheckID, c.Outcome)
+			if c.Message != "" {
+				fmt.Fprintf(w, ": %s", c.Message)
+			}
+			fmt.Fprintln(w)
+			for _, tail := range []string{c.StderrTail, c.StdoutTail} {
+				for _, line := range strings.Split(strings.TrimRight(tail, "\n"), "\n") {
+					if line != "" {
+						fmt.Fprintf(w, "      %s\n", line)
+					}
+				}
+			}
+		}
+	}
+	if h.TotalLogs > 0 {
+		fmt.Fprintf(w, "Recent log (%d of %d, newest first):\n", len(h.RecentLogs), h.TotalLogs)
+		for _, l := range h.RecentLogs {
+			renderLog(w, l)
+		}
 	}
 	for _, wn := range h.Warnings {
 		fmt.Fprintf(w, "Warning:  %s\n", wn)
+	}
+}
+
+// renderWarnings prints planning warnings keyed by task reference.
+func renderWarnings(w io.Writer, warnings map[string][]string) {
+	keys := make([]string, 0, len(warnings))
+	for k := range warnings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, msg := range warnings[k] {
+			fmt.Fprintf(w, "Warning:  %s: %s\n", k, msg)
+		}
 	}
 }
 

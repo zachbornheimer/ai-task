@@ -43,22 +43,14 @@ type fixture struct {
 	c    *clock
 	path string
 	proj project.Project
-	repo string // "" for projects without a Git repository
+	repo string
 }
 
-// newFixture creates a project without a directory: checks cannot run,
-// which is fine for planning and claiming tests.
-func newFixture(t *testing.T) *fixture {
-	t.Helper()
-	f := &fixture{t: t, ctx: context.Background(), c: newClock(), path: filepath.Join(t.TempDir(), "at.db")}
-	f.e = f.open()
-	var err error
-	f.proj, err = f.e.InitProject(f.ctx, "demo", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
-}
+// newFixture is newGitFixture: every project is a Git project.
+func newFixture(t *testing.T) *fixture { t.Helper(); return newGitFixture(t) }
+
+// okChecks is the minimal task check set every task must carry.
+func okChecks() []verification.CheckSpec { return []verification.CheckSpec{check("u", "true", true)} }
 
 // newGitFixture creates a project whose root is a Git repository with one
 // commit on main and a passing regression check.

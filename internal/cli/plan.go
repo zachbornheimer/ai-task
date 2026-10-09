@@ -17,11 +17,11 @@ import (
 )
 
 func init() {
-	register("init", "register the current directory (or --path) as a project", runInit)
+	register("init", "register the current directory (or --path) as a Git project (runs `git init` if needed)", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --regression-json, --integration, --target-branch, --max-attempts", runProject)
 	register("add", "plan a task or group: at add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]*", runAdd)
-	register("update", "change a plan item: at update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive] [--reset-attempts]", runUpdate)
+	register("update", "change a plan item: at update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts]", runUpdate)
 	register("show", "show a task or group: at show REF [--full]", runShow)
 	register("list", "list the plan: at list [ready|blocked|all|archived]", runList)
 	register("status", "project summary: counts, claimable, active, done, stalled", runStatus)
@@ -59,7 +59,6 @@ func (c *ctxt) changeSet(pid project.ID, pf planFlags, ops ...plan.Change) plan.
 func runInit(ctx context.Context, c *ctxt, args []string) error {
 	name := c.fs.String("name", "", "display name (default: directory name)")
 	path := c.fs.String("path", "", "directory to register (default: current directory)")
-	noDir := c.fs.Bool("no-dir", false, "register a project with no directory")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -68,26 +67,29 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	dir := *path
-	if dir == "" && !*noDir {
+	if dir == "" {
 		dir = c.env.Cwd
 	}
-	if *noDir {
-		dir = ""
-	}
-	p, err := e.InitProject(ctx, *name, dir)
+	res, err := e.InitProjectResult(ctx, *name, dir)
 	if err != nil {
 		return err
 	}
-	return c.emit(p, func(w io.Writer) {
+	p := res.Project
+	return c.emit(res, func(w io.Writer) {
 		fmt.Fprintf(w, "✓ Registered project %s · %s\n", p.ID, p.Name)
-		if p.RootPath != "" {
-			fmt.Fprintf(w, "Root:        %s\n", p.RootPath)
+		fmt.Fprintf(w, "Root:        %s\n", p.RootPath)
+		if res.CreatedRepo {
+			fmt.Fprintln(w, "Repository:  created (git init + initial commit)")
 		}
-		if p.TargetBranch != "" {
-			fmt.Fprintf(w, "Target:      %s (integration: %s)\n", p.TargetBranch, p.Integration)
+		fmt.Fprintf(w, "Target:      %s (integration: %s; task branches at/<id>)\n", p.TargetBranch, p.Integration)
+		switch {
+		case res.HookInstalled:
+			fmt.Fprintln(w, "Hook:        post-commit installed (commits renew the lease)")
+		case res.HookSkipped:
+			fmt.Fprintln(w, "Hook:        post-commit NOT installed (a foreign hook exists; add `at claim renew` to it)")
 		}
 		fmt.Fprintf(w, "State:       %s\n", e.Path())
-		fmt.Fprintln(w, "Next:        define regression checks with `at project --regression-json '[...]'`")
+		fmt.Fprintln(w, "Next:        define regression checks with `at project --regression-check \"id: cmd\"` (required before any claim)")
 	})
 }
 
@@ -310,6 +312,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		if verr == nil {
 			renderAck(w, view)
 		}
+		renderWarnings(w, res.Warnings)
 		fmt.Fprintf(w, "Plan rev: %d\n", res.PlanRev)
 	})
 }
@@ -329,8 +332,8 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.Var(&requires, "requires", "add a hard prerequisite (repeatable)")
 	c.fs.Var(&remove, "remove-requires", "remove a hard prerequisite (repeatable)")
 	c.fs.Var(&setRequires, "set-requires", "replace the prerequisite set (repeatable; use once with empty value to clear)")
-	clearChecks := c.fs.Bool("clear-checks", false, "remove every task check")
-	archive := c.fs.Bool("archive", false, "archive (soft-delete) the task or group")
+	archive := c.fs.Bool("archive", false, "archive (soft-delete) the task or group; needs --reason")
+	reason := c.fs.String("reason", "", "why the item is archived (recorded; required with --archive)")
 	reset := c.fs.Bool("reset-attempts", false, "clear failure bookkeeping so the task can be claimed again")
 	if err := c.parse(args); err != nil {
 		return err
@@ -345,7 +348,10 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	target := plan.Ref(c.args[0])
 	var ops []plan.Change
 	if *archive {
-		ops = append(ops, plan.ArchiveTask{Target: target})
+		if strings.TrimSpace(*reason) == "" {
+			return usage("--archive needs --reason: say why the item is leaving the plan")
+		}
+		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
 	} else {
 		u := plan.UpdateTask{Target: target, ResetAttempts: *reset}
 		if *title != "" {
@@ -367,9 +373,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if len(accept) > 0 {
 			u.Acceptance = plan.Replace([]string(accept))
 		}
-		if *clearChecks {
-			u.TaskChecks = plan.Replace([]verification.CheckSpec{})
-		} else if len(checks)+len(optionalChecks) > 0 {
+		if len(checks)+len(optionalChecks) > 0 {
 			var list []verification.CheckSpec
 			for i, raw := range checks {
 				cs, err := parseCheck(raw, i+1, true)
@@ -431,6 +435,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		} else {
 			fmt.Fprintf(w, "✓ %s %s\n", verb, target)
 		}
+		renderWarnings(w, res.Warnings)
 		fmt.Fprintf(w, "Plan rev: %d\n", res.PlanRev)
 	})
 }

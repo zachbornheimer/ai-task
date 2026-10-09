@@ -66,9 +66,11 @@ type UpdateTask struct {
 	ResetAttempts bool
 }
 
-// ArchiveTask soft-deletes a task or group.
+// ArchiveTask soft-deletes a task or group. Reason is mandatory: removing a
+// step from a plan is never silent.
 type ArchiveTask struct {
 	Target Ref
+	Reason string
 }
 
 // Patch carries a list replacement: Set false means unchanged.
@@ -157,6 +159,9 @@ func (cs ChangeSet) Validate() error {
 			if c.Target == "" {
 				return fault.New(fault.CodeInvalidInput, "operation %d: archive needs a target", i)
 			}
+			if strings.TrimSpace(c.Reason) == "" {
+				return fault.New(fault.CodeInvalidInput, "operation %d: archive needs a reason (--reason)", i)
+			}
 		default:
 			return fault.New(fault.CodeInvalidInput, "operation %d: unknown change type", i)
 		}
@@ -172,4 +177,6 @@ type Result struct {
 	Created  map[string]task.ID `json:"created,omitempty"` // key or title -> id
 	Updated  []task.ID          `json:"updated,omitempty"`
 	Archived []task.ID          `json:"archived,omitempty"`
+	// Warnings are non-blocking atomicity hints keyed like Created.
+	Warnings map[string][]string `json:"warnings,omitempty"`
 }
