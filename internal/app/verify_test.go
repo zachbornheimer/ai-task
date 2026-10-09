@@ -324,10 +324,18 @@ func TestIntegrationConflictDoesNotComplete(t *testing.T) {
 	f.commit(s.Workspace, "f.txt", "from a")
 	// main moves with a conflicting change before a verifies.
 	f.commit(f.repo, "f.txt", "from main")
-	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeIntegrationFailed)
 	if f.status(string(a)) == task.StatusComplete || f.git(f.repo, "rev-parse", "HEAD") != f.git(f.repo, "rev-parse", "main") {
 		t.Fatal("completed or moved target despite conflict")
+	}
+	// The refusal names the conflicting files and the remedy, and no check
+	// ran: the merge is checked before any check time is spent.
+	if len(res.Conflicts) != 1 || res.Conflicts[0] != "f.txt" || !strings.Contains(res.Message, "git merge main") || len(res.Evidence) != 0 {
+		t.Fatalf("conflict result: %+v", res)
+	}
+	if v := f.show(string(a)); v.Failures != 0 || !strings.Contains(v.LastError, "f.txt") {
+		t.Fatalf("conflict must be recorded without a strike: failures=%d last_error=%q", v.Failures, v.LastError)
 	}
 	if b, _ := os.ReadFile(filepath.Join(f.repo, "f.txt")); string(b) != "from main" {
 		t.Fatal("target content changed")
@@ -337,7 +345,7 @@ func TestIntegrationConflictDoesNotComplete(t *testing.T) {
 	sb := f.claim(string(b))
 	f.commit(sb.Workspace, "b.txt", "b")
 	f.commit(f.repo, "other.txt", "main again")
-	res, err := f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
+	res, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
 	if err != nil || !res.Completed || res.IntegratedRevision == "" || res.IntegratedRevision == res.Revision {
 		t.Fatalf("%+v %v", res, err)
 	}

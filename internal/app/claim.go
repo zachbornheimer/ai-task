@@ -215,6 +215,10 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	sess.Workspace, sess.Branch, sess.WorkspaceDirty, sess.QuarantinedWorkspace = info.Path, info.Branch, info.Dirty, info.Quarantined
+	sess.TargetBranch, sess.Regression = proj.TargetBranch, proj.Regression
+	if rev, err := mgr.Revision(ctx, "refs/heads/"+proj.TargetBranch); err == nil {
+		sess.TargetRevision = rev
+	}
 	if sess.Task.Attempt != nil {
 		sess.Task.Attempt.Workspace, sess.Task.Attempt.Branch = info.Path, info.Branch
 	}

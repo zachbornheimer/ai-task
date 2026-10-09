@@ -175,6 +175,19 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 			}
 			fmt.Fprintln(w)
 		}
+		if s.TargetBranch != "" {
+			fmt.Fprintf(w, "Target:    %s", s.TargetBranch)
+			if s.TargetRevision != "" {
+				fmt.Fprintf(w, " at %s", s.TargetRevision[:min(12, len(s.TargetRevision))])
+			}
+			fmt.Fprintln(w, " (verified work is promoted there; on INTEGRATION_FAILED merge it into your branch)")
+		}
+		if len(s.Regression) > 0 {
+			fmt.Fprintf(w, "Regression: %d check(s) run by `verify complete` after the task checks:\n", len(s.Regression))
+			for _, ch := range s.Regression {
+				fmt.Fprintf(w, "  - %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
+			}
+		}
 		if s.WorkspaceDirty {
 			fmt.Fprintln(w, "Warning:   workspace has uncommitted changes from a previous attempt; review `git status` before editing")
 		}

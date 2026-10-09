@@ -42,7 +42,7 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 | `MISSING_VERIFICATION` | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim |
 | `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once |
 | `VERIFICATION_RUNNING` | this attempt's `verify complete` is still running; wait for its result |
-| `INTEGRATION_FAILED` | merge conflict, moved target that kept moving, or dirty target checkout |
+| `INTEGRATION_FAILED` | merge conflict (`details.conflicts` lists the files; merge the target branch into the task branch, commit, verify again), moved target that kept moving, or dirty target checkout; never a strike |
 | `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes at `verify complete` / the worktree is gone |
 | `INTERNAL` | bug or I/O failure |
 
@@ -120,6 +120,13 @@ that can never complete is never handed out. `--wait` blocks until work is
 claimable, `DONE`, `STALLED`, or interrupted; while waiting the process
 runs any pending cohort verification job it finds.
 
+The claim result carries the task view, the token (the only place it is
+ever printed), `attempt`, `lease_until`, `workspace` and `branch`,
+`target_branch` with its head `target_revision` at claim time (the base
+the worktree was created from on a first attempt), `regression_checks`
+(the project checks `verify complete` runs after the task checks), and
+the `handoff`.
+
 Every claim gets the task's own worktree on branch `at/<task-id>`, created
 from the project's target branch on the first attempt and reused by every
 later attempt, so the next attempt starts from the previous one's commits
@@ -157,19 +164,22 @@ newest failed verification run with the tail of their output. Read it
 before touching the code.
 
 `verify task` and `verify regression` run that category fresh in the
-attempt's worktree. They are diagnostic: they never complete, release, or
-integrate. `verify complete`:
+attempt's worktree, working tree included (the summary says so when it
+has uncommitted changes; `revision` is HEAD). They are diagnostic: they
+never complete, release, or integrate. `verify complete`:
 
 1. refuses unless both categories have checks (`MISSING_VERIFICATION`) and
    every prerequisite is complete (`TASK_BLOCKED`);
 2. requires a clean worktree and records its HEAD as the immutable
    submission (nothing is committed on your behalf);
-3. runs BOTH suites fresh on a detached snapshot of that revision;
-4. in `promote` projects, merges the revision onto the target branch in a
-   scratch worktree, re-runs both suites on the merge when it changed
+3. in `promote` projects, first merges the revision onto the target branch
+   in a scratch worktree; a conflict is `INTEGRATION_FAILED` before any
+   check runs, with `details.conflicts` naming the files;
+4. runs BOTH suites fresh on a detached snapshot of that revision;
+5. in `promote` projects, re-runs both suites on the merge when it changed
    content, and compare-and-swaps the target (rebuilding on a moved base
    up to three times);
-5. in one transaction re-checks the session, prerequisites, contract
+6. in one transaction re-checks the session, prerequisites, contract
    revision, regression policy and the run's evidence, then records
    completion and ends the claim.
 
@@ -267,6 +277,8 @@ Use `at log` for progress/discoveries.
 Use `at verify task` and `at verify regression` while iterating.
 When ready, commit the final code revision and call `at verify complete`.
 It runs BOTH suites again and establishes completion only if all gates pass.
+INTEGRATION_FAILED means the target branch moved against you: merge it into
+your branch, resolve `details.conflicts`, commit, and verify again.
 If new prerequisite work is needed, add it as a blocker of the current
 claimed task (`at add "..." --blocks <task> --check "id: cmd"`; your
 AT_SESSION authorises it), log the handoff, and release the claim

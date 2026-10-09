@@ -136,7 +136,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	}
 	summary := verdict.Summary
 	if dirty {
-		summary += "; workspace had uncommitted changes (diagnostic only)"
+		summary += "; ran in the working tree with uncommitted changes (diagnostic only: `verify complete` tests the committed revision)"
 	}
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(runID, status, summary, e.now()) }); err != nil {
 		return res, err
@@ -416,23 +416,54 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		})
 		res.Evidence, res.Summary = evidence, summary
 		res.Status = e.statusOf(ctx, fr.rec.Task.ID)
-		switch class {
-		case classAttempt:
+		switch {
+		case class == classAttempt:
 			res.Message = "task NOT complete: a required check failed; the claim stays live for repair (counted against the attempt budget once)"
-		case classEnvironment:
+		case code == fault.CodeIntegrationFailed && len(res.Conflicts) > 0:
+			res.Message = fmt.Sprintf("task NOT complete: the submitted revision conflicts with %s (%s); in the worktree run `git merge %s`, resolve the conflicts, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, strings.Join(res.Conflicts, ", "), fr.proj.TargetBranch)
+		case code == fault.CodeIntegrationFailed:
+			res.Message = fmt.Sprintf("task NOT complete: the submitted revision could not be promoted to %s; merge %s into the task branch, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, fr.proj.TargetBranch)
+		case class == classEnvironment:
 			res.Message = "task NOT complete: the environment stopped the run, not the checks; fix the cause and verify again (not counted as a failure)"
 		default:
 			res.Message = "task NOT complete: authority or contract changed during verification; verify again under the current contract (not counted as a failure)"
 		}
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("%s: %s", fr.rec.Task.ID, summary), Details: res}
 	}
-	// Immutable inputs: detached snapshots of the submitted revision, one
-	// per check category.
+	// conflict records the conflicting files of a merge failure on the
+	// result before fail renders it.
+	conflict := func(err error) (VerifyResult, error) {
+		var ce *workspace.ConflictError
+		if errors.As(err, &ce) {
+			res.Conflicts = ce.Files
+		}
+		return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, fault.MessageOf(err), res.Evidence)
+	}
 	mgr := e.manager(fr.proj)
 	checkCtx := fr.checkCtx
 	if checkCtx == nil {
 		checkCtx = ctx
 	}
+	integrate := fmt.Sprintf("at: integrate %s (%s)", fr.rec.Task.ID, fr.rec.Task.Description)
+	// A submission that cannot merge into the target is refused before any
+	// check runs: the holder has a merge to resolve, and the checks would
+	// only be repeated on the merged result. The candidate built here is
+	// reused by the first promotion attempt below.
+	var prepared *workspace.Candidate
+	if fr.proj.Integration == project.IntegrationPromote {
+		cand, err := mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, integrate)
+		if err != nil {
+			return conflict(err)
+		}
+		prepared = &cand
+		defer func() {
+			if prepared != nil {
+				prepared.Cleanup()
+			}
+		}()
+	}
+	// Immutable inputs: detached snapshots of the submitted revision, one
+	// per check category.
 	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence)
 	if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(evidence) == 0 {
 		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
@@ -500,9 +531,16 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// completion. A moved target rebuilds (bounded); a crash anywhere is
 	// resolved by reconciliation from the intent and Git.
 	for attempt := 0; attempt < 3; attempt++ {
-		cand, err := mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, fmt.Sprintf("at: integrate %s (%s)", fr.rec.Task.ID, fr.rec.Task.Description))
-		if err != nil {
-			return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
+		var cand workspace.Candidate
+		if prepared != nil {
+			cand, prepared = *prepared, nil
+		} else {
+			var err error
+			cand, err = mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, integrate)
+			if err != nil {
+				res.Evidence = evidence
+				return conflict(err)
+			}
 		}
 		final := fr.revision
 		if cand.Revision != fr.revision {

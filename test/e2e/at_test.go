@@ -167,6 +167,10 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if taskID(sess) != a || !strings.HasPrefix(tok, "sess-") || ws == "" {
 		t.Fatalf("claim: %v", sess)
 	}
+	// The claim says where work lands and which regression checks will run.
+	if sess["target_branch"] != "main" || sess["target_revision"] == "" || len(sess["regression_checks"].([]any)) == 0 {
+		t.Fatalf("claim lacks target or regression checks: %v", sess)
+	}
 	with := []string{"AT_SESSION=" + tok}
 	// log via AT_SESSION, positional, --session, and stdin.
 	if r := e.runIn(e.cwd, "", with, "log", "--done", "started", "--next", "write parse.txt"); r.code != 0 {

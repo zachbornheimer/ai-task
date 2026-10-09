@@ -191,6 +191,14 @@ type Session struct {
 	LeaseUntil time.Time       `json:"lease_until"`
 	Workspace  string          `json:"workspace,omitempty"`
 	Branch     string          `json:"branch,omitempty"`
+	// TargetBranch is the branch verified work is promoted to and the one
+	// to merge into the task branch when integration reports a conflict;
+	// TargetRevision is its head when the claim was made.
+	TargetBranch   string `json:"target_branch,omitempty"`
+	TargetRevision string `json:"target_revision,omitempty"`
+	// Regression lists the project's regression checks, which `verify
+	// complete` runs after the task checks.
+	Regression []verification.CheckSpec `json:"regression_checks"`
 	// WorkspaceDirty reports uncommitted changes left by an earlier attempt
 	// in the reused worktree.
 	WorkspaceDirty bool `json:"workspace_dirty,omitempty"`
@@ -218,6 +226,9 @@ type VerifyResult struct {
 	Evidence           []verification.Evidence `json:"evidence"`
 	Message            string                  `json:"message,omitempty"`
 	Replayed           bool                    `json:"replayed,omitempty"`
+	// Conflicts lists the files that stopped the submitted revision from
+	// merging into the target branch (INTEGRATION_FAILED only).
+	Conflicts []string `json:"conflicts,omitempty"`
 }
 
 func rel(r sqlite.Record, st task.Status) Rel {

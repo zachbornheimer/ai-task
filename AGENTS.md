@@ -27,6 +27,13 @@ Rules of the road:
   with the evidence in `error.details`. Fix, commit, verify again.
 - Commit before `verify complete`; the tree must be clean and nothing is
   committed for you.
+- `INTEGRATION_FAILED` means your branch no longer merges into the target
+  branch (the claim printed it as `target_branch`; `error.details.conflicts`
+  lists the files). In the worktree run `git merge <target>`, resolve,
+  commit, and `verify complete` again. It is not counted against you.
+- `at claim --wait` ends with the coded errors `DONE` (everything is
+  complete) or `STALLED` (a planner is needed); both are normal exits for
+  a worker loop, not failures.
 - Your lease is 30 minutes and every `at` command renews it; `at log`
   progress at least that often.
 - Read the handoff the claim printed: previous attempts' next step and

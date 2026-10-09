@@ -18,6 +18,26 @@ import (
 // base and verifies again.
 var ErrTargetMoved = errors.New("target branch moved")
 
+// ConflictError reports that a source could not be merged onto the target
+// branch. Files lists the conflicting paths; the holder resolves them by
+// merging the target into the task branch, committing, and verifying again.
+type ConflictError struct {
+	Source string
+	Target string
+	Files  []string
+	Err    error
+}
+
+func (e *ConflictError) Error() string {
+	msg := fmt.Sprintf("merging %s into %s failed", short(e.Source), e.Target)
+	if len(e.Files) > 0 {
+		msg += " (conflicts: " + strings.Join(e.Files, ", ") + ")"
+	}
+	return msg
+}
+
+func (e *ConflictError) Unwrap() error { return e.Err }
+
 // Manager performs Git worktree operations for one repository. Every task
 // gets one branch (`at/<id>`) and one worktree, reused across attempts so
 // uncommitted work survives a crash; final verification runs in a detached
@@ -227,11 +247,13 @@ func (m Manager) PrepareMerge(ctx context.Context, target string, sources []stri
 			conflicts, _ := git(ctx, path, "diff", "--name-only", "--diff-filter=U")
 			_, _ = git(ctx, path, "merge", "--abort")
 			cleanup()
-			msg := strings.TrimSpace(conflicts)
-			if msg != "" {
-				msg = " (conflicts: " + strings.ReplaceAll(msg, "\n", ", ") + ")"
+			ce := &ConflictError{Source: src, Target: target, Err: err}
+			for _, f := range strings.Split(strings.TrimSpace(conflicts), "\n") {
+				if f != "" {
+					ce.Files = append(ce.Files, f)
+				}
 			}
-			return Candidate{}, fault.Wrap(err, fault.CodeIntegrationFailed, "merging %s into %s failed%s", short(src), target, msg)
+			return Candidate{}, fault.Wrap(ce, fault.CodeIntegrationFailed, "%s", ce.Error())
 		}
 	}
 	rev, err := git(ctx, path, "rev-parse", "HEAD")
