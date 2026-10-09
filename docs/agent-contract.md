@@ -178,7 +178,8 @@ acknowledgement: the stored submission and the member's current status,
 no new run, no new authority. A submission waiting for its peers pins the
 member's contract: changing it needs `at update <ref> --planner
 --withdraw-submission` (the member becomes claimable, nothing is counted,
-and it must resubmit under the new contract). Blame is precise: a
+and it must resubmit under the new contract); while a cohort job runs,
+members' contracts are pinned outright. Blame is precise: a
 member whose own checks fail goes back alone; a late conflict on one
 member (new prerequisite, archive) sends only that member back while its
 peers keep their submissions; a shared regression failure sends every

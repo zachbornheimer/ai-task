@@ -480,7 +480,14 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if s := rec.Submission; s != nil && (contract || edges) {
 		switch s.RunStatus() {
 		case sqlite.RunRunning:
-			return fault.New(fault.CodePlanConflict, "%s is being verified; its contract is pinned until the run ends", t.ID)
+			// A single task's running final run re-checks the contract in
+			// its intent transaction and fails closed (planner authority
+			// is still required above). A cohort job judges several
+			// members at once, so a member's contract is pinned outright
+			// while the job runs.
+			if s.Run != nil && s.Run.Mode == verification.ModeCohort {
+				return fault.New(fault.CodePlanConflict, "%s is being verified by a cohort job; its contract is pinned until the job ends", t.ID)
+			}
 		case sqlite.RunPending:
 			if !c.WithdrawSubmission || !a.cs.Planner {
 				return fault.New(fault.CodePlanConflict, "%s has a submission awaiting its cohort peers; its contract is pinned. To change it, withdraw the submission explicitly (planner authority: --planner --withdraw-submission); the member will have to resubmit", t.ID)
