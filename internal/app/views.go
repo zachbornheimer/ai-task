@@ -84,35 +84,39 @@ type History struct {
 
 // TaskView is the read model for one task or group.
 type TaskView struct {
-	ID                task.ID                    `json:"id"`
-	Kind              task.Kind                  `json:"kind"`
-	Key               string                     `json:"key,omitempty"`
-	Project           string                     `json:"project,omitempty"`
-	Title             string                     `json:"title"`
-	Outcome           string                     `json:"outcome,omitempty"`
-	Constraints       []string                   `json:"constraints,omitempty"`
-	Acceptance        []task.AcceptanceCriterion `json:"acceptance,omitempty"`
-	Checks            []verification.CheckSpec   `json:"task_checks,omitempty"`
-	Cohort            string                     `json:"cohort,omitempty"`
-	ContractRev       int                        `json:"contract_rev"`
-	Status            task.Status                `json:"status"`
-	Group             *Rel                       `json:"group,omitempty"`
-	Children          []Rel                      `json:"children,omitempty"`
-	Progress          *Progress                  `json:"progress,omitempty"`
-	Requires          []Rel                      `json:"requires,omitempty"`
-	Blocks            []Rel                      `json:"blocks,omitempty"`
-	Attempt           *AttemptView               `json:"attempt,omitempty"`
-	Submission        *SubmissionView            `json:"submission,omitempty"`
-	Verification      VerificationSummary        `json:"verification"`
-	Handoff           *execution.Handoff         `json:"handoff,omitempty"`
-	Failures          int                        `json:"failures,omitempty"`
-	NextEligibleAt    *time.Time                 `json:"next_eligible_at,omitempty"`
-	CompletedAt       *time.Time                 `json:"completed_at,omitempty"`
-	CompletedRevision string                     `json:"completed_revision,omitempty"`
-	ArchivedAt        *time.Time                 `json:"archived_at,omitempty"`
-	ArchiveReason     string                     `json:"archive_reason,omitempty"`
-	CreatedAt         time.Time                  `json:"created_at"`
-	History           *History                   `json:"history,omitempty"`
+	ID           task.ID                    `json:"id"`
+	Kind         task.Kind                  `json:"kind"`
+	Key          string                     `json:"key,omitempty"`
+	Project      string                     `json:"project,omitempty"`
+	Title        string                     `json:"title"`
+	Outcome      string                     `json:"outcome,omitempty"`
+	Constraints  []string                   `json:"constraints,omitempty"`
+	Acceptance   []task.AcceptanceCriterion `json:"acceptance,omitempty"`
+	Checks       []verification.CheckSpec   `json:"task_checks,omitempty"`
+	Cohort       string                     `json:"cohort,omitempty"`
+	ContractRev  int                        `json:"contract_rev"`
+	Status       task.Status                `json:"status"`
+	Group        *Rel                       `json:"group,omitempty"`
+	Children     []Rel                      `json:"children,omitempty"`
+	Progress     *Progress                  `json:"progress,omitempty"`
+	Requires     []Rel                      `json:"requires,omitempty"`
+	Blocks       []Rel                      `json:"blocks,omitempty"`
+	Attempt      *AttemptView               `json:"attempt,omitempty"`
+	Submission   *SubmissionView            `json:"submission,omitempty"`
+	Verification VerificationSummary        `json:"verification"`
+	Handoff      *execution.Handoff         `json:"handoff,omitempty"`
+	// Integration is the open promotion intent while the task is
+	// awaiting_integration: the candidate has been verified and is being
+	// (or was) promoted; completion follows.
+	Integration       *IntentView `json:"integration,omitempty"`
+	Failures          int         `json:"failures,omitempty"`
+	NextEligibleAt    *time.Time  `json:"next_eligible_at,omitempty"`
+	CompletedAt       *time.Time  `json:"completed_at,omitempty"`
+	CompletedRevision string      `json:"completed_revision,omitempty"`
+	ArchivedAt        *time.Time  `json:"archived_at,omitempty"`
+	ArchiveReason     string      `json:"archive_reason,omitempty"`
+	CreatedAt         time.Time   `json:"created_at"`
+	History           *History    `json:"history,omitempty"`
 }
 
 // GroupView is a group with derived progress.

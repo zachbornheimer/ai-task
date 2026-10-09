@@ -80,6 +80,21 @@ func (m Manager) BranchExists(ctx context.Context, branch string) bool {
 	return err == nil
 }
 
+// Contains reports whether revision is an ancestor of (or equal to) the
+// tip of branch, i.e. whether a promotion of revision onto branch has
+// happened.
+func (m Manager) Contains(ctx context.Context, branch, revision string) (bool, error) {
+	_, err := git(ctx, m.Repo, "merge-base", "--is-ancestor", revision, "refs/heads/"+branch)
+	if err == nil {
+		return true, nil
+	}
+	if strings.Contains(err.Error(), "exit status 1") || err.Error() == "" {
+		return false, nil
+	}
+	// git prints nothing on a plain "no" (exit 1); any message is a real error.
+	return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "compare %s with %s", short(revision), branch)
+}
+
 // Revision resolves a branch or revision to a full commit hash.
 func (m Manager) Revision(ctx context.Context, ref string) (string, error) {
 	out, err := git(ctx, m.Repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}")

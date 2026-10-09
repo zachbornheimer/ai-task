@@ -52,6 +52,9 @@ type Engine struct {
 
 	mu      sync.Mutex
 	changed chan struct{}
+
+	// faults is the crash-injection seam used by tests (see fault()).
+	faults func(point string) error
 }
 
 // Open opens the store and applies migrations.
@@ -367,7 +370,10 @@ func (e *Engine) reconcile(ctx context.Context) error {
 	if err == nil && n > 0 {
 		e.notify()
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return e.reconcileIntents(ctx)
 }
 
 // effectivePolicy merges a task's checks with the project regression
