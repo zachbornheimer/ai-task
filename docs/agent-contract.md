@@ -107,12 +107,14 @@ once the task is complete.
 
 **Lease.** The default lease is 30 minutes (minimum 5, maximum 4 hours).
 Every authenticated command (`log`, `verify`, `claim renew`, a session
-`add --blocks`) renews it, and the post-commit hook `init` installs runs
-`at claim renew` after every commit in the worktree, so an agent that
-commits or logs at least every half hour never loses its claim. Hosts
-that run the engine in-process get the same from `Renew`. When a lease
-does expire the task becomes claimable again; the old token answers
-`LEASE_EXPIRED` and the holder must stop editing.
+`add --blocks`) renews it, so an agent that logs at least every half hour
+never loses its claim; the host that launched the agent renews it on the
+agent's behalf (`Renew`, or `at claim renew` with the token) while the
+agent is busy. When a lease does expire the task becomes claimable again;
+the old token answers `LEASE_EXPIRED` (or `SESSION_SUPERSEDED` once a new
+attempt exists) and the holder must stop editing. The host must stop the
+old process before the next attempt reuses the worktree: a lease fences
+the database, not the files.
 
 **Handoff.** The claim result carries the previous attempts' `latest_next`,
 learnings and recent log, plus `inherited` learnings recorded on the
@@ -165,17 +167,23 @@ complete. Tokens never appear in any read view.
 
 ## Token transport
 
-`claim` is the only command that prints a token, and it also stores the
-token inside the task worktree's private Git directory
-(`.git/worktrees/<name>/at-session`, never in the tree). Any `at` command
-run with the worktree as its working directory finds it automatically, so
-an agent started inside the worktree needs no token at all. Explicit
-sources win when present, in this order: a positional token, `-` (one
-line of stdin, so secrets stay out of process listings), `--session`,
-`AT_SESSION`, then the worktree file. A `claim` subprocess cannot set
-`AT_SESSION` in its parent shell: hosts that run the agent elsewhere
-capture the JSON and inject the token. A lost token with no worktree is a
-stuck task until the lease expires; that is by design.
+`claim` is the only command that prints a token, and it prints it exactly
+once, to its caller. The token is written nowhere else: not into the
+worktree, not into the repository, not into the database (only its
+digest). The host that ran `claim` injects the token into the agent
+process it launches, normally as `AT_SESSION`; a `claim` subprocess
+cannot set `AT_SESSION` in its parent shell. Sources, in order: a
+positional token, `-` (one line of stdin, so secrets stay out of process
+listings), `--session`, `AT_SESSION`. There is no filesystem fallback by
+design: after a takeover a stale process holds only its own, refused,
+token and has no way to find its successor's.
+
+Inside a task worktree (branch `at/<task-id>`) the token must belong to
+that task; a token for another task is refused with `INVALID_SESSION`
+before any write, so a mis-exported `AT_SESSION` cannot act on the wrong
+task. Planning commands that need session authority (`add --blocks` on
+the claimed task) read the same `AT_SESSION`. A lost token is a stuck task
+until the lease expires; that is by design.
 
 ## The tiny agent prompt
 
@@ -187,8 +195,9 @@ Use `at verify task` and `at verify regression` while iterating.
 When ready, commit the final code revision and call `at verify complete`.
 It runs BOTH suites again and establishes completion only if all gates pass.
 If new prerequisite work is needed, add it as a blocker of the current
-claimed task (`at add "..." --blocks <task>`), log the handoff, and
-release the claim (`at claim release`).
-Commit often: every commit and every `at` command renews your lease.
+claimed task (`at add "..." --blocks <task> --check "id: cmd"`; your
+AT_SESSION authorises it), log the handoff, and release the claim
+(`at claim release`).
+Every `at` command renews your lease; `at log` at least every half hour.
 Stop editing immediately if claim renewal/authorization fails.
 ```

@@ -177,21 +177,20 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(e.cwd, tok+"\n", nil, "log", "-", "--note", "stdin works"); r.code != 0 {
 		t.Fatalf("stdin token: %s %s", r.stdout, r.stderr)
 	}
-	// Inside the worktree no token is needed: the claim stored it there.
-	if r := e.runIn(ws, "", nil, "log", "--note", "worktree token works"); r.code != 0 {
-		t.Fatalf("worktree token: %s %s", r.stdout, r.stderr)
+	// The token is bound to the process that received it: nothing in the
+	// worktree supplies one, so a command run there without AT_SESSION is a
+	// usage error, and with it the command works like anywhere else.
+	if r := e.runIn(ws, "", nil, "log", "--note", "no token"); r.code != 2 || r.env["error"].(map[string]any)["code"] != "INVALID_INPUT" {
+		t.Fatalf("worktree must not supply a token: %s %s", r.stdout, r.stderr)
 	}
-	if r := e.runIn(ws, "", nil, "whoami"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
+	if r := e.runIn(ws, "", with, "whoami"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
 		t.Fatalf("whoami in worktree: %s %s", r.stdout, r.stderr)
 	}
 	if !strings.HasSuffix(sess["branch"].(string), "/"+a) || !strings.HasPrefix(sess["branch"].(string), "at/") {
 		t.Fatalf("branch %v", sess["branch"])
 	}
-	// A commit in the worktree renews the lease through the post-commit hook.
-	before := e.ok("show", a)["attempt"].(map[string]any)["lease_expires_at"]
-	e.commit(ws, "hook.txt", "h")
-	if after := e.ok("show", a)["attempt"].(map[string]any)["lease_expires_at"]; after == before {
-		t.Fatalf("post-commit hook did not renew the lease: %v == %v", before, after)
+	if _, err := os.Stat(filepath.Join(e.cwd, ".git", "hooks", "post-commit")); err == nil {
+		t.Fatal("init must not write hooks into the repository")
 	}
 	// Provisional checks run and never complete.
 	r := e.runIn(e.cwd, "", with, "verify", "task")
@@ -219,12 +218,17 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(e.cwd, "", with, "log", "--done", "late"); r.env["error"].(map[string]any)["code"] != "SESSION_FINISHED" {
 		t.Fatalf("%s", r.stdout)
 	}
-	// Dependent is ready; outside a worktree, renew/release need a token.
+	// Dependent is ready; renew/release need a token everywhere.
 	e.fails("INVALID_INPUT", "claim", "renew")
 	sb := e.ok("claim", "reject")
 	e.ok("claim", "renew", sb["token"].(string))
-	if r := e.runIn(sb["workspace"].(string), "", nil, "claim", "renew"); r.code != 0 {
-		t.Fatalf("renew inside worktree: %s %s", r.stdout, r.stderr)
+	if r := e.runIn(sb["workspace"].(string), "", nil, "claim", "renew"); r.code != 2 {
+		t.Fatalf("renew inside worktree without a token must fail: %s %s", r.stdout, r.stderr)
+	}
+	// A token used inside another task's worktree is refused before any
+	// write: the confused-deputy case of a mis-exported AT_SESSION.
+	if r := e.runIn(sb["workspace"].(string), "", with, "log", "--note", "wrong worktree"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "INVALID_SESSION" {
+		t.Fatalf("token for %s accepted in %s's worktree: %s", a, b, r.stdout)
 	}
 	e.fails("INVALID_SESSION", "claim", "renew", "sess-0000000000000000000000000000000a")
 	e.fails("SESSION_FINISHED", "claim", "release", tok)
@@ -370,5 +374,31 @@ func TestVacuousChecksRejectedByCLI(t *testing.T) {
 	e.commit(s["workspace"].(string), "x.txt", "x")
 	if r := e.runIn(e.cwd, "", []string{"AT_SESSION=" + s["token"].(string)}, "verify", "complete"); r.code != 0 || r.env["result"].(map[string]any)["completed"] != true {
 		t.Fatalf("real gates should complete: %s %s", r.stdout, r.stderr)
+	}
+}
+
+// The documented discovered-prerequisite flow works from inside the task
+// worktree with the attempt's own AT_SESSION, needs a check like any task,
+// and is refused without the session.
+func TestDiscoveredBlockerFromWorktree(t *testing.T) {
+	e := gitEnv(t)
+	a := taskID(e.ok("add", "main work", "--key", "main", "--check", "u: true"))
+	s := e.ok("claim", a)
+	ws, tok := s["workspace"].(string), s["token"].(string)
+	if r := e.runIn(ws, "", nil, "add", "prereq", "--blocks", "main", "--check", "u: true"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "PLAN_CONFLICT" {
+		t.Fatalf("blocker without session accepted: %s", r.stdout)
+	}
+	if r := e.runIn(ws, "", []string{"AT_SESSION=" + tok}, "add", "prereq", "--blocks", "main"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "MISSING_VERIFICATION" {
+		t.Fatalf("blocker without a check accepted: %s", r.stdout)
+	}
+	r := e.runIn(ws, "", []string{"AT_SESSION=" + tok}, "add", "prereq", "--key", "pre", "--blocks", "main", "--check", "u: true")
+	if r.code != 0 {
+		t.Fatalf("blocker from worktree: %s %s", r.stdout, r.stderr)
+	}
+	if r := e.runIn(ws, "", []string{"AT_SESSION=" + tok}, "log", "--next", "wait for pre"); r.code != 0 {
+		t.Fatalf("log: %s", r.stdout)
+	}
+	if r := e.runIn(ws, "", []string{"AT_SESSION=" + tok}, "claim", "release"); r.code != 0 || r.env["result"].(map[string]any)["status"] != "blocked" {
+		t.Fatalf("release: %s %s", r.stdout, r.stderr)
 	}
 }

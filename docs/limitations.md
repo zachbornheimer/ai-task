@@ -42,9 +42,13 @@
    Evidence is bound to the verified revision; a trivial check (`true`)
    satisfies the mandatory-check rule and is the planner's own risk.
 
-12. **Worktree-resident tokens** are readable by the same OS user, like
-    the database. A lost token with no worktree leaves the task claimed
-    until the lease (at most 4 hours) expires; that is accepted.
+12. **Tokens are process-bound, files are not.** The token lives only in
+    the process the host gave it to, so a stale process cannot borrow a
+    successor's authority; but it can still edit the shared per-task
+    worktree. The host MUST terminate the old agent process before a new
+    attempt reuses the worktree (the claim reports `workspace_dirty`
+    when uncommitted edits are present). A lost token leaves the task
+    claimed until the lease (at most 4 hours) expires; that is accepted.
 
 10. **Single host, local filesystem.** WAL-mode SQLite on a network
     filesystem is unsafe.

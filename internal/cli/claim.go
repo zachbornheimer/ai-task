@@ -25,10 +25,14 @@ func init() {
 }
 
 // token resolves a REQUIRED session token: a positional argument, "-" for
-// one line of stdin, --session, AT_SESSION, or the token the engine stored
-// in the task worktree when the task was claimed (so commands run inside
-// the worktree need no token at all). Human read commands never print
-// tokens.
+// one line of stdin, --session, or AT_SESSION. The token is never read
+// from the filesystem: the host that launched this process injected it,
+// so a stale process can only ever present its own, stale, token. Human
+// read commands never print tokens.
+//
+// When the working directory is a task worktree the token must belong to
+// that task: a token for another task is refused before any write, so a
+// mis-exported AT_SESSION cannot act on the wrong task.
 func (c *ctxt) token(ctx context.Context, positional []string, flag string) (execution.Token, error) {
 	raw := flag
 	switch {
@@ -47,12 +51,37 @@ func (c *ctxt) token(ctx context.Context, positional []string, flag string) (exe
 		raw = c.env.Getenv("AT_SESSION")
 	}
 	if strings.TrimSpace(raw) == "" {
-		raw = workspace.LoadToken(ctx, c.env.Cwd)
+		return "", usage("session token required: pass it as an argument, '-' to read stdin, --session, or set AT_SESSION (the host that started this process has it)")
 	}
-	if strings.TrimSpace(raw) == "" {
-		return "", usage("session token required: run inside the task worktree, pass it as an argument, '-' to read stdin, --session, or set AT_SESSION")
+	tok, err := execution.ParseToken(raw)
+	if err != nil {
+		return "", err
 	}
-	return execution.ParseToken(raw)
+	return tok, c.guardWorkspace(ctx, tok)
+}
+
+// guardWorkspace refuses a token that does not own the task whose worktree
+// is the working directory (branch at/<task-id>). Outside a task worktree
+// it does nothing; a token that resolves to nothing is left for the
+// command itself to report.
+func (c *ctxt) guardWorkspace(ctx context.Context, tok execution.Token) error {
+	branch := workspace.CurrentBranch(ctx, c.env.Cwd)
+	here := strings.TrimPrefix(branch, "at/")
+	if here == branch || !task.IsID(here) {
+		return nil
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	v, err := e.Whoami(ctx, tok)
+	if err != nil {
+		return nil
+	}
+	if string(v.ID) != here {
+		return fault.New(fault.CodeInvalidSession, "session token belongs to %s but the working directory is the worktree of %s; run in %s's worktree or use its token", v.ID, here, v.ID)
+	}
+	return nil
 }
 
 func runClaim(ctx context.Context, c *ctxt, args []string) error {
@@ -61,7 +90,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 		return c.claimSub(ctx, args[0], args[1:])
 	}
 	wait := c.fs.Bool("wait", false, "block until work is claimable, the project is done, or it is stalled")
-	lease := c.fs.Duration("lease", 0, "lease duration (default 30m, min 5m, max 4h; renewed by every authenticated command and the post-commit hook)")
+	lease := c.fs.Duration("lease", 0, "lease duration (default 30m, min 5m, max 4h; every authenticated command renews it)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -119,7 +148,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 		if s.WorkspaceDirty {
 			fmt.Fprintln(w, "Warning:   workspace has uncommitted changes from a previous attempt; review `git status` before editing")
 		}
-		fmt.Fprintf(w, "Token:     %s (also stored in the worktree; `at` commands run there need no token)\n", s.Token)
+		fmt.Fprintf(w, "Token:     %s (export it as AT_SESSION for the agent process; it is stored nowhere else)\n", s.Token)
 		fmt.Fprintln(w)
 		renderShow(w, s.Task, false)
 		renderHandoff(w, s.Handoff)
@@ -129,7 +158,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 	note := c.fs.String("note", "", "why the task is being released (logged)")
 	failed := c.fs.Bool("failed", false, "record a failed attempt (retry bookkeeping)")
-	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -168,7 +197,7 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.StringVar(&entry.Next, "next", "", "remaining work / next action")
 	c.fs.StringVar(&entry.Learned, "learned", "", "reusable discovery")
 	c.fs.StringVar(&entry.Note, "note", "", "warning, question, or context")
-	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -188,7 +217,7 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func runVerify(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -215,7 +244,7 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func runWhoami(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
+	session := c.fs.String("session", "", "session token (default: AT_SESSION)")
 	if err := c.parse(args); err != nil {
 		return err
 	}

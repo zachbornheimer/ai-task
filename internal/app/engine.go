@@ -173,18 +173,15 @@ func stateDir() (string, error) {
 
 // InitResult reports what InitProject did to the directory.
 type InitResult struct {
-	Project       project.Project `json:"project"`
-	CreatedRepo   bool            `json:"created_repo"`
-	HookInstalled bool            `json:"hook_installed"`
-	HookSkipped   bool            `json:"hook_skipped,omitempty"`
+	Project     project.Project `json:"project"`
+	CreatedRepo bool            `json:"created_repo"`
 }
 
 // InitProject registers a Git project. Every project is a Git project: if
 // dir is not a repository one is created (with an initial commit); if it is
 // inside a repository, the main worktree root is registered. The current
 // branch becomes the target branch and integration policy is "promote".
-// The post-commit hook that renews leases is installed unless a foreign
-// hook already exists.
+// Nothing is written into the repository's hooks or working tree.
 func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Project, error) {
 	res, err := e.InitProjectResult(ctx, name, dir)
 	return res.Project, err
@@ -218,11 +215,6 @@ func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitR
 	if err := p.Validate(); err != nil {
 		return res, err
 	}
-	installed, err := workspace.InstallHooks(ctx, root)
-	if err != nil {
-		return res, err
-	}
-	res.HookInstalled, res.HookSkipped = installed, !installed
 	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if p.RootPath != "" {
 			if existing, ok, err := tx.GetProjectByRoot(p.RootPath); err != nil {

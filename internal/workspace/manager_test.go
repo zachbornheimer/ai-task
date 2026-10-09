@@ -82,22 +82,8 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	if err != nil || r.git(w2.Path, "rev-parse", "HEAD") != rev {
 		t.Fatalf("%+v %v", w2, err)
 	}
-	// Tokens live in the worktree's private git dir, never in the tree.
-	if err := StoreToken(r.ctx, w2.Path, "sess-test"); err != nil {
-		t.Fatal(err)
-	}
-	if LoadToken(r.ctx, filepath.Join(w2.Path)) != "sess-test" || LoadToken(r.ctx, r.dir) != "" {
-		t.Fatal("token discovery")
-	}
-	if out := r.git(w2.Path, "status", "--porcelain"); out != "" {
-		t.Fatalf("token file leaked into the tree: %s", out)
-	}
-	ok, err := InstallHooks(r.ctx, r.dir)
-	if err != nil || !ok {
-		t.Fatalf("hooks: %v %v", ok, err)
-	}
-	if ok, _ := InstallHooks(r.ctx, r.dir); !ok {
-		t.Fatal("reinstalling our own hook must succeed")
+	if CurrentBranch(r.ctx, w2.Path) != "at/at-aaaaaa" || CurrentBranch(r.ctx, r.dir) != "main" || CurrentBranch(r.ctx, t.TempDir()) != "" {
+		t.Fatal("current branch")
 	}
 	created, err := InitRepo(r.ctx, t.TempDir())
 	if err != nil || !created {

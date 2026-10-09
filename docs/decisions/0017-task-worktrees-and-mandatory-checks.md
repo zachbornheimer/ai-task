@@ -1,6 +1,6 @@
 # ADR 0017: One worktree per task, worktree-resident tokens, mandatory checks
 
-**Status:** accepted (supersedes the per-attempt branches of ADR 0016; refines ADR 0006 and ADR 0010)
+**Status:** accepted in part (supersedes the per-attempt branches of ADR 0016; refines ADR 0006 and ADR 0010). The worktree-resident token and the post-commit hook were withdrawn by ADR 0018: a token readable from the worktree let a stale process borrow its successor's authority.
 
 **Decision.**
 

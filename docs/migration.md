@@ -22,9 +22,9 @@ handoff. Databases created by the earlier `tasks` binary migrate in place
 | `tasks deps remove B --requires A` | `at update B --remove-requires A` | |
 | `tasks deps list B` / `tasks graph` | `at show B` (REQUIRES / BLOCKS sections), `at list` | no graph command |
 | `tasks take [ID] [--wait D]` | `at claim [REF] [--wait]` | wait returns `DONE` / `STALLED` instead of timing out |
-| `tasks renew-task-lease <token>` | `at claim renew [token\|-]` | no token needed inside the task worktree; commits renew too |
+| `tasks renew-task-lease <token>` | `at claim renew [token\|-]` | token from the argument, `-`, `--session` or AT_SESSION |
 | `tasks release <token>` | `at claim release [token\|-] [--failed]` | |
-| `tasks log <token> …` | `at log …` (positional, `-`, `--session`, AT_SESSION, or the worktree's stored token) | |
+| `tasks log <token> …` | `at log …` (positional, `-`, `--session`, or AT_SESSION) | |
 | `tasks finish <token>` | `at verify complete` | records submission, runs BOTH suites fresh, integrates, completes |
 | `tasks verify <task> [--retry] [--again] [--no-reuse]` | `at verify task` / `at verify regression` (diagnostic) | no evidence reuse exists any more; a stuck run is closed by reconciliation and the task re-claimed |
 | `tasks policy <task> --check …` | `at update <task> --check …` | planner authority; rejected on claimed/completed tasks without `--planner` |
@@ -68,8 +68,9 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
 - Checks are mandatory: `add` without `--check` and `claim` in a project
   without regression checks fail with `MISSING_VERIFICATION`;
   `--clear-checks` is gone.
-- Leases default to 30 minutes (5m..4h); every authenticated command and
-  every commit in the worktree renews them.
+- Leases default to 30 minutes (5m..4h); every authenticated command
+  renews them. The token is never stored on disk; hosts inject it as
+  `AT_SESSION`.
 - `--archive` needs `--reason`.
 - JSON output is compact by default (`--pretty` indents).
 - Completion re-checks prerequisites, contract revision, regression policy,

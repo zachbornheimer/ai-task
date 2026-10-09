@@ -17,7 +17,7 @@ import (
 )
 
 func init() {
-	register("init", "register the current directory (or --path) as a Git project (runs `git init` if needed)", runInit)
+	register("init", "register the current directory (or --path) as a Git project (runs `git init` if needed; writes nothing into the repository)", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --regression-json, --integration, --target-branch, --max-attempts", runProject)
 	register("add", "plan a task or group: at add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]*", runAdd)
@@ -82,12 +82,6 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 			fmt.Fprintln(w, "Repository:  created (git init + initial commit)")
 		}
 		fmt.Fprintf(w, "Target:      %s (integration: %s; task branches at/<id>)\n", p.TargetBranch, p.Integration)
-		switch {
-		case res.HookInstalled:
-			fmt.Fprintln(w, "Hook:        post-commit installed (commits renew the lease)")
-		case res.HookSkipped:
-			fmt.Fprintln(w, "Hook:        post-commit NOT installed (a foreign hook exists; add `at claim renew` to it)")
-		}
 		fmt.Fprintf(w, "State:       %s\n", e.Path())
 		fmt.Fprintln(w, "Next:        define regression checks with `at project --regression-check \"id: cmd\"` (required before any claim)")
 	})

@@ -11,7 +11,6 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
-	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 // Typed outcomes of a waiting Claim.
@@ -163,13 +162,12 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	}
 	e.notify()
 	// One branch and worktree per task, reused across attempts so committed
-	// and uncommitted work survives a crash; the token lives in the
-	// worktree's private git dir so commands run there need no AT_SESSION.
+	// and uncommitted work survives a crash. The token is returned once,
+	// to the caller only: it is never written anywhere a later process
+	// could pick it up, so a stale attempt can never borrow its
+	// successor's authority.
 	mgr := e.manager(proj)
 	info, werr := mgr.EnsureTask(ctx, string(sess.Task.ID), proj.TargetBranch)
-	if werr == nil {
-		werr = workspace.StoreToken(ctx, info.Path, string(token))
-	}
 	if werr != nil {
 		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.EndAttempt(attempt.ID, execution.EndReleased, e.now()) })
 		e.notify()

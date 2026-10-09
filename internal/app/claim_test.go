@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,6 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
-	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 func TestClaimIsDeterministicOldestFirst(t *testing.T) {
@@ -295,15 +295,57 @@ func TestHandoffCarriesPrerequisiteLearningsAndLastFailure(t *testing.T) {
 	if lf == nil || lf.Mode != string(verification.ModeComplete) || len(lf.Checks) != 1 || lf.Checks[0].CheckID != "unit-c" || !strings.Contains(lf.Checks[0].StderrTail, "boom") {
 		t.Fatalf("last failure: %+v", lf)
 	}
-	// Worktree reuse: the previous attempt's commit is still there and the
-	// token stored in the worktree is the new attempt's.
+	// Worktree reuse: the previous attempt's commit is still there.
 	if _, err := os.Stat(filepath.Join(sc2.Workspace, "c.txt")); err != nil {
 		t.Fatal("work not carried over")
 	}
-	if tok := workspace.LoadToken(f.ctx, sc2.Workspace); tok != string(sc2.Token) {
-		t.Fatalf("stored token %q != %q", tok, sc2.Token)
+}
+
+// A token is bound to the process that received it. After a takeover the
+// stale holder keeps only its own token, which every authority check
+// refuses; nothing on disk lets it find the successor's.
+func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	sA := f.claim(string(a))
+	f.commit(sA.Workspace, "a.txt", "from A")
+	// A freezes; its lease runs out; B takes over in the same worktree.
+	f.c.Advance(execution.DefaultLease + time.Minute)
+	sB := f.claim(string(a))
+	if sB.AttemptSeq != 2 || sB.Workspace != sA.Workspace || sB.Token == sA.Token {
+		t.Fatalf("takeover: %+v", sB)
 	}
-	if _, err := os.Stat(filepath.Join(sc2.Workspace, "at-session")); err == nil {
-		t.Fatal("token stored inside the tree")
+	// Nothing in the worktree or its git dir carries B's token.
+	gitdir := strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "--absolute-git-dir"))
+	for _, dir := range []string{sB.Workspace, gitdir} {
+		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), string(sB.Token)) {
+				t.Fatalf("successor token found on disk at %s", path)
+			}
+			return nil
+		})
 	}
+	// A wakes up with its own token: every action is refused.
+	_, err := f.e.Renew(f.ctx, sA.Token)
+	wantCode(t, err, fault.CodeSessionSuperseded)
+	_, err = f.e.Log(f.ctx, sA.Token, execution.LogEntry{Note: "still here"})
+	wantCode(t, err, fault.CodeSessionSuperseded)
+	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeTask)
+	wantCode(t, err, fault.CodeSessionSuperseded)
+	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeSessionSuperseded)
+	_, err = f.e.Release(f.ctx, sA.Token, app.ReleaseOptions{})
+	wantCode(t, err, fault.CodeSessionSuperseded)
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sA.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}}); err == nil {
+		t.Fatal("stale session could add a blocker")
+	}
+	// B is untouched: same lease, still claimed, and it completes normally.
+	v := f.show(string(a))
+	if v.Status != task.StatusClaimed || v.Attempt == nil || !v.Attempt.LeaseExpiresAt.Equal(sB.LeaseUntil) {
+		t.Fatalf("B disturbed: %+v", v.Attempt)
+	}
+	f.complete(sB)
 }

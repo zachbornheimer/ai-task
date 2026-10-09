@@ -20,16 +20,18 @@ go install github.com/zachbornheimer/ai-task/cmd/at@latest
 
 ```sh
 export AT_OUTPUT=json
-cd my-repo && at init                                  # Git project (git init if needed): target branch, promote policy, post-commit hook
+cd my-repo && at init                                  # Git project (git init if needed): target branch, promote policy; writes nothing into the repo
 at project --regression-check "test: go test ./..."    # trusted project gate (required before any claim)
 at add "Identity Core" --group --key identity
 at add "Confirm OAuth API compatibility" --key compat --parent identity --check "unit: go test ./auth/..."
 at add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
 at list                                                # ○ ◐ ● hierarchy
-cd "$(at claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on at/<id>, token stored inside
-at log --done "..." --next "..."                       # inside the worktree no token is needed
+S=$(at claim | tee /dev/stderr | jq -r .result.token)  # atomic leased claim; the task's worktree is on at/<id>
+export AT_SESSION=$S                                   # the host injects the token into the agent process; it is stored nowhere
+cd "$(at whoami | jq -r .result.attempt.workspace)"
+at log --done "..." --next "..."                       # every command renews the lease
 at verify task                                         # diagnostic
-# commit in the worktree (each commit renews the lease), then:
+# commit in the worktree, then:
 at verify complete                                     # both suites fresh on a snapshot, promote, complete
 at claim --wait                                        # next eligible task, or DONE / STALLED
 ```
@@ -59,7 +61,8 @@ workers.
 - One leased attempt per task; tokens stored as digests; stale tokens are
   inert; oldest-eligible deterministic claims; `DONE` / `STALLED` for
   waiting workers. One worktree per task (`at/<id>`), reused across
-  attempts, carrying the session token so commands run there need none.
+  attempts. Tokens are bound to the process that claimed: never on disk,
+  refused after a takeover, refused in another task's worktree.
 - Checks are mandatory: a task cannot be planned without task checks and
   no work is handed out until the project has regression checks.
 - Completion only from `verify complete`: both check categories fresh on a

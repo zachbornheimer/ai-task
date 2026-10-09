@@ -32,6 +32,19 @@ func (s GitState) Clean() bool { return len(s.Dirty) == 0 }
 
 // IsGitRepo reports whether dir is inside a Git working tree, without
 // invoking Git: it looks for a .git directory or file up the tree.
+// CurrentBranch returns the branch checked out at dir ("" when dir is not
+// in a repository or HEAD is detached).
+func CurrentBranch(ctx context.Context, dir string) string {
+	if !IsGitRepo(dir) {
+		return ""
+	}
+	out, err := git(ctx, dir, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 func IsGitRepo(dir string) bool {
 	cur, err := filepath.Abs(dir)
 	if err != nil {
