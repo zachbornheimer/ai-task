@@ -268,6 +268,13 @@ func (e *Engine) UpdateProject(ctx context.Context, p project.Project) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
+	// An empty list means "not configured yet" (no claim is possible); a
+	// non-empty list must be a gate.
+	if len(p.Regression) > 0 {
+		if err := verification.RequireGate(p.Regression, "project regression checks"); err != nil {
+			return err
+		}
+	}
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		used, err := tx.TaskCheckIDs(p.ID)
 		if err != nil {

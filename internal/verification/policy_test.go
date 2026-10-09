@@ -92,7 +92,7 @@ func TestMergeKeepsNamespacesSeparate(t *testing.T) {
 	if Collides([]CheckSpec{{ID: "lint"}}, proj) != "lint" || Collides([]CheckSpec{{ID: "unit"}}, proj) != "" {
 		t.Fatal("collision detection")
 	}
-	if m.MissingCategory() != "" || (Policy{TaskChecks: task.TaskChecks}).MissingCategory() != "project regression checks" || (Policy{Regression: proj}).MissingCategory() != "task checks" {
+	if m.MissingCategory() != "" || (Policy{TaskChecks: task.TaskChecks}).MissingCategory() != "required project regression checks" || (Policy{Regression: proj}).MissingCategory() != "required task checks" {
 		t.Fatal("missing category")
 	}
 	if _, err := ParseMode(""); err == nil {
@@ -119,5 +119,33 @@ func TestEffectiveTimeout(t *testing.T) {
 	}
 	if (CheckSpec{Timeout: time.Second}).EffectiveTimeout() != time.Second {
 		t.Fatal("explicit timeout must be kept")
+	}
+}
+
+func TestRequireGateAndJSONRequiredDefault(t *testing.T) {
+	if err := RequireGate(nil, "task checks"); err == nil {
+		t.Fatal("empty list accepted as a gate")
+	}
+	if err := RequireGate([]CheckSpec{{ID: "o", Command: []string{"x"}}}, "task checks"); err == nil {
+		t.Fatal("optional-only list accepted as a gate")
+	}
+	if err := RequireGate([]CheckSpec{{ID: "o", Command: []string{"x"}}, {ID: "r", Command: []string{"x"}, Required: true}}, "task checks"); err != nil {
+		t.Fatal(err)
+	}
+	// Hand-written JSON that omits "required" describes a gate, not an
+	// informational check; stored JSON always says so explicitly.
+	var absent, explicitFalse CheckSpec
+	if err := json.Unmarshal([]byte(`{"id":"x","command":["true"]}`), &absent); err != nil || !absent.Required {
+		t.Fatalf("absent required should default to true: %+v %v", absent, err)
+	}
+	if err := json.Unmarshal([]byte(`{"id":"x","command":["true"],"required":false}`), &explicitFalse); err != nil || explicitFalse.Required {
+		t.Fatalf("explicit false lost: %+v %v", explicitFalse, err)
+	}
+	b, _ := json.Marshal(CheckSpec{ID: "x", Command: []string{"true"}})
+	if !strings.Contains(string(b), `"required":false`) {
+		t.Fatalf("stored form must be explicit: %s", b)
+	}
+	if (Policy{TaskChecks: []CheckSpec{{ID: "o", Command: []string{"x"}}}, Regression: []CheckSpec{{ID: "r", Command: []string{"x"}, Required: true}}}).MissingCategory() == "" {
+		t.Fatal("optional-only task checks counted as a category")
 	}
 }

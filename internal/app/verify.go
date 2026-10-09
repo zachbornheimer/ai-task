@@ -94,8 +94,12 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 		return VerifyResult{}, err
 	}
 	policy := p.policy.Subset(mode)
-	if policy.Empty() {
-		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "no %s checks are defined for %s; `verify complete` will fail closed", mode, p.rec.Task.ID)
+	gate := policy.TaskChecks
+	if mode == verification.ModeRegression {
+		gate = policy.Regression
+	}
+	if err := verification.RequireGate(gate, string(mode)+" checks"); err != nil {
+		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s: %v; `verify complete` will fail closed", p.rec.Task.ID, fault.MessageOf(err))
 	}
 	revision, dirty := "", false
 	if st, err := workspace.Inspect(ctx, p.dir); err == nil {

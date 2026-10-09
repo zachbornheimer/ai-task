@@ -216,10 +216,10 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err := spec.Validate(); err != nil {
 		return err
 	}
-	// A task is implementable only with its own checks: completion fails
-	// closed without them, so planning fails closed too.
-	if len(spec.Verification.TaskChecks) == 0 {
-		return fault.New(fault.CodeMissingVerification, "task %q needs at least one task check (--check); a task without checks can never complete", c.Title)
+	// A task is implementable only with a required check of its own:
+	// completion fails closed without one, so planning fails closed too.
+	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
+		return fault.New(fault.CodeMissingVerification, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
 	}
 	var requires []task.ID
 	for _, r := range c.Requires {
@@ -427,8 +427,10 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		t.Cohort, changed = *c.Cohort, true
 	}
 	if c.TaskChecks.Set {
-		if t.Kind == task.KindTask && len(c.TaskChecks.Value) == 0 {
-			return fault.New(fault.CodeMissingVerification, "%s needs at least one task check; archive it instead of removing its checks", t.ID)
+		if t.Kind == task.KindTask {
+			if err := verification.RequireGate(c.TaskChecks.Value, "task checks"); err != nil {
+				return fault.New(fault.CodeMissingVerification, "%s: %v; archive the task instead of removing its gate", t.ID, fault.MessageOf(err))
+			}
 		}
 		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value}
 		changed = true

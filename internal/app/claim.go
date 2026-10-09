@@ -111,8 +111,8 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
 				return err
 			}
-			if len(proj.Regression) == 0 {
-				return fault.New(fault.CodeMissingVerification, "project %s has no regression checks; define them with `at project --regression-check` before claiming work", proj.ID)
+			if err := regressionGate(proj); err != nil {
+				return err
 			}
 			if err := notClaimable(r, proj, now); err != nil {
 				return err
@@ -121,8 +121,8 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			if proj, err = tx.GetProject(req.ProjectID); err != nil {
 				return err
 			}
-			if len(proj.Regression) == 0 {
-				return fault.New(fault.CodeMissingVerification, "project %s has no regression checks; define them with `at project --regression-check` before claiming work", proj.ID)
+			if err := regressionGate(proj); err != nil {
+				return err
 			}
 			cand, ok, err := tx.ClaimCandidate(req.ProjectID, now, proj.MaxAttempts)
 			if err != nil {
@@ -228,6 +228,15 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 	return nil
 }
 
+// regressionGate refuses to hand out work in a project whose regression
+// checks cannot act as a gate: nothing claimed there could ever complete.
+func regressionGate(proj project.Project) error {
+	if err := verification.RequireGate(proj.Regression, "project regression checks"); err != nil {
+		return fault.New(fault.CodeMissingVerification, "project %s: %v; define them with `at project --regression-check` before claiming work", proj.ID, fault.MessageOf(err))
+	}
+	return nil
+}
+
 // notClaimable maps a non-claimable status to the error an agent sees.
 func notClaimable(r sqlite.Record, proj project.Project, now time.Time) error {
 	st := r.Status(now, proj.MaxAttempts)
@@ -251,7 +260,10 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time) error {
 	case task.StatusComplete:
 		return fault.New(fault.CodeTaskComplete, "%s is complete", id)
 	case task.StatusNeedsAttention:
-		return fault.New(fault.CodeStalled, "%s exhausted its attempts (%d failures); a planner must `at update %s --reset-attempts`", id, r.Failures, id)
+		if !verification.HasRequired(r.Task.Verification.TaskChecks) {
+			return fault.New(fault.CodeMissingVerification, "%s has no required task check (legacy or edited policy); a planner must `at update %s --check ...` before it can be claimed", id, id)
+		}
+		return fault.New(fault.CodeNeedsAttention, "%s exhausted its attempts (%d failures); a planner must `at update %s --reset-attempts`", id, r.Failures, id)
 	case task.StatusCooldown:
 		return fault.New(fault.CodeNoAvailableTask, "%s is in retry cooldown until %s", id, r.NextEligibleAt.Format(time.RFC3339))
 	}

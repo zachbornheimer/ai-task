@@ -351,3 +351,24 @@ func TestChecksRunWithoutHoldingTheDatabase(t *testing.T) {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// Every CLI route that defines checks enforces a required check: optional
+// checks are informational and JSON without "required" means required.
+func TestVacuousChecksRejectedByCLI(t *testing.T) {
+	e := gitEnv(t)
+	e.fails("MISSING_VERIFICATION", "add", "opt only", "--optional-check", "o: false")
+	e.fails("MISSING_VERIFICATION", "add", "json false", "--policy-json", `{"task_checks":[{"id":"j","command":["true"],"required":false}]}`)
+	x := taskID(e.ok("add", "json absent", "--policy-json", `{"task_checks":[{"id":"j","command":["true"]}]}`))
+	checks := e.ok("show", x)["task_checks"].([]any)
+	if len(checks) != 1 || checks[0].(map[string]any)["required"] != true {
+		t.Fatalf("absent required must mean required: %v", checks)
+	}
+	e.fails("MISSING_VERIFICATION", "update", x, "--optional-check", "o: true")
+	e.fails("MISSING_VERIFICATION", "project", "--regression-json", `[{"id":"r2","command":["true"],"required":false}]`)
+	e.ok("project", "--regression-json", `[{"id":"r2","command":["true"]}]`)
+	s := e.ok("claim", x)
+	e.commit(s["workspace"].(string), "x.txt", "x")
+	if r := e.runIn(e.cwd, "", []string{"AT_SESSION=" + s["token"].(string)}, "verify", "complete"); r.code != 0 || r.env["result"].(map[string]any)["completed"] != true {
+		t.Fatalf("real gates should complete: %s %s", r.stdout, r.stderr)
+	}
+}

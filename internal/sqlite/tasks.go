@@ -96,6 +96,7 @@ func (r Record) Facts(now time.Time, maxAttempts int) task.Facts {
 		Complete:      r.CompletedAt != nil,
 		UnmetRequires: r.UnmetRequires,
 		Exhausted:     maxAttempts > 0 && r.Failures >= maxAttempts,
+		Unverifiable:  r.Task.Kind == task.KindTask && !verification.HasRequired(r.Task.Verification.TaskChecks),
 		CooldownUntil: r.NextEligibleAt,
 		Now:           now,
 	}
@@ -420,7 +421,8 @@ const claimableWhere = `
   AND (a.id IS NULL OR a.ended_at IS NOT NULL OR a.lease_expires_at <= ?)
   AND (s.id IS NULL OR vr.status IN ('failed', 'error'))
   AND t.next_eligible_at <= ?
-  AND (? = 0 OR t.failures < ?)`
+  AND (? = 0 OR t.failures < ?)
+  AND EXISTS (SELECT 1 FROM json_each(t.policy_json, '$.task_checks') WHERE json_extract(value, '$.required') = 1)`
 
 // ClaimCandidate picks the task automatic Claim should take: the oldest
 // claimable task, ties broken by ID. Deterministic; no priority field.

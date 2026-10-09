@@ -37,6 +37,9 @@ const (
 	CodeNoAvailableTask          Code = "NO_ELIGIBLE_WORK"
 	CodeDone                     Code = "DONE"
 	CodeStalled                  Code = "STALLED"
+	// CodeNeedsAttention: one task cannot proceed without a planner
+	// (attempts exhausted, checks unverifiable, workspace unusable).
+	CodeNeedsAttention Code = "NEEDS_ATTENTION"
 
 	// Session authority failures.
 	CodeInvalidSession    Code = "INVALID_SESSION"
@@ -110,3 +113,16 @@ func CodeOf(err error) Code {
 
 // Is reports whether err carries the given code.
 func Is(err error, code Code) bool { return CodeOf(err) == code }
+
+// MessageOf returns the message of a coded error without its code, or
+// err.Error() for any other error.
+func MessageOf(err error) string {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.Message
+	}
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

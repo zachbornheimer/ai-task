@@ -45,8 +45,17 @@ func TestJudge(t *testing.T) {
 			t.Errorf("%s: passed=%v (%s)", c.name, v.Passed, v.Summary)
 		}
 	}
-	if v := Judge(Policy{}, nil); !v.Passed {
-		t.Fatal("empty policy passes vacuously")
+	// A policy with no required check proves nothing: it must never pass,
+	// even when every (optional) check it has passed.
+	if v := Judge(Policy{}, nil); v.Passed {
+		t.Fatal("empty policy must not pass vacuously")
+	}
+	optOnly := Policy{TaskChecks: []CheckSpec{{ID: "o", Command: []string{"x"}}}, Regression: []CheckSpec{{ID: "r", Command: []string{"x"}}}}
+	if v := Judge(optOnly, []Evidence{ev("o", OutcomePassed), ev("r", OutcomePassed)}); v.Passed {
+		t.Fatalf("optional-only policy passed: %s", v.Summary)
+	}
+	if v := Judge(optOnly, []Evidence{ev("o", OutcomeFailed), ev("r", OutcomeFailed)}); v.Passed {
+		t.Fatalf("optional-only policy with failures passed: %s", v.Summary)
 	}
 	if v := Judge(p, []Evidence{ev("unit", OutcomePassed), ev("lint", OutcomeFailed), ev("full", OutcomePassed)}); v.Summary == "" || !contains(v.Summary, "optional failed: lint") {
 		t.Fatalf("summary: %s", v.Summary)

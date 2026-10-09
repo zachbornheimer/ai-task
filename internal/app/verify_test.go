@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -357,5 +359,92 @@ func TestGoTestCacheDisabledInCheckEnvironment(t *testing.T) {
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
 	t.Setenv("AT_SESSION", string(s.Token))
+	f.complete(s)
+}
+
+// A policy made only of optional checks can never fail, so it can never be
+// a gate: planning, project configuration, claiming and completion all
+// refuse it, including rows written before the rule existed.
+func TestVacuousPoliciesFailClosed(t *testing.T) {
+	f := newGitFixture(t)
+	opt := func(id string) verification.CheckSpec { return check(id, "false", false) }
+	optJSON := func(ids ...string) string {
+		var cs []verification.CheckSpec
+		for _, id := range ids {
+			cs = append(cs, opt(id))
+		}
+		b, _ := json.Marshal(verification.Policy{TaskChecks: cs})
+		return string(b)
+	}
+	// Planning boundaries.
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "o", Title: "o", TaskChecks: []verification.CheckSpec{opt("o1")}}}})
+	wantCode(t, err, fault.CodeMissingVerification)
+	a := f.add("a")
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{opt("o2")})}}})
+	wantCode(t, err, fault.CodeMissingVerification)
+	// Project boundary.
+	p, _ := f.e.Project(f.ctx, f.proj.ID)
+	p.Regression = []verification.CheckSpec{opt("r")}
+	wantCode(t, f.e.UpdateProject(f.ctx, p), fault.CodeMissingVerification)
+	// Legacy rows that bypassed the rule: never handed out, never completed.
+	db, err := sql.Open("sqlite", f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	setPolicy := func(id task.ID, body string) {
+		t.Helper()
+		if _, err := db.Exec(`UPDATE tasks SET policy_json = ? WHERE id = ?`, body, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setRegression := func(body string) {
+		t.Helper()
+		if _, err := db.Exec(`UPDATE projects SET regression_json = ? WHERE id = ?`, body, f.proj.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	regOpt, _ := json.Marshal(verification.Policy{Regression: []verification.CheckSpec{opt("r")}})
+	setRegression(string(regOpt))
+	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
+	wantCode(t, err, fault.CodeMissingVerification)
+	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
+	wantCode(t, err, fault.CodeMissingVerification)
+	f.setRegression(check("regress", "true", true))
+	setPolicy(a, optJSON("o3"))
+	if st := f.status(string(a)); st != task.StatusNeedsAttention {
+		t.Fatalf("vacuous task status %s", st)
+	}
+	snap, _ := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterReady})
+	for _, v := range snap.Tasks {
+		if v.ID == a {
+			t.Fatal("vacuous task listed as ready")
+		}
+	}
+	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
+	wantCode(t, err, fault.CodeNoAvailableTask)
+	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
+	wantCode(t, err, fault.CodeMissingVerification)
+	// Checks made vacuous underneath a live claim: completion still refuses.
+	b := f.add("b")
+	s := f.claim(string(b))
+	f.commit(s.Workspace, "b.txt", "b")
+	setPolicy(b, optJSON("o4"))
+	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeMissingVerification)
+	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+	wantCode(t, err, fault.CodeMissingVerification)
+	good, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("u", "true", true)}})
+	setPolicy(b, string(good))
+	setRegression(string(regOpt))
+	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeMissingVerification)
+	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeRegression)
+	wantCode(t, err, fault.CodeMissingVerification)
+	if f.status(string(b)) != task.StatusClaimed {
+		t.Fatal("claim must survive the refusal")
+	}
+	// With real gates on both sides the same task completes normally.
+	f.setRegression(check("regress", "true", true))
 	f.complete(s)
 }

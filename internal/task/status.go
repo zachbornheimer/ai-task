@@ -48,6 +48,10 @@ type Facts struct {
 	VerificationFailed bool
 	// Exhausted: failures reached the project's attempt limit.
 	Exhausted bool
+	// Unverifiable: the task's stored checks cannot act as a gate (no
+	// required check), so no attempt could ever complete it. A planner
+	// must repair the checks; it is never handed out.
+	Unverifiable bool
 	// CooldownUntil, when after now, delays the next claim.
 	CooldownUntil time.Time
 	Now           time.Time
@@ -76,7 +80,7 @@ func Derive(f Facts) Status {
 		return StatusClaimed
 	case f.UnmetRequires > 0:
 		return StatusBlocked
-	case f.Exhausted:
+	case f.Exhausted, f.Unverifiable:
 		return StatusNeedsAttention
 	case f.VerificationFailed:
 		return StatusVerificationFailed

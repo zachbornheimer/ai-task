@@ -12,11 +12,15 @@ type Verdict struct {
 }
 
 // Judge decides whether a run passed from the policy it executed and the
-// evidence it produced. A run passes iff every required check in the
-// policy has evidence with OutcomePassed. Optional checks never change the
-// decision; a required check with no evidence (never run, skipped, or
-// missing verifier) fails the run.
+// evidence it produced. A run passes iff the policy has at least one
+// required check and every required check has evidence with
+// OutcomePassed. Optional checks never change the decision; a required
+// check with no evidence (never run, skipped, or missing verifier) fails
+// the run, and a policy with no required check proves nothing and fails.
 func Judge(p Policy, evidence []Evidence) Verdict {
+	if len(p.RequiredChecks()) == 0 {
+		return Verdict{Passed: false, Summary: "no required checks: nothing can be proven (optional checks are informational)"}
+	}
 	byID := map[string]Evidence{}
 	for _, e := range evidence {
 		byID[e.CheckID] = e

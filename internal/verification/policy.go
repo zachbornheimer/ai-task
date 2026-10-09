@@ -60,14 +60,18 @@ type checkJSON struct {
 	Command   []string `json:"command"`
 	Dir       string   `json:"dir,omitempty"`
 	TimeoutMS int64    `json:"timeout_ms,omitempty"`
-	Required  bool     `json:"required"`
+	// Required is a pointer so that an absent field in hand-written JSON
+	// means "required": a check someone wrote down is a gate unless they
+	// said otherwise. Stored policies always carry it explicitly.
+	Required *bool `json:"required"`
 }
 
 // MarshalJSON writes the durable form.
 func (c CheckSpec) MarshalJSON() ([]byte, error) {
+	required := c.Required
 	return json.Marshal(checkJSON{
 		ID: c.ID, Version: c.Version, Command: c.Command, Dir: c.Dir,
-		TimeoutMS: c.Timeout.Milliseconds(), Required: c.Required,
+		TimeoutMS: c.Timeout.Milliseconds(), Required: &required,
 	})
 }
 
@@ -77,9 +81,13 @@ func (c *CheckSpec) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &w); err != nil {
 		return err
 	}
+	required := true
+	if w.Required != nil {
+		required = *w.Required
+	}
 	*c = CheckSpec{
 		ID: w.ID, Version: w.Version, Command: w.Command, Dir: w.Dir,
-		Timeout: time.Duration(w.TimeoutMS) * time.Millisecond, Required: w.Required,
+		Timeout: time.Duration(w.TimeoutMS) * time.Millisecond, Required: required,
 	}
 	return nil
 }
@@ -126,6 +134,32 @@ func (p Policy) Validate() error {
 
 // Empty reports whether the policy requires nothing at all.
 func (p Policy) Empty() bool { return len(p.TaskChecks) == 0 && len(p.Regression) == 0 }
+
+// HasRequired reports whether a check list contains at least one required
+// check. A list of only optional checks is informational: it can never
+// fail a run, so it can never be a gate.
+func HasRequired(checks []CheckSpec) bool {
+	for _, c := range checks {
+		if c.Required {
+			return true
+		}
+	}
+	return false
+}
+
+// RequireGate rejects a check list that cannot act as a gate for the named
+// category: empty, or made only of optional checks. It is the single rule
+// every boundary (planning, project configuration, claim, completion)
+// applies, so a vacuous policy cannot enter the system or complete anything.
+func RequireGate(checks []CheckSpec, category string) error {
+	switch {
+	case len(checks) == 0:
+		return fault.New(fault.CodeMissingVerification, "no %s are defined; at least one required check is needed", category)
+	case !HasRequired(checks):
+		return fault.New(fault.CodeMissingVerification, "every %s is optional; at least one required check is needed (optional checks are informational and cannot prove anything)", category)
+	}
+	return nil
+}
 
 // RequiredChecks returns every check that must pass, in planning order.
 func (p Policy) RequiredChecks() []CheckSpec {
@@ -243,14 +277,15 @@ func (p Policy) Subset(m Mode) Policy {
 	return p
 }
 
-// MissingCategory reports which required category is absent for a complete
-// run, or "" when both are present. Completion fails closed without both.
+// MissingCategory reports which category cannot act as a gate for a
+// complete run (absent, or optional checks only), or "" when both can.
+// Completion fails closed without both.
 func (p Policy) MissingCategory() string {
 	switch {
-	case len(p.TaskChecks) == 0:
-		return "task checks"
-	case len(p.Regression) == 0:
-		return "project regression checks"
+	case !HasRequired(p.TaskChecks):
+		return "required task checks"
+	case !HasRequired(p.Regression):
+		return "required project regression checks"
 	}
 	return ""
 }
