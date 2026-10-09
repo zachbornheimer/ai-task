@@ -38,7 +38,8 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 | `STALLED` | open tasks remain, nothing claimable, nothing in flight; `details` carries the summary with reasons |
 | `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED` | authority failures |
 | `MISSING_VERIFICATION` | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim |
-| `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence |
+| `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once |
+| `VERIFICATION_RUNNING` | this attempt's `verify complete` is still running; wait for its result |
 | `INTEGRATION_FAILED` | merge conflict, moved target that kept moving, or dirty target checkout |
 | `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes at `verify complete` / the worktree is gone |
 | `INTERNAL` | bug or I/O failure |
@@ -115,6 +116,18 @@ the old token answers `LEASE_EXPIRED` (or `SESSION_SUPERSEDED` once a new
 attempt exists) and the holder must stop editing. The next claim
 quarantines the old worktree (see Token transport), so a holder that does
 not stop can harm nothing but its own quarantined copy.
+
+**Failure budget.** Only a genuine failed proof counts against a task: a
+required check failing in `verify complete`, or `claim release --failed`.
+It counts at most once per attempt (repairing and re-verifying within
+the same lease adds nothing) and only for the attempt that is still the
+task's current generation. Environment problems (snapshot or worktree
+trouble, a dirty or moving target, a merge to resolve) and authority or
+contract conflicts (superseded session, planner edit, new prerequisite)
+stop the run, are reported as `last_error`, and are never a strike. A
+`verify complete` fired while the attempt's previous one is still running
+is refused with `VERIFICATION_RUNNING`; after completion it returns the
+stored acknowledgement.
 
 **Handoff.** The claim result carries the previous attempts' `latest_next`,
 learnings and recent log, plus `inherited` learnings recorded on the

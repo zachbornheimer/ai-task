@@ -59,6 +59,11 @@ claimed, verifying, and submissions whose cohort can be verified.
   (`TestWaitingClaimDoneAndStalled`, `TestCoupledVerificationRecoversAfterVerifierCrash`)
 - Release keeps the handoff; `--failed` counts a failure and applies the
   cooldown; exhausted tasks need a planner reset. (`TestReleaseAndCooldown`)
+- Failure accounting is fenced and classified: a failed proof counts once
+  per current attempt; environment and authority problems are recorded as
+  `last_error`, never counted; a stale attempt cannot count against its
+  successor; a double-fired completion is refused, not raced.
+  (`TestFailureAccountingIsFencedAndClassified`)
 - No claim without a project regression suite; no task without task
   checks; a check set cannot be emptied. (`TestEmptyChecksFailClosed`,
   `e2e.TestPlanningCommands`)

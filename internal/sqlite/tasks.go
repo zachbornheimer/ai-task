@@ -84,8 +84,17 @@ type Record struct {
 	Submission        *Submission        // the newest submission, if any
 	CompletedAt       *time.Time
 	CompletedRevision string
-	Failures          int
-	NextEligibleAt    time.Time
+	// CompletedSubmissionID is the submission whose run established the
+	// completion fact (the newest submission may be a later, failed one).
+	CompletedSubmissionID int64
+	Failures              int
+	NextEligibleAt        time.Time
+	// LastFailureAttemptID is the attempt whose failure was counted last;
+	// a second failure of the same attempt is not counted again.
+	LastFailureAttemptID int64
+	// LastError is the most recent environment or authority problem that
+	// stopped a verification without counting as a failure.
+	LastError string
 }
 
 // Facts converts the record into the domain's status inputs.
@@ -135,7 +144,8 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch,
        s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
-       (SELECT revision FROM submissions WHERE id = t.completed_submission_id)
+       (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
+       t.completed_submission_id, t.last_failure_attempt_id, t.last_error
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
 LEFT JOIN submissions s ON s.id = t.latest_submission_id
@@ -156,16 +166,18 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var sRev, sCohort sql.NullString
 	var run runScan
 	var completedRev sql.NullString
+	var completedSub sql.NullInt64
 	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Kind, &key, &parent, &r.Task.Description, &r.Task.Outcome, &constraints, &policy,
 		&r.Task.Cohort, &r.Task.ContractRev, &archived, &r.Task.ArchiveReason, &r.Failures, &nextEligible,
 		&completed, &created, &updated, &r.UnmetRequires,
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
-		&completedRev)
+		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError)
 	if err != nil {
 		return r, err
 	}
+	r.CompletedSubmissionID = completedSub.Int64
 	r.Task.Key, r.Task.ParentID = key.String, task.ID(parent.String)
 	r.Task.ArchivedAt = nullMS(archived)
 	r.Task.CreatedAt, r.Task.UpdatedAt = fromMS(created), fromMS(updated)
@@ -300,18 +312,37 @@ func (t *Tx) ArchiveTask(id task.ID, reason string, now time.Time) error {
 
 // ResetAttempts clears failure bookkeeping.
 func (t *Tx) ResetAttempts(id task.ID, now time.Time) error {
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = 0, next_eligible_at = 0, updated_at = ? WHERE id = ?`, ms(now), id)
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = 0, next_eligible_at = 0, last_failure_attempt_id = 0, last_error = '', updated_at = ? WHERE id = ?`, ms(now), id)
 	return wrapInternal(err, "reset attempts")
 }
 
-// RecordFailure increments the failure count and sets the cooldown.
-func (t *Tx) RecordFailure(id task.ID, cooldown time.Duration, now time.Time) error {
+// RecordFailure counts one failure of an attempt and sets the cooldown.
+// It is fenced (the attempt must still be the task's current generation
+// and the task must not be complete) and idempotent (at most one counted
+// failure per attempt). It reports whether a failure was counted.
+func (t *Tx) RecordFailure(id task.ID, attemptID int64, cooldown time.Duration, now time.Time) (bool, error) {
 	next := int64(0)
 	if cooldown > 0 {
 		next = ms(now.Add(cooldown))
 	}
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = failures + 1, next_eligible_at = ?, updated_at = ? WHERE id = ?`, next, ms(now), id)
-	return wrapInternal(err, "record failure")
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = failures + 1, last_failure_attempt_id = ?, next_eligible_at = ?, updated_at = ?
+		WHERE id = ? AND completed_at IS NULL AND last_failure_attempt_id <> ?
+		  AND current_attempt_seq = (SELECT seq FROM execution_attempts WHERE id = ? AND task_id = tasks.id)`,
+		attemptID, next, ms(now), id, attemptID, attemptID)
+	if err != nil {
+		return false, wrapInternal(err, "record failure")
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// SetLastError records an environment or authority problem on the task
+// without counting a failure. It is fenced to the current attempt so a
+// stale verifier cannot overwrite a successor's state.
+func (t *Tx) SetLastError(id task.ID, attemptID int64, msg string, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET last_error = ?, updated_at = ? WHERE id = ? AND completed_at IS NULL
+		AND (? = 0 OR current_attempt_seq = (SELECT seq FROM execution_attempts WHERE id = ? AND task_id = tasks.id))`, msg, ms(now), id, attemptID, attemptID)
+	return wrapInternal(err, "set last error")
 }
 
 func nonNil(s []string) []string {
@@ -451,7 +482,7 @@ func (t *Tx) TaskProject(id task.ID) (project.ID, task.Kind, bool, error) {
 
 // MarkComplete records the completion fact.
 func (t *Tx) MarkComplete(id task.ID, submissionID int64, now time.Time) error {
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET completed_at = ?, completed_submission_id = ?, updated_at = ? WHERE id = ?`, ms(now), submissionID, ms(now), id)
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET completed_at = ?, completed_submission_id = ?, last_error = '', updated_at = ? WHERE id = ?`, ms(now), submissionID, ms(now), id)
 	return wrapInternal(err, "mark complete")
 }
 

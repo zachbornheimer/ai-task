@@ -358,7 +358,7 @@ func (e *Engine) Release(ctx context.Context, token execution.Token, opts Releas
 			return err
 		}
 		if opts.Failed {
-			if err := tx.RecordFailure(a.TaskID, proj.RetryCooldown, now); err != nil {
+			if _, err := tx.RecordFailure(a.TaskID, a.ID, proj.RetryCooldown, now); err != nil {
 				return err
 			}
 			if r, err = tx.GetRecord(a.TaskID); err != nil {

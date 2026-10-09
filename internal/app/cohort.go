@@ -190,6 +190,9 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 		}
 		return nil
 	}
+	// finishAll ends every member run. A genuine proof failure counts
+	// against each member's submitting attempt (once); anything else is
+	// recorded as the members' last_error.
 	finishAll := func(status sqlite.RunStatus, summary string, failed bool) error {
 		now := e.now()
 		err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
@@ -201,9 +204,11 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 					return err
 				}
 				if failed {
-					if err := tx.RecordFailure(m.rec.Task.ID, job.proj.RetryCooldown, now); err != nil {
+					if _, err := tx.RecordFailure(m.rec.Task.ID, m.rec.Submission.AttemptID, job.proj.RetryCooldown, now); err != nil {
 						return err
 					}
+				} else if err := tx.SetLastError(m.rec.Task.ID, 0, summary, now); err != nil {
+					return err
 				}
 			}
 			return tx.FinishJob(job.id, job.owner.Digest(), "failed", "", summary, now)
@@ -226,7 +231,8 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 		var err error
 		cand, err = mgr.PrepareMerge(ctx, job.proj.TargetBranch, sources, fmt.Sprintf("at: integrate cohort %s", job.cohort))
 		if err != nil {
-			_ = finishAll(sqlite.RunFailed, "cohort candidate could not be assembled: "+err.Error(), true)
+			// A conflicting merge is for the members to resolve, not a strike.
+			_ = finishAll(sqlite.RunFailed, "cohort candidate could not be assembled: "+err.Error(), false)
 			return err
 		}
 		candidate = cand.Revision
@@ -282,6 +288,9 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 				}
 				for _, m := range job.members {
 					if err := tx.FinishRun(m.runID, sqlite.RunPending, "candidate passed but promotion failed: "+err.Error(), now); err != nil {
+						return err
+					}
+					if err := tx.SetLastError(m.rec.Task.ID, 0, "INTEGRATION_FAILED: "+err.Error(), now); err != nil {
 						return err
 					}
 				}
@@ -489,14 +498,14 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, dir, candidate 
 				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "cohort regression failed on candidate "+short(candidate)+": "+regressionSummary, now); err != nil {
 					return err
 				}
-				if err := tx.RecordFailure(m.rec.Task.ID, job.proj.RetryCooldown, now); err != nil {
+				if _, err := tx.RecordFailure(m.rec.Task.ID, m.rec.Submission.AttemptID, job.proj.RetryCooldown, now); err != nil {
 					return err
 				}
 			case verdicts[m.runID].Summary != "":
 				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "task checks failed on cohort candidate "+short(candidate)+": "+verdicts[m.runID].Summary, now); err != nil {
 					return err
 				}
-				if err := tx.RecordFailure(m.rec.Task.ID, job.proj.RetryCooldown, now); err != nil {
+				if _, err := tx.RecordFailure(m.rec.Task.ID, m.rec.Submission.AttemptID, job.proj.RetryCooldown, now); err != nil {
 					return err
 				}
 			default:

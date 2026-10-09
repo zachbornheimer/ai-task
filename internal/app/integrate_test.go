@@ -156,8 +156,8 @@ func TestPlannerEditDuringVerificationNeverMovesTarget(t *testing.T) {
 		t.Fatal("target moved on a refused completion")
 	}
 	v := f.show(string(a))
-	if v.Status != task.StatusClaimed || v.Integration != nil {
-		t.Fatalf("%s %+v", v.Status, v.Integration)
+	if v.Status != task.StatusClaimed || v.Integration != nil || v.Failures != 0 || v.LastError == "" {
+		t.Fatalf("%s %+v failures=%d last_error=%q", v.Status, v.Integration, v.Failures, v.LastError)
 	}
 	// The same attempt verifies again under the new contract and completes.
 	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)

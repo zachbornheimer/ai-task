@@ -108,15 +108,18 @@ type TaskView struct {
 	// Integration is the open promotion intent while the task is
 	// awaiting_integration: the candidate has been verified and is being
 	// (or was) promoted; completion follows.
-	Integration       *IntentView `json:"integration,omitempty"`
-	Failures          int         `json:"failures,omitempty"`
-	NextEligibleAt    *time.Time  `json:"next_eligible_at,omitempty"`
-	CompletedAt       *time.Time  `json:"completed_at,omitempty"`
-	CompletedRevision string      `json:"completed_revision,omitempty"`
-	ArchivedAt        *time.Time  `json:"archived_at,omitempty"`
-	ArchiveReason     string      `json:"archive_reason,omitempty"`
-	CreatedAt         time.Time   `json:"created_at"`
-	History           *History    `json:"history,omitempty"`
+	Integration *IntentView `json:"integration,omitempty"`
+	Failures    int         `json:"failures,omitempty"`
+	// LastError is the most recent environment or authority problem that
+	// stopped a verification without counting as a failure.
+	LastError         string     `json:"last_error,omitempty"`
+	NextEligibleAt    *time.Time `json:"next_eligible_at,omitempty"`
+	CompletedAt       *time.Time `json:"completed_at,omitempty"`
+	CompletedRevision string     `json:"completed_revision,omitempty"`
+	ArchivedAt        *time.Time `json:"archived_at,omitempty"`
+	ArchiveReason     string     `json:"archive_reason,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	History           *History   `json:"history,omitempty"`
 }
 
 // GroupView is a group with derived progress.
@@ -267,7 +270,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
 		Checks: t.Verification.TaskChecks, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
-		Failures: r.Failures, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
+		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
 	}
 	if st == task.StatusAwaitingIntegration {
 		if in, err := tx.ActiveIntentForTask(t.ID); err == nil && in != nil {

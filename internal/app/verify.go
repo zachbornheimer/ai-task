@@ -277,6 +277,11 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		if r.UnmetRequires > 0 {
 			return fault.New(fault.CodeTaskBlocked, "%s cannot complete: prerequisites changed", r.Task.ID)
 		}
+		// One final run per attempt at a time: a double-fired `verify
+		// complete` must neither race its twin nor count a failure.
+		if s := r.Submission; s != nil && s.AttemptID == p.attempt.ID && s.RunStatus() == sqlite.RunRunning {
+			return fault.New(fault.CodeVerificationRunning, "%s: a `verify complete` run (%d) is already in progress for this attempt; wait for its result", r.Task.ID, s.Run.ID)
+		}
 		if fr.submission, err = tx.InsertSubmission(r.Task.ID, p.attempt.ID, revision, "", now); err != nil {
 			return err
 		}
@@ -311,17 +316,33 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		return nil
 	}
+	// fail records why the run did not complete. Only a genuine failed
+	// proof counts against the attempt (once per attempt, fenced to the
+	// current generation); environment and authority problems are kept
+	// as last_error so the next attempt and humans can see them.
 	fail := func(status sqlite.RunStatus, code fault.Code, summary string, evidence []verification.Evidence) (VerifyResult, error) {
 		now := e.now()
+		class := classify(code)
 		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 			if err := tx.FinishRun(fr.runID, status, summary, now); err != nil {
 				return err
 			}
-			return tx.RecordFailure(fr.rec.Task.ID, fr.proj.RetryCooldown, now)
+			if class == classAttempt {
+				_, err := tx.RecordFailure(fr.rec.Task.ID, fr.attempt.ID, fr.proj.RetryCooldown, now)
+				return err
+			}
+			return tx.SetLastError(fr.rec.Task.ID, fr.attempt.ID, string(code)+": "+summary, now)
 		})
 		res.Evidence, res.Summary = evidence, summary
 		res.Status = e.statusOf(ctx, fr.rec.Task.ID)
-		res.Message = "task NOT complete; the claim stays live for repair"
+		switch class {
+		case classAttempt:
+			res.Message = "task NOT complete: a required check failed; the claim stays live for repair (counted against the attempt budget once)"
+		case classEnvironment:
+			res.Message = "task NOT complete: the environment stopped the run, not the checks; fix the cause and verify again (not counted as a failure)"
+		default:
+			res.Message = "task NOT complete: authority or contract changed during verification; verify again under the current contract (not counted as a failure)"
+		}
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("%s: %s", fr.rec.Task.ID, summary), Details: res}
 	}
 	// Immutable inputs: a detached snapshot of the submitted revision.
@@ -484,15 +505,27 @@ func (e *Engine) replayCompletion(ctx context.Context, token execution.Token) (V
 		if err != nil {
 			return err
 		}
-		if r.CompletedAt == nil || r.Submission == nil || r.Submission.AttemptID != a.ID || r.Submission.Run == nil {
+		if r.CompletedAt == nil || r.CompletedSubmissionID == 0 {
 			return nil
 		}
-		ev, err := tx.EvidenceForRun(r.Submission.Run.ID)
+		// The acknowledgement is the run that established completion, which
+		// is not necessarily the newest submission (a double-fired call may
+		// have recorded a later, refused one).
+		subs, err := tx.Submissions(a.TaskID)
 		if err != nil {
 			return err
 		}
-		res = VerifyResult{TaskID: a.TaskID, Mode: verification.ModeComplete, RunID: r.Submission.Run.ID, Revision: r.Submission.Revision, IntegratedRevision: r.Submission.Run.IntegratedRevision, SubmissionID: r.Submission.ID, Passed: true, Completed: true, Status: task.StatusComplete, Summary: r.Submission.Run.Summary, Evidence: ev, Replayed: true, Message: "already complete; stored result returned, no checks re-run"}
-		ok = true
+		for _, s := range subs {
+			if s.ID != r.CompletedSubmissionID || s.AttemptID != a.ID || s.Run == nil {
+				continue
+			}
+			ev, err := tx.EvidenceForRun(s.Run.ID)
+			if err != nil {
+				return err
+			}
+			res = VerifyResult{TaskID: a.TaskID, Mode: verification.ModeComplete, RunID: s.Run.ID, Revision: s.Revision, IntegratedRevision: s.Run.IntegratedRevision, SubmissionID: s.ID, Passed: true, Completed: true, Status: task.StatusComplete, Summary: s.Run.Summary, Evidence: ev, Replayed: true, Message: "already complete; stored result returned, no checks re-run"}
+			ok = true
+		}
 		return nil
 	})
 	return res, ok, err
