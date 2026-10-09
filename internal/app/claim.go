@@ -63,6 +63,7 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 		if !retryable(err) {
 			return Session{}, err
 		}
+		wait := e.poll
 		if req.ProjectID != "" {
 			sum, serr := e.Summary(ctx, req.ProjectID)
 			if serr != nil {
@@ -74,12 +75,19 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 			if sum.Stalled {
 				return Session{}, &fault.Error{Code: fault.CodeStalled, Message: ErrStalled.Message, Details: sum}
 			}
+			// A cooldown resolves itself: wait for it, no later than its
+			// expiry, rather than report a stall.
+			if sum.NextEligibleAt != nil {
+				if d := sum.NextEligibleAt.Sub(e.now()); d > 0 && d < wait {
+					wait = d
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return Session{}, ctx.Err()
 		case <-wake:
-		case <-time.After(e.poll):
+		case <-time.After(wait):
 		}
 	}
 }

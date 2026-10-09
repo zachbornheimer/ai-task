@@ -39,7 +39,8 @@ unless noted).
 
 Precedence: archived > complete > awaiting_integration > verifying >
 awaiting_verification > claimed > blocked > needs_attention >
-verification_failed > cooldown > interrupted > ready. Claimable: ready,
+cooldown > verification_failed > interrupted > ready (a cooling task is
+not claimable however its last proof ended). Claimable: ready,
 interrupted, verification_failed. Active (keeps a waiting worker waiting):
 claimed, verifying, and submissions whose cohort can be verified.
 (`task.TestDerivePrecedence`, `TestWaitingClaimDoneAndStalled`)
@@ -54,8 +55,13 @@ claimed, verifying, and submissions whose cohort can be verified.
 - Completing A makes its dependents claimable before unrelated work ends.
   (`TestContinuousQueueReleasesDependentsImmediately`)
 - `Claim(wait)` returns `DONE` only when every executable task is complete,
-  `STALLED` only when nothing is claimable and nothing (including a
-  runnable cohort job) is in flight, and `ctx.Err()` on cancellation.
+  `STALLED` only when nothing is claimable, nothing (including a runnable
+  cohort job or an open integration) is in flight, and nothing is in
+  retry cooldown, and `ctx.Err()` on cancellation. A cooldown is waited
+  for. (`TestCooldownIsOneRuleEverywhere`)
+- The SQL claim prefilter and the derived status agree on claimability
+  for every state the engine produces.
+  (`TestClaimablePrefilterMatchesDerivedStatus`)
   (`TestWaitingClaimDoneAndStalled`, `TestCoupledVerificationRecoversAfterVerifierCrash`)
 - Release keeps the handoff; `--failed` counts a failure and applies the
   cooldown; exhausted tasks need a planner reset. (`TestReleaseAndCooldown`)

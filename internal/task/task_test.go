@@ -92,7 +92,8 @@ func TestDerivePrecedence(t *testing.T) {
 		{"exhausted beats failed", Facts{VerificationFailed: true, Exhausted: true}, StatusNeedsAttention},
 		{"cooldown", Facts{Now: now, CooldownUntil: now.Add(time.Minute)}, StatusCooldown},
 		{"cooldown expired", Facts{Now: now, CooldownUntil: now.Add(-time.Minute)}, StatusReady},
-		{"failed beats cooldown", Facts{Now: now, VerificationFailed: true, CooldownUntil: now.Add(time.Minute)}, StatusVerificationFailed},
+		{"cooldown beats failed", Facts{Now: now, VerificationFailed: true, CooldownUntil: now.Add(time.Minute)}, StatusCooldown},
+		{"failed once cooldown expired", Facts{Now: now, VerificationFailed: true, CooldownUntil: now.Add(-time.Minute)}, StatusVerificationFailed},
 		{"awaiting integration", Facts{AwaitingIntegration: true}, StatusAwaitingIntegration},
 		{"complete", Facts{Complete: true, UnmetRequires: 3, LeaseActive: true}, StatusComplete},
 	}

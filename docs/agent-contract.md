@@ -35,7 +35,7 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 | `AWAITING_VERIFICATION`, `INTEGRATION_PENDING`, `TASK_COMPLETE` | not claimable in that state |
 | `NO_ELIGIBLE_WORK` | nothing claimable now (non-waiting claim, cooldown) |
 | `DONE` | every executable task is complete (waiting claim) |
-| `STALLED` | open tasks remain, nothing claimable, nothing in flight; `details` carries the summary with reasons |
+| `STALLED` | open tasks remain, nothing claimable, nothing in flight, nothing cooling down; `details` carries the summary with reasons |
 | `NEEDS_ATTENTION` | this task needs a planner: attempts exhausted, or its worktree could not be prepared (`attention_reason` says which) |
 | `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED` | authority failures |
 | `MISSING_VERIFICATION` | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim |
@@ -95,7 +95,12 @@ at verify task | regression | complete               (same token sources)
 
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;
 cooldowns, exhausted tasks and tasks whose worktree could not be prepared
-excluded). A worktree that cannot be prepared marks that task
+excluded). Eligibility is one rule: `list ready`, `status`, automatic and
+explicit claims all derive it from the same facts, and a task in retry
+cooldown is not claimable however its last proof ended. `claim --wait`
+treats a cooldown as something to wait for (it wakes at the earliest
+expiry; `status` reports `cooling` and `next_eligible_at`) and returns
+`STALLED` only when nothing can proceed without a planner. A worktree that cannot be prepared marks that task
 `needs_attention` with the reason and ends the attempt; the queue moves
 on to the next task. `at claim <ref>` on such a task retries the
 preparation (the repair path after fixing the worktree); `at update <ref>

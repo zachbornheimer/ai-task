@@ -152,10 +152,16 @@ type Summary struct {
 	// PendingCohorts names cohorts whose members have all submitted and
 	// whose verification job can run (or is running).
 	PendingCohorts []string `json:"pending_cohorts,omitempty"`
+	// Cooling counts tasks in retry cooldown: not claimable now, claimable
+	// later without anyone's intervention.
+	Cooling int `json:"cooling,omitempty"`
+	// NextEligibleAt is the earliest cooldown expiry, when Cooling > 0.
+	NextEligibleAt *time.Time `json:"next_eligible_at,omitempty"`
 	// Done: every executable task is complete (groups and archived tasks
 	// do not count).
 	Done bool `json:"done"`
-	// Stalled: open tasks remain, nothing is claimable, nothing is active.
+	// Stalled: open tasks remain, nothing is claimable, nothing is active,
+	// and nothing is cooling: no progress is possible without a planner.
 	Stalled bool `json:"stalled"`
 	// Reasons explains a stall for humans.
 	Reasons []string `json:"reasons,omitempty"`

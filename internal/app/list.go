@@ -202,6 +202,12 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		switch {
 		case st.Claimable():
 			s.Claimable++
+		case st == task.StatusCooldown:
+			s.Cooling++
+			if s.NextEligibleAt == nil || r.NextEligibleAt.Before(*s.NextEligibleAt) {
+				ne := r.NextEligibleAt
+				s.NextEligibleAt = &ne
+			}
 		case st == task.StatusClaimed, st == task.StatusVerifying, st == task.StatusAwaitingIntegration:
 			// An open integration intent is work in flight: its owner is
 			// promoting, or reconciliation will resolve it from Git once
@@ -231,7 +237,7 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	}
 	sort.Strings(s.PendingCohorts)
 	s.Done = s.Open == 0
-	s.Stalled = s.Open > 0 && s.Claimable == 0 && s.Active == 0
+	s.Stalled = s.Open > 0 && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
 	if s.Stalled {
 		if exhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `at update <task> --reset-attempts`", exhausted))
@@ -241,9 +247,6 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		}
 		if unverifiable > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `at update <task> --check ...`", unverifiable))
-		}
-		if c := s.Counts[task.StatusCooldown]; c > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) in retry cooldown", c))
 		}
 		if c := s.Counts[task.StatusAwaitingVerification]; c > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort member(s) await peers that cannot progress", c))

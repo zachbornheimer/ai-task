@@ -65,7 +65,11 @@ type Facts struct {
 //
 //	archived > complete > awaiting_integration > verifying
 //	> awaiting_verification > claimed > blocked > needs_attention
-//	> verification_failed > cooldown > interrupted > ready
+//	> cooldown > verification_failed > interrupted > ready
+//
+// Cooldown outranks verification_failed so that a task whose newest proof
+// failed is not claimable while its retry cooldown runs: eligibility is
+// one rule, and the SQL prefilter (next_eligible_at <= now) agrees.
 func Derive(f Facts) Status {
 	switch {
 	case f.Archived:
@@ -86,10 +90,10 @@ func Derive(f Facts) Status {
 		return StatusBlocked
 	case f.Exhausted, f.Unverifiable, f.WorkspaceBlocked:
 		return StatusNeedsAttention
-	case f.VerificationFailed:
-		return StatusVerificationFailed
 	case f.CooldownUntil.After(f.Now):
 		return StatusCooldown
+	case f.VerificationFailed:
+		return StatusVerificationFailed
 	case f.Interrupted:
 		return StatusInterrupted
 	default:
