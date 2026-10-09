@@ -40,6 +40,7 @@ func (e *Engine) Finish(ctx context.Context, token execution.Token, opts FinishO
 	// captured outside any write transaction.
 	var root string
 	var taskID task.ID
+	now0 := e.now()
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		auth, err := tx.AttemptByDigest(token.Digest())
 		if err != nil {
@@ -49,6 +50,14 @@ func (e *Engine) Finish(ctx context.Context, token execution.Token, opts FinishO
 		r, err := tx.GetRecord(taskID)
 		if err != nil {
 			return err
+		}
+		// Report an authority problem before any workspace problem; the
+		// write transaction re-checks authority atomically later.
+		replay := auth.Attempt.EndedAt != nil && auth.Attempt.EndReason == execution.EndFinished && r.Submission != nil && r.Submission.AttemptID == auth.Attempt.ID
+		if !replay {
+			if err := execution.Authorize(auth.Attempt, auth.CurrentSeq, now0); err != nil {
+				return err
+			}
 		}
 		proj, err := tx.GetProject(r.Task.ProjectID)
 		if err != nil {
@@ -151,12 +160,14 @@ func (e *Engine) Finish(ctx context.Context, token execution.Token, opts FinishO
 		var fe *fault.Error
 		if asFault(verr, &fe) && fe.Code == fault.CodeVerificationFailed {
 			res.RunID, res.PolicyDigest, res.Verification, res.Summary, res.Status = vr.RunID, vr.PolicyDigest, vr.Verification, vr.Summary, vr.Status
+			res.Evidence = vr.Evidence
 			res.Message = "submission recorded; verification failed"
 			fe.Details = res
 		}
 		return res, verr
 	}
 	res.RunID, res.PolicyDigest, res.Verification, res.Summary, res.Status = vr.RunID, vr.PolicyDigest, vr.Verification, vr.Summary, vr.Status
+	res.Evidence = vr.Evidence
 	res.Message = "submission verified"
 	if res.Status == task.StatusComplete {
 		res.Message = "submission verified; task complete"

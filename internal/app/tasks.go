@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"sort"
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -62,15 +63,17 @@ type ListFilter struct {
 func (e *Engine) List(ctx context.Context, pid project.ID, f ListFilter) ([]TaskSummary, error) {
 	now := e.now()
 	scope := sqlite.ScopeAll
-	// Use the SQL pre-filter when it is exact for the request.
-	if len(f.Statuses) == 1 {
-		switch f.Statuses[0] {
-		case task.StatusAvailable:
-			scope = sqlite.ScopeTakeable
-		case task.StatusComplete:
-			scope = sqlite.ScopeComplete
-		default:
-			scope = sqlite.ScopeOpen
+	// Use the narrowest SQL pre-filter that still contains every requested
+	// status; the exact status is derived per row below.
+	if len(f.Statuses) > 0 {
+		scope = sqlite.ScopeTakeable
+		for _, st := range f.Statuses {
+			switch {
+			case st == task.StatusComplete:
+				scope = sqlite.ScopeAll
+			case !st.Takeable() && scope == sqlite.ScopeTakeable:
+				scope = sqlite.ScopeOpen
+			}
 		}
 	}
 	want := map[task.Status]bool{}
@@ -99,9 +102,23 @@ func (e *Engine) List(ctx context.Context, pid project.ID, f ListFilter) ([]Task
 	return out, err
 }
 
-// Available lists tasks that can be started right now.
+// Available lists tasks with status "available": fresh work whose
+// prerequisites are complete. Interrupted and verification-failed tasks are
+// also takeable but are listed by Takeable, so an agent can tell new work
+// from recovery work.
 func (e *Engine) Available(ctx context.Context, pid project.ID) ([]TaskSummary, error) {
 	return e.List(ctx, pid, ListFilter{Statuses: []task.Status{task.StatusAvailable}})
+}
+
+// Takeable lists every task a Take could claim right now, in the order
+// automatic selection would consider them.
+func (e *Engine) Takeable(ctx context.Context, pid project.ID) ([]TaskSummary, error) {
+	out, err := e.List(ctx, pid, ListFilter{Statuses: []task.Status{task.StatusInterrupted, task.StatusVerificationFailed, task.StatusAvailable}})
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Status.TakePriority() < out[j].Status.TakePriority() })
+	return out, nil
 }
 
 // History returns a page of a task's log plus its attempts and

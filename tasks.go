@@ -97,6 +97,8 @@ type (
 func ErrorCode(err error) Code { return fault.CodeOf(err) }
 
 // ParseTaskID validates an external task ID.
+// Takeable statuses are listed by Engine.Takeable; see docs/invariants.md.
+
 func ParseTaskID(s string) (TaskID, error) { return task.ParseID(s) }
 
 // ParseSessionToken validates an external session token.

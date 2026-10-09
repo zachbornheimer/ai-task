@@ -26,7 +26,7 @@ Warnings (never fatal) go to stderr in both modes. Exit status: `0` success,
 | `NO_PROJECT` | no project for this directory | `tasks init` or `--project` |
 | `SELF_DEPENDENCY`, `DUPLICATE_DEPENDENCY`, `CROSS_PROJECT_DEPENDENCY`, `DEPENDENCY_CYCLE` | edge rejected (nothing written) | redesign the edge |
 | `TASK_BLOCKED` | prerequisites incomplete | work on them first |
-| `TASK_ALREADY_TAKEN` | another attempt holds a live lease | pick another task |
+| `TASK_ALREADY_TAKEN` | another attempt holds a live lease (on `verify`: an attempt is open, so its finish will verify) | pick another task / finish the attempt |
 | `TASK_AWAITING_VERIFICATION` / `TASK_AWAITING_INTEGRATION` / `TASK_COMPLETE` | not takeable in that state | nothing to do |
 | `NO_AVAILABLE_TASK` | automatic take found nothing | wait or add work |
 | `INVALID_SESSION` | token unknown or malformed | re-take |
@@ -49,7 +49,7 @@ tasks projects                                        list projects
 tasks project [--name N] [--integration none|promote] [--regression-json JSON|--regression-file F]
 tasks add "description" [--outcome ..] [--constraint ..]* [--accept ..]* [--check "[id:] cmd"]* [--optional-check ..]* [--policy-json JSON]
 tasks show <task>
-tasks list [--available|--blocked|--in-progress|--interrupted|--awaiting-verification|--verification-failed|--awaiting-integration|--complete|--all|--status a,b]
+tasks list [--available|--takeable|--blocked|--in-progress|--interrupted|--awaiting-verification|--verification-failed|--awaiting-integration|--complete|--all|--status a,b]
 tasks deps add <task> --requires <prerequisite>       <task> requires <prerequisite>
 tasks deps remove <task> --requires <prerequisite>
 tasks deps list <task>
@@ -58,7 +58,7 @@ tasks take [<task>] [--lease 1h]                      atomic claim; prints the s
 tasks log <token> [--done ..] [--next ..] [--learned ..] [--note ..]
 tasks renew-task-lease <token> [--lease 1h]           (alias: renew)
 tasks finish <token> [--no-verify]                    submit; runs the checks unless --no-verify
-tasks verify <task> [--retry] [--again]               run (or re-run) the checks for the newest submission
+tasks verify <task> [--retry] [--again] [--no-reuse]  run (or re-run) the checks for the newest submission
 tasks evidence <task> [--run N] [--full]              verification runs and per-check evidence
 tasks policy <task> [--check ..]* [--optional-check ..]* [--policy-json ..] [--clear]
 tasks history <task> [--limit N] [--offset N]
@@ -129,7 +129,13 @@ and the task becomes `verification_failed` (takeable for repair). With
 `--no-verify` the task waits at `awaiting_verification` until `tasks verify`.
 
 Evidence for a check is reused instead of re-executed when an identical
-check already passed at the same revision.
+check already passed at the same revision; `--no-reuse` forces execution.
+`verify` refuses while an execution attempt is open (active or expired):
+the attempt's own `finish` produces the submission to judge, so an older
+submission can never complete the task underneath repair work.
+
+`list --available` shows fresh work; `list --takeable` adds `interrupted`
+and `verification_failed` tasks, in the order automatic `take` prefers them.
 
 ## Statuses
 

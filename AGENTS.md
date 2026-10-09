@@ -51,7 +51,8 @@ outcome; if you would write "and" in the outcome, make two tasks.
 
 ## Inspect
 
-`tasks list --available`, `tasks list --blocked`, `tasks show <id>`,
+`tasks list --available` (fresh work), `tasks list --takeable` (also
+interrupted and failed work), `tasks list --blocked`, `tasks show <id>`,
 `tasks history <id>`, `tasks graph --format dot`.
 
 Full reference: `docs/agent-contract.md`.

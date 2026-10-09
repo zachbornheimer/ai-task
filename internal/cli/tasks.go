@@ -311,7 +311,7 @@ func renderLog(w io.Writer, l execution.RecordedLog) {
 
 func runList(ctx context.Context, c *ctxt, args []string) error {
 	flags := map[task.Status]*bool{
-		task.StatusAvailable:            c.fs.Bool("available", false, "takeable now"),
+		task.StatusAvailable:            c.fs.Bool("available", false, "fresh work whose prerequisites are complete"),
 		task.StatusBlocked:              c.fs.Bool("blocked", false, "waiting on prerequisites"),
 		task.StatusInProgress:           c.fs.Bool("in-progress", false, "held by an active lease"),
 		task.StatusInterrupted:          c.fs.Bool("interrupted", false, "lease expired before finish"),
@@ -320,6 +320,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		task.StatusAwaitingIntegration:  c.fs.Bool("awaiting-integration", false, "verified, not integrated"),
 		task.StatusComplete:             c.fs.Bool("complete", false, "complete"),
 	}
+	takeable := c.fs.Bool("takeable", false, "everything a take could claim: available, interrupted, verification-failed")
 	all := c.fs.Bool("all", false, "include complete tasks (default: open tasks only)")
 	status := c.fs.String("status", "", "comma-separated statuses")
 	if err := c.parse(args); err != nil {
@@ -330,6 +331,9 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		if *on {
 			f.Statuses = append(f.Statuses, st)
 		}
+	}
+	if *takeable {
+		f.Statuses = append(f.Statuses, task.StatusAvailable, task.StatusInterrupted, task.StatusVerificationFailed)
 	}
 	for _, s := range strings.Split(*status, ",") {
 		if s = strings.TrimSpace(s); s != "" {

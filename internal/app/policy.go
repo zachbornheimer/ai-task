@@ -37,7 +37,11 @@ func (e *Engine) SetTaskPolicy(ctx context.Context, id task.ID, policy verificat
 			return err
 		}
 		effective := verification.Merge(policy, proj.Regression)
-		if sub := r.Submission; sub != nil && sub.Run != nil && sub.Run.Status != sqlite.RunStale && sub.Run.PolicyDigest != effective.Digest() {
+		// With an open attempt the next submission is judged under the new
+		// policy anyway; marking the old run stale would only hide the
+		// attempt behind awaiting_verification.
+		attemptOpen := r.Attempt != nil && r.Attempt.EndedAt == nil
+		if sub := r.Submission; !attemptOpen && sub != nil && sub.Run != nil && sub.Run.Status != sqlite.RunStale && sub.Run.PolicyDigest != effective.Digest() {
 			summary := fmt.Sprintf("task policy changed (%s -> %s); run %d no longer applies", shortDigest(sub.Run.PolicyDigest), shortDigest(effective.Digest()), sub.Run.ID)
 			if _, err := tx.InsertRun(sub.ID, sqlite.RunStale, effective, "", summary, now); err != nil {
 				return err

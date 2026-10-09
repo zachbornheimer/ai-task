@@ -192,6 +192,22 @@ judge (tx). Each boundary leaves a recoverable state (see
 - **M4:** explicit integration candidates, shared regression once per batch,
   guarded promotion, resource limits.
 
+### Findings from the independent adversarial review (fixed)
+
+1. `verify` could complete a task from an older submission while a repair
+   attempt was open; now refused (`TASK_ALREADY_TAKEN`) and a new submission
+   always withdraws completion.
+2. A policy change during an open attempt hid the attempt behind
+   `awaiting_verification`; now the change simply applies to the attempt's
+   next submission.
+3. CLI `--` protected only the first following positional; fixed.
+4. SQL take priority disagreed with `Derive` for a failed task with an
+   expired attempt; order aligned.
+5. `verify --again` always reused evidence; `--no-reuse` added.
+6. `finish` reported `WORKSPACE_DIRTY` before `SESSION_SUPERSEDED`; authority
+   is now checked first.
+7. `list --available` omitted recoverable takeable work; `--takeable` added.
+
 ## 6. Deviations from the specification, with rationale
 
 | Spec | Implementation | Why |

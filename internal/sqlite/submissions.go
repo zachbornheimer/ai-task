@@ -9,7 +9,9 @@ import (
 )
 
 // InsertSubmission records a submission for an attempt and points the task
-// at it. It returns the submission ID.
+// at it. The newest submission is the one that must be judged, so any
+// completion fact recorded for an older submission is withdrawn here.
+// It returns the submission ID.
 func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision string, now time.Time) (int64, error) {
 	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO submissions (task_id, attempt_id, revision, submitted_at) VALUES (?, ?, ?, ?)`,
 		id, attemptID, revision, ms(now))
@@ -17,7 +19,7 @@ func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision string, now 
 		return 0, wrapInternal(err, "insert submission")
 	}
 	sid, _ := res.LastInsertId()
-	if _, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET latest_submission_id = ?, updated_at = ? WHERE id = ?`, sid, ms(now), id); err != nil {
+	if _, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET latest_submission_id = ?, completed_at = NULL, completed_submission_id = NULL, updated_at = ? WHERE id = ?`, sid, ms(now), id); err != nil {
 		return 0, wrapInternal(err, "point task at submission")
 	}
 	return sid, nil

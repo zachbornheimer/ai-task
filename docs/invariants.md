@@ -96,8 +96,16 @@ claim. (`engine.TestConcurrentAutomaticTakeAssignsEachTaskOnce`)
 - A Git submission names a clean commit; nothing is staged or committed on
   the agent's behalf. (`engine.TestDirtyWorktreeSubmissionIsRejected`)
 - A task-level policy change appends a `stale` run and withdraws
-  completion; the policy is not reachable through a session token.
-  (`e2e.TestDeferredVerificationAndPolicyChange`)
+  completion; the policy is not reachable through a session token. While
+  an attempt is open the change applies to that attempt's next submission
+  instead, so the attempt stays visible.
+  (`e2e.TestDeferredVerificationAndPolicyChange`, `engine.TestPolicyChangeDuringOpenAttemptKeepsAttemptVisible`)
+- `verify` refuses while an attempt is open, and recording a new submission
+  withdraws any completion fact, so the task is complete only on the
+  evidence of its newest submission.
+  (`engine.TestVerifyRefusesWhileAttemptOpenAndNewSubmissionWithdrawsCompletion`)
+- Finish reports authority errors before workspace errors.
+  (`engine.TestFinishReportsAuthorityBeforeDirtyTree`)
 - A task awaiting verification or integration cannot be taken.
 - Withdrawing completion (`ClearComplete`, used by Milestone 2 policy
   changes) does not retroactively evict attempts on dependents that were

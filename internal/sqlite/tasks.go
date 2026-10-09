@@ -322,10 +322,11 @@ const takeableWhere = `
 // the three groups separately was measured slower (three scans).
 func (t *Tx) TakeCandidate(pid project.ID, now time.Time) (Record, bool, error) {
 	where, args := scopeWhere(pid, ScopeTakeable, now)
-	// Priority mirrors task.Status.TakePriority.
+	// Priority mirrors task.Status.TakePriority after task.Derive: a failed
+	// run outranks an expired open attempt, so it is tested first.
 	order := ` ORDER BY CASE
-	    WHEN a.id IS NOT NULL AND a.ended_at IS NULL THEN 0
 	    WHEN vr.status IN ('failed', 'error') THEN 1
+	    WHEN a.id IS NOT NULL AND a.ended_at IS NULL THEN 0
 	    ELSE 2 END, t.created_at, t.id LIMIT 1`
 	row := t.tx.QueryRowContext(t.ctx, recordSelect+where+order, args...)
 	r, err := scanRecord(row)

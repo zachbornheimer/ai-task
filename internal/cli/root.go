@@ -121,11 +121,13 @@ func (c *ctxt) parse(args []string) error {
 			return &usageErr{err}
 		}
 		rest := c.fs.Args()
-		if len(rest) == 0 {
+		// flag.Parse consumes a "--" terminator itself; if the last consumed
+		// argument was one, everything after it is positional.
+		if consumed := len(args) - len(rest); consumed > 0 && args[consumed-1] == "--" {
+			pos = append(pos, rest...)
 			break
 		}
-		if rest[0] == "--" {
-			pos = append(pos, rest[1:]...)
+		if len(rest) == 0 {
 			break
 		}
 		pos = append(pos, rest[0])

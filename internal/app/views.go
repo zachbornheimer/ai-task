@@ -6,6 +6,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
+	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
 // TaskSummary is the list-row read model.
@@ -68,17 +69,18 @@ type Session struct {
 
 // SubmissionResult is what Finish returns.
 type SubmissionResult struct {
-	TaskID           task.ID          `json:"task_id"`
-	SubmissionID     int64            `json:"submission_id"`
-	AttemptSeq       int              `json:"attempt"`
-	Revision         string           `json:"revision,omitempty"`
-	RunID            int64            `json:"run_id,omitempty"`
-	PolicyDigest     string           `json:"policy_digest,omitempty"`
-	Verification     sqlite.RunStatus `json:"verification"`
-	Summary          string           `json:"summary,omitempty"`
-	Status           task.Status      `json:"status"`
-	AlreadySubmitted bool             `json:"already_submitted,omitempty"`
-	Message          string           `json:"message,omitempty"`
+	TaskID           task.ID                 `json:"task_id"`
+	SubmissionID     int64                   `json:"submission_id"`
+	AttemptSeq       int                     `json:"attempt"`
+	Revision         string                  `json:"revision,omitempty"`
+	RunID            int64                   `json:"run_id,omitempty"`
+	PolicyDigest     string                  `json:"policy_digest,omitempty"`
+	Verification     sqlite.RunStatus        `json:"verification"`
+	Summary          string                  `json:"summary,omitempty"`
+	Status           task.Status             `json:"status"`
+	Evidence         []verification.Evidence `json:"evidence,omitempty"`
+	AlreadySubmitted bool                    `json:"already_submitted,omitempty"`
+	Message          string                  `json:"message,omitempty"`
 }
 
 // HistoryPage is a page of a task's log.

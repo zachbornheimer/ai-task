@@ -35,7 +35,8 @@ These are not planned to be hidden behind better wording. Each is a real gap.
 
 5a. **Project-level regression changes do not re-judge completed tasks.**
    Only task-level policy edits withdraw completion. Use
-   `tasks verify --again` to re-verify deliberately.
+   `tasks verify --again` (with `--no-reuse` to force execution rather than
+   evidence reuse) to re-verify deliberately.
 
 6. **Withdrawing completion does not evict released dependents.** If a
    policy change (Milestone 2) invalidates a completed task's evidence,

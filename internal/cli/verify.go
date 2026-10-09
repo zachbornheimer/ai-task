@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	register("verify", "run the checks for a task's newest submission: tasks verify <task> [--retry] [--again]", runVerify)
+	register("verify", "run the checks for a task's newest submission: tasks verify <task> [--retry] [--again] [--no-reuse]", runVerify)
 	register("evidence", "show verification runs and evidence: tasks evidence <task> [--run N] [--full]", runEvidence)
 	register("policy", "show or replace a task's verification policy: tasks policy <task> [--check ..] [--optional-check ..] [--policy-json ..] [--clear]", runPolicy)
 }
@@ -22,6 +22,7 @@ func init() {
 func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	retry := c.fs.Bool("retry", false, "restart a run stuck in 'running' (its process is gone)")
 	again := c.fs.Bool("again", false, "re-verify a submission that already passed, under the current policy")
+	noReuse := c.fs.Bool("no-reuse", false, "execute every check even if identical evidence exists at this revision")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -36,7 +37,7 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := e.Verify(ctx, id, app.VerifyOptions{Retry: *retry, Again: *again})
+	res, err := e.Verify(ctx, id, app.VerifyOptions{Retry: *retry, Again: *again, NoReuse: *noReuse})
 	if err != nil {
 		return err
 	}

@@ -27,6 +27,9 @@ type VerifyOptions struct {
 	// Again re-verifies a submission that already passed, under the current
 	// effective policy. Completion is withdrawn until the new run passes.
 	Again bool
+	// NoReuse executes every check even when identical evidence exists at
+	// the same revision (e.g. to re-test after an environment change).
+	NoReuse bool
 }
 
 // VerifyResult reports one verification run.
@@ -52,6 +55,7 @@ type runPlan struct {
 	policy     verification.Policy
 	steps      []verification.Step
 	proj       project.Project
+	noReuse    bool
 }
 
 // Verify executes the effective verification policy against the task's
@@ -98,6 +102,16 @@ func (e *Engine) beginRun(ctx context.Context, id task.ID, opts VerifyOptions) (
 		sub := r.Submission
 		if sub == nil {
 			return fault.New(fault.CodeNothingToVerify, "task %s has no submission; an agent must `tasks finish` first", id)
+		}
+		// An open attempt owns the task's current intent: its finish will
+		// produce the submission to judge. Verifying an older submission
+		// underneath it could complete the task over in-flight repair work.
+		if a := r.Attempt; a != nil && a.EndedAt == nil {
+			state := "lease expired; take the task to resume it, then finish"
+			if a.LeaseActive(now) {
+				state = "lease active until " + a.LeaseExpiresAt.Format(time.RFC3339) + "; its finish will verify"
+			}
+			return fault.New(fault.CodeTaskAlreadyTaken, "task %s has an open attempt %d (%s)", id, a.Seq, state)
 		}
 		switch sub.RunStatus() {
 		case sqlite.RunRunning:
@@ -156,7 +170,7 @@ func (e *Engine) beginRun(ctx context.Context, id task.ID, opts VerifyOptions) (
 				return err
 			}
 		}
-		plan = runPlan{taskID: id, submission: sub.ID, runID: runID, revision: sub.Revision, root: proj.RootPath, policy: policy, steps: verification.Plan(policy), proj: proj}
+		plan = runPlan{taskID: id, submission: sub.ID, runID: runID, revision: sub.Revision, root: proj.RootPath, policy: policy, steps: verification.Plan(policy), proj: proj, noReuse: opts.NoReuse}
 		return nil
 	})
 	return plan, early, err
@@ -206,11 +220,13 @@ func (e *Engine) runStep(ctx context.Context, plan runPlan, step verification.St
 	}
 	// Reuse: identical check content at the same immutable revision.
 	var prior *verification.Evidence
-	_ = e.store.Read(ctx, func(tx *sqlite.Tx) error {
-		var err error
-		prior, err = tx.FindReusableEvidence(c.Digest(), plan.revision)
-		return err
-	})
+	if !plan.noReuse {
+		_ = e.store.Read(ctx, func(tx *sqlite.Tx) error {
+			var err error
+			prior, err = tx.FindReusableEvidence(c.Digest(), plan.revision)
+			return err
+		})
+	}
 	if prior != nil && verification.Reusable(*prior, c, plan.revision) {
 		ev.Outcome = verification.OutcomePassed
 		ev.ExitCode = prior.ExitCode
