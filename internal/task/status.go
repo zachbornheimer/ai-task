@@ -127,17 +127,28 @@ func (s Status) Open() bool {
 	return s != StatusComplete && s != StatusArchived && s != StatusGroup
 }
 
-// Glyph is the Beads-style progress glyph: ○ not in progress, ◐ in
-// progress (live claim or verification), ● complete.
-func (s Status) Glyph() string {
+// Glyph is the Beads-style progress glyph: ○ never started, ◐ started but
+// not complete (claimed, verifying, submitted, awaiting integration,
+// interrupted, failed or cooling, or any state after an attempt existed),
+// ● complete. It is a progress indicator, not a liveness indicator; the
+// annotation says why a ◐ task is not complete. started reports whether
+// any attempt ever existed, which the status alone cannot tell for
+// blocked, ready and needs_attention tasks.
+func Glyph(s Status, started bool) string {
 	switch s {
 	case StatusComplete:
 		return "●"
-	case StatusClaimed, StatusVerifying:
+	case StatusClaimed, StatusVerifying, StatusAwaitingVerification, StatusAwaitingIntegration, StatusInterrupted, StatusVerificationFailed, StatusCooldown:
+		return "◐"
+	}
+	if started && s != StatusArchived && s != StatusGroup {
 		return "◐"
 	}
 	return "○"
 }
+
+// Glyph renders the status alone (no attempt history known).
+func (s Status) Glyph() string { return Glyph(s, false) }
 
 // Annotation is the bracketed text shown after a title for states the
 // glyph does not express. Ready, claimed, complete and group have none.

@@ -203,10 +203,16 @@ at list ready | blocked | all | archived
 at status                   counts, claimable, active, pending cohorts, done, stalled with reasons
 ```
 
-Glyphs: `○` not in progress (with `[blocked]`, `[failed]`, `[awaiting
-verification]`, …), `◐` live claim or live verification, `●` complete. A
-group shows `(n/m complete)` and `●` only when a nonempty member set is
-complete. Tokens never appear in any read view.
+Glyphs are progress, not liveness: `○` never started (ready or blocked
+work with no attempt yet), `◐` started but not complete (claimed,
+verifying, awaiting cohort verification or integration, interrupted,
+failed, cooling, or any task that once had an attempt), `●` complete.
+The bracketed annotation (`[blocked]`, `[failed]`, `[awaiting
+verification]`, …) says why a task is not complete. A group shows
+`(n/m complete)`: `●` only when a nonempty member set is complete, `◐`
+when any member was started or completed, `○` otherwise. JSON carries
+`started` on tasks and `progress.started` on groups. Tokens never appear
+in any read view.
 
 ## Token transport
 

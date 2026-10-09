@@ -240,13 +240,15 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 			t.Fatalf("%v leaked a token", args)
 		}
 	}
-	// Human views carry the glyph convention.
+	// Human views carry the glyph convention: a is complete (●); b was
+	// claimed and released, so it is started but not complete (◐) even
+	// though it is ready again.
 	h := e.runIn(e.cwd, "", []string{"AT_OUTPUT="}, "list", "all")
-	if !strings.Contains(h.stdout, "● "+a) || !strings.Contains(h.stdout, "○ "+b) {
+	if !strings.Contains(h.stdout, "● "+a) || !strings.Contains(h.stdout, "◐ "+b) {
 		t.Fatalf("list glyphs:\n%s", h.stdout)
 	}
 	hs := e.runIn(e.cwd, "", []string{"AT_OUTPUT="}, "show", "reject")
-	if !strings.Contains(hs.stdout, "○ "+b+" · Reject expired access tokens") || !strings.Contains(hs.stdout, "REQUIRES\n● "+a) {
+	if !strings.Contains(hs.stdout, "◐ "+b+" · Reject expired access tokens") || !strings.Contains(hs.stdout, "REQUIRES\n● "+a) {
 		t.Fatalf("show:\n%s", hs.stdout)
 	}
 	st := e.ok("status")

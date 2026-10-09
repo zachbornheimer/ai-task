@@ -149,6 +149,10 @@ type (
 	Error = fault.Error
 )
 
+// Glyph is the progress glyph for a status: ○ never started, ◐ started
+// but not complete, ● complete.
+func Glyph(s Status, started bool) string { return task.Glyph(s, started) }
+
 // ErrorCode returns the stable code carried by err ("" for nil).
 func ErrorCode(err error) Code { return fault.CodeOf(err) }
 

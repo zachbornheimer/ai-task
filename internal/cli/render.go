@@ -33,19 +33,28 @@ func stateLabel(s task.Status) string {
 
 // line renders one compact list row.
 func line(v app.TaskView) string {
-	s := fmt.Sprintf("%s %s  %s", v.Status.Glyph(), v.ID, v.Title)
+	s := fmt.Sprintf("%s %s  %s", task.Glyph(v.Status, v.Started), v.ID, v.Title)
 	if a := v.Status.Annotation(); a != "" {
 		s += " " + a
 	}
 	return s
 }
 
+// groupLine: ● when every executable member is complete (and there is
+// one), ◐ when any member was ever started or completed, ○ otherwise.
 func groupLine(g app.GroupView) string {
 	glyph := "○"
-	if g.Complete {
+	switch {
+	case g.Complete:
 		glyph = "●"
+	case g.Progress.Started > 0 || g.Progress.Complete > 0:
+		glyph = "◐"
 	}
-	return fmt.Sprintf("%s %s  %s (%d/%d complete)", glyph, g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
+	s := fmt.Sprintf("%s %s  %s (%d/%d complete)", glyph, g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
+	if g.ArchivedAt != nil {
+		s += " [archived]"
+	}
+	return s
 }
 
 // renderList prints the hierarchy (list) or a flat filtered list.
@@ -59,10 +68,16 @@ func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter) {
 		}
 		return
 	}
+	known := map[task.ID]bool{}
+	for _, g := range snap.Groups {
+		known[g.ID] = true
+	}
 	byGroup := map[task.ID][]app.TaskView{}
 	var top []app.TaskView
 	for _, t := range snap.Tasks {
-		if t.Group != nil {
+		// A member whose group is not in this listing (archived group,
+		// filtered-out group) is shown at the top level, never hidden.
+		if t.Group != nil && known[t.Group.ID] {
 			byGroup[t.Group.ID] = append(byGroup[t.Group.ID], t)
 		} else {
 			top = append(top, t)
@@ -87,12 +102,14 @@ func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		renderGroup(w, g, byGroup, children, "")
+		renderGroup(w, g, byGroup, children, "", "")
 	}
 }
 
-func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskView, children map[task.ID][]app.GroupView, indent string) {
-	fmt.Fprintln(w, indent+groupLine(g))
+// renderGroup prints a group line prefixed by linePrefix (the tree branch
+// of a nested group) and its members indented by indent.
+func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskView, children map[task.ID][]app.GroupView, linePrefix, indent string) {
+	fmt.Fprintln(w, linePrefix+groupLine(g))
 	type row struct {
 		text   string
 		extra  string
@@ -123,8 +140,7 @@ func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskVie
 		if len(rows)+i == total-1 {
 			branch, next = "└── ", "    "
 		}
-		fmt.Fprint(w, indent+branch)
-		renderGroup(w, sg, byGroup, children, indent+next)
+		renderGroup(w, sg, byGroup, children, indent+branch, indent+next)
 	}
 }
 
@@ -186,7 +202,7 @@ func capitalise(s string) string {
 
 // renderShow prints the annotated detail view.
 func renderShow(w io.Writer, v app.TaskView, full bool) {
-	fmt.Fprintf(w, "%s %s · %s\n", v.Status.Glyph(), v.ID, v.Title)
+	fmt.Fprintf(w, "%s %s · %s\n", task.Glyph(v.Status, v.Started), v.ID, v.Title)
 	fmt.Fprintf(w, "[%s]\n", stateLabel(v.Status))
 	fmt.Fprintf(w, "Created: %s\n", v.CreatedAt.Format("2006-01-02 15:04"))
 	if v.Project != "" {

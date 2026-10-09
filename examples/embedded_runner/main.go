@@ -276,7 +276,7 @@ func printPlan(ctx context.Context, eng *at.Store, project at.ProjectID, out *os
 		fmt.Fprintf(out, "  group %s %s (%d/%d)\n", g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
 	}
 	for _, t := range snap.Tasks {
-		fmt.Fprintf(out, "  %s %s  %s [%s]", t.Status.Glyph(), t.ID, t.Title, t.Status)
+		fmt.Fprintf(out, "  %s %s  %s [%s]", at.Glyph(t.Status, t.Started), t.ID, t.Title, t.Status)
 		if r := t.Verification.Complete; r != nil && r.Summary != "" {
 			fmt.Fprintf(out, " — %s: %s", r.Status, r.Summary)
 		}

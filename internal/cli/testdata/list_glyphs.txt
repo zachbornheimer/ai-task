@@ -1,7 +1,13 @@
 ◐ at-v01  Verifying now [verifying]
-○ at-w01  Waiting for cohort [awaiting verification]
-○ at-x01  Failed last time [failed]
+◐ at-w01  Waiting for cohort [awaiting verification]
+◐ at-x01  Failed last time [failed]
 ● at-y01  Done
+◐ at-z01  Blocked after a first attempt [blocked]
+    requires: -
+○ at-n01  Never started [blocked]
+    requires: -
 ● at-g03  All done (2/2 complete)
 
 ○ at-g04  Empty (0/0 complete)
+
+◐ at-g05  Partly started (0/3 complete)

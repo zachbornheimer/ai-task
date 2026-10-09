@@ -113,7 +113,13 @@ func TestDerivePrecedence(t *testing.T) {
 			t.Errorf("ParseStatus(%s)", s)
 		}
 	}
-	if StatusComplete.Glyph() != "●" || StatusClaimed.Glyph() != "◐" || StatusVerifying.Glyph() != "◐" || StatusReady.Glyph() != "○" || StatusBlocked.Glyph() != "○" || StatusAwaitingVerification.Glyph() != "○" {
-		t.Fatal("glyphs")
+	// Progress glyphs: ● complete; ◐ started but not complete (every state
+	// that implies an attempt, plus ready/blocked/needs_attention once an
+	// attempt existed); ○ never started.
+	if StatusComplete.Glyph() != "●" || StatusClaimed.Glyph() != "◐" || StatusVerifying.Glyph() != "◐" || StatusAwaitingVerification.Glyph() != "◐" || StatusAwaitingIntegration.Glyph() != "◐" || StatusVerificationFailed.Glyph() != "◐" || StatusCooldown.Glyph() != "◐" || StatusInterrupted.Glyph() != "◐" {
+		t.Fatal("started glyphs")
+	}
+	if StatusReady.Glyph() != "○" || StatusBlocked.Glyph() != "○" || StatusNeedsAttention.Glyph() != "○" || Glyph(StatusReady, true) != "◐" || Glyph(StatusBlocked, true) != "◐" || Glyph(StatusNeedsAttention, true) != "◐" || Glyph(StatusArchived, true) != "○" || Glyph(StatusComplete, false) != "●" {
+		t.Fatal("never-started glyphs")
 	}
 }

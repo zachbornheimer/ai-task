@@ -63,7 +63,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		for _, r := range records {
 			st := r.Status(now, proj.MaxAttempts)
 			if r.Task.Kind == task.KindGroup {
-				if q.Filter == FilterArchived {
+				if (q.Filter == FilterArchived) != r.Task.Archived() {
 					continue
 				}
 				prog, err := e.groupProgress(tx, r.Task.ID, proj, now)
@@ -73,7 +73,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				if q.Filter == FilterOpen && prog.Total > 0 && prog.Complete == prog.Total {
 					continue
 				}
-				snap.Groups = append(snap.Groups, GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total})
+				snap.Groups = append(snap.Groups, GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt})
 				continue
 			}
 			switch q.Filter {

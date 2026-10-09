@@ -51,7 +51,7 @@ func snapshot() app.PlanSnapshot {
 		withGroup(tv("at-j37", "Implement iframe messaging", task.StatusReady), g2),
 	}
 	return app.PlanSnapshot{Revision: 7, Tasks: tasks, Groups: []app.GroupView{
-		{ID: "at-g01", Title: "Identity Core", Progress: app.Progress{Complete: 1, Total: 4}},
+		{ID: "at-g01", Title: "Identity Core", Progress: app.Progress{Complete: 1, Total: 4, Started: 2}},
 		{ID: "at-g02", Title: "Embed Platform", Progress: app.Progress{Complete: 0, Total: 2}},
 	}}
 }
@@ -81,18 +81,46 @@ func TestListGolden(t *testing.T) {
 	renderList(&b, blocked, app.FilterBlocked)
 	golden(t, "list_blocked.txt", b.String())
 
-	// Glyph rules: ● only for complete, ◐ for live claim or verification,
-	// ○ otherwise with a bracketed annotation; a group is ● only when its
-	// nonempty member set is complete; empty groups are (0/0) and ○.
+	// Glyph rules: ● only for complete; ◐ for anything started but not
+	// complete (live claim, verification, waiting for a cohort, awaiting
+	// integration, failed or cooling, and a blocked or ready task that once
+	// had an attempt); ○ for work never started; a bracketed annotation says
+	// why a ◐ or ○ task is not complete. A group is ● only when its nonempty
+	// member set is complete, ◐ when any member was started or completed,
+	// and empty groups are (0/0) and ○.
+	startedButBlocked := tv("at-z01", "Blocked after a first attempt", task.StatusBlocked)
+	startedButBlocked.Started = true
 	mixed := app.PlanSnapshot{Tasks: []app.TaskView{
 		tv("at-v01", "Verifying now", task.StatusVerifying),
 		tv("at-w01", "Waiting for cohort", task.StatusAwaitingVerification),
 		tv("at-x01", "Failed last time", task.StatusVerificationFailed),
 		tv("at-y01", "Done", task.StatusComplete),
-	}, Groups: []app.GroupView{{ID: "at-g03", Title: "All done", Progress: app.Progress{Complete: 2, Total: 2}, Complete: true}, {ID: "at-g04", Title: "Empty", Progress: app.Progress{}}}}
+		startedButBlocked,
+		tv("at-n01", "Never started", task.StatusBlocked),
+	}, Groups: []app.GroupView{
+		{ID: "at-g03", Title: "All done", Progress: app.Progress{Complete: 2, Total: 2, Started: 2}, Complete: true},
+		{ID: "at-g04", Title: "Empty", Progress: app.Progress{}},
+		{ID: "at-g05", Title: "Partly started", Progress: app.Progress{Total: 3, Started: 1}},
+	}}
 	b.Reset()
 	renderList(&b, mixed, app.FilterAll)
 	golden(t, "list_glyphs.txt", b.String())
+
+	// Nested groups: a subgroup line carries exactly one tree prefix and
+	// its members indent under it.
+	outer := &app.Rel{ID: "at-o01", Title: "Outer", Status: task.StatusGroup}
+	inner := &app.Rel{ID: "at-i01", Title: "Inner", Status: task.StatusGroup}
+	nested := app.PlanSnapshot{Tasks: []app.TaskView{
+		withGroup(tv("at-l01", "Outer leaf", task.StatusReady), outer),
+		withGroup(tv("at-l02", "Inner leaf", task.StatusReady), inner),
+		withGroup(tv("at-l03", "Orphaned member of a group not listed", task.StatusReady), &app.Rel{ID: "at-x99", Title: "Gone", Status: task.StatusGroup}),
+	}, Groups: []app.GroupView{
+		{ID: "at-o01", Title: "Outer", Progress: app.Progress{Total: 2}},
+		{ID: "at-i01", Title: "Inner", ParentID: "at-o01", Progress: app.Progress{Total: 1}},
+	}}
+	b.Reset()
+	renderList(&b, nested, app.FilterOpen)
+	golden(t, "list_nested.txt", b.String())
 }
 
 func TestShowGolden(t *testing.T) {

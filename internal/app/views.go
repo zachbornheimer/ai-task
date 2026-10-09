@@ -23,6 +23,9 @@ type Rel struct {
 type Progress struct {
 	Complete int `json:"complete"`
 	Total    int `json:"total"`
+	// Started counts executable members that have ever had an attempt
+	// (complete ones included): a group is ◐ as soon as one has.
+	Started int `json:"started"`
 }
 
 // AttemptView describes an execution attempt without its token.
@@ -85,27 +88,30 @@ type History struct {
 
 // TaskView is the read model for one task or group.
 type TaskView struct {
-	ID           task.ID                    `json:"id"`
-	Kind         task.Kind                  `json:"kind"`
-	Key          string                     `json:"key,omitempty"`
-	Project      string                     `json:"project,omitempty"`
-	Title        string                     `json:"title"`
-	Outcome      string                     `json:"outcome,omitempty"`
-	Constraints  []string                   `json:"constraints,omitempty"`
-	Acceptance   []task.AcceptanceCriterion `json:"acceptance,omitempty"`
-	Checks       []verification.CheckSpec   `json:"task_checks,omitempty"`
-	Cohort       string                     `json:"cohort,omitempty"`
-	ContractRev  int                        `json:"contract_rev"`
-	Status       task.Status                `json:"status"`
-	Group        *Rel                       `json:"group,omitempty"`
-	Children     []Rel                      `json:"children,omitempty"`
-	Progress     *Progress                  `json:"progress,omitempty"`
-	Requires     []Rel                      `json:"requires,omitempty"`
-	Blocks       []Rel                      `json:"blocks,omitempty"`
-	Attempt      *AttemptView               `json:"attempt,omitempty"`
-	Submission   *SubmissionView            `json:"submission,omitempty"`
-	Verification VerificationSummary        `json:"verification"`
-	Handoff      *execution.Handoff         `json:"handoff,omitempty"`
+	ID          task.ID                    `json:"id"`
+	Kind        task.Kind                  `json:"kind"`
+	Key         string                     `json:"key,omitempty"`
+	Project     string                     `json:"project,omitempty"`
+	Title       string                     `json:"title"`
+	Outcome     string                     `json:"outcome,omitempty"`
+	Constraints []string                   `json:"constraints,omitempty"`
+	Acceptance  []task.AcceptanceCriterion `json:"acceptance,omitempty"`
+	Checks      []verification.CheckSpec   `json:"task_checks,omitempty"`
+	Cohort      string                     `json:"cohort,omitempty"`
+	ContractRev int                        `json:"contract_rev"`
+	Status      task.Status                `json:"status"`
+	// Started reports whether any execution attempt ever existed: the
+	// difference between ○ (never started) and ◐ (started, not complete).
+	Started      bool                `json:"started"`
+	Group        *Rel                `json:"group,omitempty"`
+	Children     []Rel               `json:"children,omitempty"`
+	Progress     *Progress           `json:"progress,omitempty"`
+	Requires     []Rel               `json:"requires,omitempty"`
+	Blocks       []Rel               `json:"blocks,omitempty"`
+	Attempt      *AttemptView        `json:"attempt,omitempty"`
+	Submission   *SubmissionView     `json:"submission,omitempty"`
+	Verification VerificationSummary `json:"verification"`
+	Handoff      *execution.Handoff  `json:"handoff,omitempty"`
 	// Integration is the open promotion intent while the task is
 	// awaiting_integration: the candidate has been verified and is being
 	// (or was) promoted; completion follows.
@@ -134,6 +140,8 @@ type GroupView struct {
 	Progress Progress `json:"progress"`
 	// Complete is derived: a nonempty member set that is fully complete.
 	Complete bool `json:"complete"`
+	// ArchivedAt is set for archived groups (listed by `list archived`).
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 }
 
 // Summary is the project-level view a driver needs.
@@ -277,7 +285,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	t := r.Task
 	v := TaskView{
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
-		Checks: t.Verification.TaskChecks, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st,
+		Checks: t.Verification.TaskChecks, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
 	}
@@ -455,9 +463,13 @@ func (e *Engine) groupProgress(tx *sqlite.Tx, id task.ID, p project.Project, now
 			}
 			prog.Total += gp.Total
 			prog.Complete += gp.Complete
+			prog.Started += gp.Started
 			continue
 		}
 		prog.Total++
+		if c.Attempt != nil {
+			prog.Started++
+		}
 		if c.Status(now, p.MaxAttempts) == task.StatusComplete {
 			prog.Complete++
 		}

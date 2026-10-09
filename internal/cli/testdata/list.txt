@@ -1,5 +1,5 @@
 ○ at-a91  Rotate leaked credentials
-○ at-g01  Identity Core (1/4 complete)
+◐ at-g01  Identity Core (1/4 complete)
 ├── ● at-c17  Confirm OAuth API compatibility
 ├── ◐ at-d83  Implement PostgreSQL token store
 ├── ○ at-e29  Implement scope enforcement
