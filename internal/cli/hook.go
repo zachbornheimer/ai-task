@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,8 @@ type hookInput struct {
 	ToolName       string `json:"tool_name"`
 	StopHookActive bool   `json:"stop_hook_active"`
 	ToolInput      struct {
-		FilePath string `json:"file_path"`
+		FilePath     string `json:"file_path"`
+		NotebookPath string `json:"notebook_path"` // NotebookEdit
 	} `json:"tool_input"`
 }
 
@@ -91,13 +93,16 @@ func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
 // AT_ALLOW_DIRECT=1, are left alone.
 func (c *ctxt) hookGuardEdit(ctx context.Context, cwd string, in hookInput) error {
 	path := in.ToolInput.FilePath
+	if path == "" {
+		path = in.ToolInput.NotebookPath
+	}
 	if path == "" || c.env.Getenv("AT_ALLOW_DIRECT") == "1" {
 		return nil
 	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(cwd, path)
 	}
-	dir := filepath.Dir(path)
+	dir := nearestExistingDir(filepath.Dir(path))
 	top, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return nil // not in a repository
@@ -116,6 +121,22 @@ func (c *ctxt) hookGuardEdit(ctx context.Context, cwd string, in hookInput) erro
 	}
 	reason := fmt.Sprintf("%s is on branch %q of project %s, not in a task worktree. Work goes through at: `at context` to see the plan, `at claim <task>` (or `at add \"...\" --check \"...\" --claim` for a new change), then edit inside the workspace the claim prints. Set AT_ALLOW_DIRECT=1 to bypass deliberately.", path, branch, p.Name)
 	return c.encoder().Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
+}
+
+// nearestExistingDir walks up from dir to the closest directory that exists,
+// so a file about to be created in a new directory is judged by the
+// repository that directory would belong to.
+func nearestExistingDir(dir string) string {
+	for {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
 }
 
 // hookStop refuses to end a turn while the session holds a task that is
