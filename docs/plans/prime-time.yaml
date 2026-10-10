@@ -1,0 +1,221 @@
+# Prime-time plan for `at`, worked through `at` itself.
+# Apply with: at add -f docs/plans/prime-time.yaml
+# Every task check runs the one test that proves the outcome and fails if
+# that test did not run (a -run filter that matches nothing must not pass).
+tasks:
+  - kind: group
+    key: prime-time
+    title: Prime time
+    size: large
+    checks:
+      - id: race-suite
+        command: [sh, -c, "go test -race -count=1 ./internal/app/ ./internal/checkexec/ ./test/e2e/"]
+
+  - key: baseline-goflags
+    title: Check environment keeps a single -count=1 in GOFLAGS
+    parent: prime-time
+    outcome: "When GOFLAGS already contains -count=1 (an at check running a suite that runs at), the check environment does not append it again, so TestGoTestCacheDisabledInCheckEnvironment passes when the suite itself runs as an at regression check."
+    constraints: ["Put the regression test in internal/app/goflags_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestNestedCheckEnvKeepsOneCountFlag$' -v -count=1 2>&1 | grep -q '^--- PASS: TestNestedCheckEnvKeepsOneCountFlag '"]
+    pins: [internal/app/verify_test.go]
+
+  - key: plan-file
+    title: Check in the prime-time plan
+    parent: prime-time
+    outcome: "docs/plans/prime-time.yaml holds this plan so it survives the database"
+    requires: [baseline-goflags]
+    checks: ["proof: test -f docs/plans/prime-time.yaml"]
+
+  # ---- blockers: promises the docs make that the code breaks
+  - key: cohort-timeout
+    title: A cohort member's timeout is not a strike
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "In judgeCohort/finalisation (internal/app/cohort.go), a member whose required task checks timed out (Verdict.TimedOut non-empty) is recorded as VERIFICATION_TIMEOUT via SetLastError with the timeout wording, never RecordFailure; a shared regression timeout is worded as a timeout too. Same contract as the single-task path."
+    acceptance: ["Repro: project budget small 300ms, a cohort pair where one member's check is `sleep 1`; after both submit, that member has failures == 0 and last_error starting with VERIFICATION_TIMEOUT"]
+    constraints: ["Put the regression test in internal/app/cohort_timeout_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestCohortTimeoutIsNotAStrike$' -v -count=1 2>&1 | grep -q '^--- PASS: TestCohortTimeoutIsNotAStrike '"]
+    pins: [internal/app/cohort_test.go, internal/app/budget_test.go]
+
+  - key: nested-epic
+    title: An epic waits for every nested epic, through plain groups
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "groupReady (internal/app/groups.go) recurses through plain sub-groups: an epic is not ready while any epic anywhere beneath it is unverified, so an outer epic can never pass over a failed or unrun inner epic."
+    acceptance: ["Repro: A(epic, check true) contains B(plain group) contains C(epic, check false) contains task t; complete t, run pending groups twice: C is failed and A is not complete"]
+    constraints: ["Put the regression test in internal/app/epic_nested_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestNestedEpicWaitsThroughPlainGroups$' -v -count=1 2>&1 | grep -q '^--- PASS: TestNestedEpicWaitsThroughPlainGroups '"]
+    pins: [internal/app/groups_test.go]
+
+  - key: pin-rename
+    title: Renaming a pinned file away is a pin violation
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "The changed-path list used for pins (workspace.ChangedBetween) disables rename detection (git diff --no-renames), so moving a pinned file away reports the pinned path and verify complete refuses it."
+    acceptance: ["Repro: pin f.txt, `git mv f.txt g.txt`, commit: verify complete fails naming f.txt"]
+    constraints: ["Put the regression test in internal/app/pins_rename_test.go", "AT_CHANGED_FILES and the context's changed files use the same rename-free list"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestPinnedFileRenamedAwayIsRefused$' -v -count=1 2>&1 | grep -q '^--- PASS: TestPinnedFileRenamedAwayIsRefused '"]
+    pins: [internal/app/pins_test.go]
+
+  - key: kill-tree
+    title: A timed-out check's whole process tree is killed at the deadline
+    parent: prime-time
+    requires: [baseline-goflags]
+    size: medium
+    outcome: "checkexec.Run starts each check in its own process group on Unix and kills the whole group when the timeout or context ends, so background children of a check never outlive it and a timeout is enforced within about a second of the deadline. Windows keeps working (build-tagged fallback)."
+    acceptance: ["A check `sh -c 'sleep 30 & sleep 5'` with a 1s timeout returns timed out in under 3s and leaves no `sleep 30` running"]
+    constraints: ["Put the regression test in internal/checkexec/tree_test.go", "Use build tags for the Unix process-group code; the repository must still build for windows and darwin"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/checkexec/ -run '^TestTimeoutKillsChildProcesses$' -v -count=1 2>&1 | grep -q '^--- PASS: TestTimeoutKillsChildProcesses '"]
+      - id: builds
+        command: [sh, -c, "GOOS=windows GOARCH=amd64 go build ./... && GOOS=darwin GOARCH=arm64 go build ./..."]
+    pins: [internal/checkexec/command_test.go]
+
+  # ---- correctness
+  - key: epic-recovery
+    title: An epic run whose verifier died is reconciled
+    parent: prime-time
+    requires: [nested-epic]
+    outcome: "ReconcileRuns (internal/sqlite/submissions.go) treats mode 'group' runs of an expired job like cohort runs: the run is closed (error, with a summary saying the verifier died) so the epic is pending again and a later worker reruns it."
+    constraints: ["Put the regression test in internal/app/epic_recovery_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestEpicRunReconciledAfterVerifierDies$' -v -count=1 2>&1 | grep -q '^--- PASS: TestEpicRunReconciledAfterVerifierDies '"]
+
+  - key: epic-git-outside-tx
+    title: Epic code reads the target head outside database transactions
+    parent: prime-time
+    requires: [epic-recovery]
+    outcome: "claimGroupJob and groupVerification (internal/app/groups.go) receive the target head resolved before the transaction instead of running git inside store.Write/store.Read, and a failure to resolve the target is reported (an error from claim, a reason in status), never silently turned into 'pending'."
+    constraints: ["Put the regression test in internal/app/epic_target_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestEpicReportsUnresolvableTarget$' -v -count=1 2>&1 | grep -q '^--- PASS: TestEpicReportsUnresolvableTarget '"]
+
+  - key: group-size-upgrade
+    title: Groups planned before sizes existed are large
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "A new migration (0012) sets size 'large' on every group row whose size is 'small' and which has no group-mode run yet, so epics planned before migration 0011 get the large budget; groups created by the current code keep their declared size."
+    constraints: ["Do not edit existing migrations", "Put the regression test in internal/sqlite/migrate_test.go or internal/app/group_size_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/... -run '^TestGroupsBeforeSizesBecomeLarge$' -v -count=1 2>&1 | grep -q '^--- PASS: TestGroupsBeforeSizesBecomeLarge '"]
+
+  - key: epic-rename
+    title: Renaming a verified epic keeps it verified
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "In updateTask (internal/app/apply.go) only a change to a group's checks or size withdraws its completion; renaming it, or changing its parent, does not."
+    constraints: ["Put the regression test in internal/app/epic_rename_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestRenamingVerifiedEpicKeepsIt$' -v -count=1 2>&1 | grep -q '^--- PASS: TestRenamingVerifiedEpicKeepsIt '"]
+    pins: [internal/app/groups_test.go]
+
+  - key: guard-edit
+    title: The edit guard covers new directories and notebooks
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "`at hook guard-edit` (internal/cli/hook.go) resolves the repository from the nearest existing ancestor directory, so a Write to a new file in a not-yet-existing directory on the target branch is denied; NotebookEdit's notebook_path is read like file_path."
+    constraints: ["Put the regression test in test/e2e/guard_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./test/e2e/ -run '^TestGuardEditCoversNewDirsAndNotebooks$' -v -count=1 2>&1 | grep -q '^--- PASS: TestGuardEditCoversNewDirsAndNotebooks '"]
+    pins: [test/e2e/at_test.go]
+
+  - key: uncharged-status
+    title: Uncharged failures are not shown as failed
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "A task whose last final run failed without a strike (VERIFICATION_TIMEOUT, INTEGRATION_FAILED, environment errors) derives to a claimable status that is not verification_failed (ready, or interrupted when the attempt is still open), keeps last_error, and renders without [failed]; verification_failed is reserved for runs charged against the attempt."
+    constraints: ["Put the regression test in internal/app/uncharged_status_test.go", "Update docs/agent-contract.md if a status meaning changes"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestUnchargedFailuresAreNotShownAsFailed$' -v -count=1 2>&1 | grep -q '^--- PASS: TestUnchargedFailuresAreNotShownAsFailed '"]
+
+  # ---- first run
+  - key: doctor-human
+    title: Human-mode doctor prints its report when unhealthy
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "`at doctor` without AT_OUTPUT=json prints every check, remedy and failing evidence tail on an UNHEALTHY result (stderr is fine), not only the one-line error; JSON is unchanged."
+    constraints: ["Put the regression test in test/e2e/doctor_human_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./test/e2e/ -run '^TestDoctorHumanReportOnFailure$' -v -count=1 2>&1 | grep -q '^--- PASS: TestDoctorHumanReportOnFailure '"]
+    pins: [test/e2e/at_test.go]
+
+  - key: help-flags
+    title: Subcommand help lists the command's flags
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "`at <command> --help` (and -h) prints the command's usage line and every flag with its description on stdout and exits 0 (JSON mode: the same in a help envelope); `at help` mentions `verify groups`."
+    constraints: ["Put the regression test in test/e2e/help_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./test/e2e/ -run '^TestSubcommandHelpListsFlags$' -v -count=1 2>&1 | grep -q '^--- PASS: TestSubcommandHelpListsFlags '"]
+    pins: [test/e2e/at_test.go]
+
+  - key: init-uncommitted
+    title: init and doctor say when the code is not committed
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "When `at init` creates the repository in a directory that already has files, it says that they are untracked and must be committed before the baseline can pass (it never commits them itself); `at doctor` adds a warning when the target checkout has uncommitted or untracked files."
+    constraints: ["Put the regression test in test/e2e/init_uncommitted_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./test/e2e/ -run '^TestInitAndDoctorWarnAboutUncommittedFiles$' -v -count=1 2>&1 | grep -q '^--- PASS: TestInitAndDoctorWarnAboutUncommittedFiles '"]
+    pins: [test/e2e/at_test.go]
+
+  - key: check-shell-ops
+    title: A check written with shell operators is rejected
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "parseCheck (internal/cli/plan.go) and plan-file string checks reject a command whose words include a bare shell operator (&&, ||, |, ;, >, >>, <) with INVALID_INPUT saying checks run without a shell and to wrap it as sh -c '...'; quoted operators inside an argument stay allowed."
+    constraints: ["Put the regression test in test/e2e/check_shell_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./test/e2e/ -run '^TestCheckWithShellOperatorsIsRejected$' -v -count=1 2>&1 | grep -q '^--- PASS: TestCheckWithShellOperatorsIsRejected '"]
+    pins: [test/e2e/at_test.go]
+
+  - key: installer-idempotent
+    title: Re-running init leaves AGENTS.md byte-for-byte unchanged
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "InstallInstructions (internal/app/instructions.go) keeps one blank line after the end marker, reports Updated=false and writes nothing on a second run, and a file with an end marker but no begin marker gets one block, never two."
+    constraints: ["Put the regression test in internal/app/instructions_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestInstallInstructionsIsIdempotent$' -v -count=1 2>&1 | grep -q '^--- PASS: TestInstallInstructionsIsIdempotent '"]
+
+  - key: spent-budget-message
+    title: Checks skipped by a spent budget say they did not run
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "In runChecks (internal/app/verify.go) the 'exceeded the budget ... or the code hangs' message is applied only to checks that actually started; checks recorded without running keep 'not run: the suite's budget was spent by earlier checks'."
+    constraints: ["Put the regression test in internal/app/budget_message_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestSpentBudgetChecksSayNotRun$' -v -count=1 2>&1 | grep -q '^--- PASS: TestSpentBudgetChecksSayNotRun '"]
+    pins: [internal/app/budget_test.go]
+
+  - key: whole-suite-warning
+    title: The whole-suite warning respects -run and covers updates
+    parent: prime-time
+    requires: [baseline-goflags]
+    outcome: "planBudgetWarnings (internal/app/apply.go) does not warn when the check already filters tests (-run), fixes the && / || precedence, and also runs when an update sets checks or size on a small task."
+    constraints: ["Put the regression test in internal/app/budget_warning_test.go"]
+    checks:
+      - id: proof
+        command: [sh, -c, "go test ./internal/app/ -run '^TestWholeSuiteWarningRespectsRunFilter$' -v -count=1 2>&1 | grep -q '^--- PASS: TestWholeSuiteWarningRespectsRunFilter '"]
+    pins: [internal/app/budget_test.go]
