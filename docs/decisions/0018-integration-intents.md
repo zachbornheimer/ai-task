@@ -18,8 +18,8 @@
   attempt's worktree: moved to `<path>.stale-<seq>`, HEAD detached, token
   left in place; a fresh worktree on the task branch appears at the task
   path with the new token. Worktree-resident tokens stay.
-- The post-commit hook is withdrawn; `at init` writes nothing into the
-  repository.
+- The post-commit hook is withdrawn; `at init` writes no Git hooks (it
+  installs agent instruction files, which carry no authority).
 - Every category needs a required check; optional checks are
   informational; a policy with no required check never passes.
 

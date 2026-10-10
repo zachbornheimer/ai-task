@@ -565,3 +565,97 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 		t.Fatal("--skip-baseline should not run the suite")
 	}
 }
+
+// TestInitInstallsInstructionsAndHooks: `at init` writes the AGENTS.md
+// block and the CLAUDE.md import, re-runs refresh only the block and keep
+// the repository's own text, `--claude` merges the hooks into
+// .claude/settings.json beside existing settings, and `at hook` answers
+// Claude Code's events: context at session start, edits denied outside
+// a task worktree and allowed inside one, and a stop refused while the
+// worktree holds an unfinished claim.
+func TestInitInstallsInstructionsAndHooks(t *testing.T) {
+	e := gitEnv(t) // init ran once already
+	agents := filepath.Join(e.cwd, "AGENTS.md")
+	b, err := os.ReadFile(agents)
+	if err != nil || !strings.Contains(string(b), "<!-- at:begin -->") || !strings.Contains(string(b), "## Agent execution contract") || !strings.Contains(string(b), "# Engineering guidelines") {
+		t.Fatalf("AGENTS.md: %v\n%s", err, b)
+	}
+	if c, _ := os.ReadFile(filepath.Join(e.cwd, "CLAUDE.md")); strings.TrimSpace(string(c)) != "@AGENTS.md" {
+		t.Fatalf("CLAUDE.md: %q", c)
+	}
+	// The repository's own text survives a refresh; init is idempotent.
+	os.WriteFile(agents, []byte(string(b)+"\n# Ours\n\nkeep me\n"), 0o644)
+	os.WriteFile(filepath.Join(e.cwd, ".claude", "settings.json"), nil, 0o644) // will be replaced below
+	os.RemoveAll(filepath.Join(e.cwd, ".claude"))
+	os.MkdirAll(filepath.Join(e.cwd, ".claude"), 0o755)
+	os.WriteFile(filepath.Join(e.cwd, ".claude", "settings.json"), []byte(`{"permissions":{"allow":["Bash(go test *)"]}}`), 0o644)
+	again := e.ok("init", "--claude")
+	if again["existing"] != true || again["claude_hooks"] == nil {
+		t.Fatalf("re-init: %v", again)
+	}
+	b2, _ := os.ReadFile(agents)
+	if !strings.Contains(string(b2), "keep me") || strings.Count(string(b2), "<!-- at:begin -->") != 1 {
+		t.Fatalf("refresh damaged AGENTS.md:\n%s", b2)
+	}
+	var settings map[string]any
+	sb, _ := os.ReadFile(filepath.Join(e.cwd, ".claude", "settings.json"))
+	if err := json.Unmarshal(sb, &settings); err != nil || settings["permissions"] == nil {
+		t.Fatalf("settings merge: %v %s", err, sb)
+	}
+	hooks := settings["hooks"].(map[string]any)
+	for _, ev := range []string{"SessionStart", "PreToolUse", "Stop"} {
+		if hooks[ev] == nil {
+			t.Fatalf("hook %s missing: %s", ev, sb)
+		}
+	}
+	e.ok("init", "--claude") // idempotent: no duplicate entries
+	sb2, _ := os.ReadFile(filepath.Join(e.cwd, ".claude", "settings.json"))
+	if strings.Count(string(sb2), "at hook guard-edit") != 1 {
+		t.Fatalf("hooks duplicated: %s", sb2)
+	}
+	// Hooks. Session start with no task: the plan.
+	a := taskID(e.ok("add", "Guarded", "--check", "u: test -f g.txt"))
+	if r := e.runIn(e.cwd, `{"hook_event_name":"SessionStart","cwd":"`+e.cwd+`"}`, nil, "hook", "session-start"); r.code != 0 || !strings.Contains(r.stdout, "Claimable now") {
+		t.Fatalf("session-start: %d %s %s", r.code, r.stdout, r.stderr)
+	}
+	// Edit in the project root: denied; outside any project: allowed.
+	deny := e.runIn(e.cwd, `{"tool_name":"Write","tool_input":{"file_path":"`+filepath.Join(e.cwd, "f.txt")+`"},"cwd":"`+e.cwd+`"}`, nil, "hook", "guard-edit")
+	if deny.code != 0 || !strings.Contains(deny.stdout, `"permissionDecision":"deny"`) {
+		t.Fatalf("guard-edit in root: %d %s %s", deny.code, deny.stdout, deny.stderr)
+	}
+	if r := e.runIn(e.cwd, `{"tool_name":"Write","tool_input":{"file_path":"`+filepath.Join(t.TempDir(), "x.txt")+`"},"cwd":"`+e.cwd+`"}`, nil, "hook", "guard-edit"); r.code != 0 || strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("guard-edit outside: %d %s", r.code, r.stdout)
+	}
+	if r := e.runIn(e.cwd, `{"tool_name":"Write","tool_input":{"file_path":"`+filepath.Join(e.cwd, "f.txt")+`"},"cwd":"`+e.cwd+`"}`, []string{"AT_ALLOW_DIRECT=1"}, "hook", "guard-edit"); strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("AT_ALLOW_DIRECT ignored: %s", r.stdout)
+	}
+	// Inside the task worktree: allowed; stop refused while the claim is live.
+	sess := e.ok("claim", a)
+	ws := sess["workspace"].(string)
+	if r := e.runIn(ws, `{"tool_name":"Edit","tool_input":{"file_path":"`+filepath.Join(ws, "g.txt")+`"},"cwd":"`+ws+`"}`, nil, "hook", "guard-edit"); r.code != 0 || strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("guard-edit in worktree: %d %s", r.code, r.stdout)
+	}
+	if r := e.runIn(ws, `{"hook_event_name":"SessionStart","cwd":"`+ws+`"}`, nil, "hook", "session-start"); !strings.Contains(r.stdout, "# Task "+a) {
+		t.Fatalf("session-start in worktree: %s", r.stdout)
+	}
+	stop := e.runIn(ws, `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"`+ws+`"}`, nil, "hook", "stop")
+	if !strings.Contains(stop.stdout, `"decision":"block"`) || !strings.Contains(stop.stdout, a) {
+		t.Fatalf("stop with live claim: %s", stop.stdout)
+	}
+	if r := e.runIn(ws, `{"hook_event_name":"Stop","stop_hook_active":true,"cwd":"`+ws+`"}`, nil, "hook", "stop"); strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("stop_hook_active must end the loop: %s", r.stdout)
+	}
+	e.commit(ws, "g.txt", "g")
+	if r := e.runIn(ws, "", nil, "verify", "complete"); r.code != 0 {
+		t.Fatalf("verify complete: %s %s", r.stdout, r.stderr)
+	}
+	if r := e.runIn(ws, `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"`+ws+`"}`, nil, "hook", "stop"); strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("stop after completion must allow: %s", r.stdout)
+	}
+	// --no-instructions writes nothing.
+	bare := newEnv(t)
+	bare.ok("init", "--name", "bare", "--no-instructions")
+	if _, err := os.Stat(filepath.Join(bare.cwd, "AGENTS.md")); err == nil {
+		t.Fatal("--no-instructions wrote AGENTS.md")
+	}
+}

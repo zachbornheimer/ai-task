@@ -188,13 +188,17 @@ func stateDir() (string, error) {
 type InitResult struct {
 	Project     project.Project `json:"project"`
 	CreatedRepo bool            `json:"created_repo"`
+	// Existing: the directory was already registered; nothing changed in
+	// the database.
+	Existing bool `json:"existing,omitempty"`
 }
 
 // InitProject registers a Git project. Every project is a Git project: if
 // dir is not a repository one is created (with an initial commit); if it is
 // inside a repository, the main worktree root is registered. The current
 // branch becomes the target branch and integration policy is "promote".
-// Nothing is written into the repository's hooks or working tree.
+// Nothing is written into the repository's hooks; the CLI's `at init`
+// installs the agent instruction files (see InstallInstructions).
 func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Project, error) {
 	res, err := e.InitProjectResult(ctx, name, dir)
 	return res.Project, err
@@ -233,7 +237,10 @@ func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitR
 			if existing, ok, err := tx.GetProjectByRoot(p.RootPath); err != nil {
 				return err
 			} else if ok {
-				return fault.New(fault.CodeInvalidInput, "directory already registered as project %s (%s)", existing.ID, existing.Name)
+				// Re-running init is how the instruction files get
+				// refreshed; the registration itself is kept as is.
+				p, res.Existing = existing, true
+				return nil
 			}
 		}
 		return tx.InsertProject(p)

@@ -90,7 +90,9 @@ the worktree's private Git directory, so `at` commands run there need no
 first moves its worktree to `<path>.stale-<seq>` with HEAD detached and
 creates a fresh one on the branch: a stale process keeps only its own
 expired token and cannot reach the branch or the new files. `at init`
-writes nothing into the repository: no hooks, no files in the tree.
+writes no Git hooks; it installs the agent instruction files (AGENTS.md
+block, CLAUDE.md import) and, on request, Claude Code hooks that call
+`at hook`.
 Final checks run in a detached snapshot of the submitted commit, never in
 the editable worktree. Integration policy `promote` (the default) merges
 the verified revision onto the target branch in a scratch worktree,

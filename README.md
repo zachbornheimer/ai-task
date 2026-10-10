@@ -20,7 +20,7 @@ go install github.com/zachbornheimer/ai-task/cmd/at@latest
 
 ```sh
 export AT_OUTPUT=json
-cd my-repo && at init                                  # Git project (git init if needed): target branch, promote policy; writes nothing into the repo
+cd my-repo && at init --claude                         # register the repo, install AGENTS.md + CLAUDE.md, and (--claude) the Claude Code hooks
 at project --regression-check "test: go test ./..."    # trusted project gate (required before any claim)
 at doctor                                              # repository, target, identity, regression suite green on the target, worktrees
 at add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
@@ -54,6 +54,19 @@ res, err := eng.Verify(ctx, s.Token, at.VerifyComplete)
 reviewer and coding agent (no provider needed); its test drains a
 seven-task graph, including a coupled-verification cohort, with four
 workers.
+
+## Using it from your AI systems
+
+`at init` installs the project instruction block into AGENTS.md (read by
+Codex, OpenCode and current Claude Code) and a CLAUDE.md that imports it,
+so every request an agent receives in that repository is routed through
+`at`: plan with checks, claim, work in the task worktree, `at verify
+complete`. `at init --claude` adds the Claude Code hooks that make it hold
+when instructions fade: the plan or task context at session start, edits
+refused outside task worktrees, and no ending a turn with a claimed task
+neither verified nor released. `docs/integrations.md` has the recipe per
+harness, headless and interactive, and `examples/hosts/` the worker
+loops.
 
 ## What it guarantees
 

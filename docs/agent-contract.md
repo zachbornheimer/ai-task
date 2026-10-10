@@ -200,6 +200,21 @@ and whether to claim or to plan (`summary` and `claimable` in JSON, no
 describes that task for anyone, read-only. `--with-rules` appends the
 rules of the road for an agent that does not read AGENTS.md.
 
+**Installing the instructions.** `at init` registers the repository and
+installs the project instruction block (`app.Instructions`: how work gets
+done through `at`, the verbs, the execution contract) into `AGENTS.md`
+between `<!-- at:begin -->` and `<!-- at:end -->`, creating the file with a
+default engineering-guidelines section when absent and refreshing only
+the block on re-runs; it also makes sure `CLAUDE.md` imports it
+(`@AGENTS.md`). `--no-instructions` skips that. `at init --claude` merges
+three hooks into `.claude/settings.json`, each calling `at hook <event>`
+with the hook's JSON on stdin: `session-start` prints the plan or task
+context; `guard-edit` denies an Edit/Write to a file inside a registered
+project that is not in a task worktree (`AT_ALLOW_DIRECT=1` bypasses);
+`stop` refuses to end a turn while the session's worktree (or
+`AT_SESSION`) holds a live claim that is neither verified nor released.
+An `at` failure inside a hook never blocks the harness.
+
 **Prompt layers.** An agent runs under three layers and `at` supplies
 the third: (1) a bootstrap system prompt, set by the host where the
 harness allows it (Claude Code `-p --append-system-prompt`, a bare model's

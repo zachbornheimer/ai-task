@@ -1,18 +1,36 @@
+<!-- at:begin -->
 # Working with `at` (for coding agents)
 
-`at` hands you one claimed task at a time, remembers what the previous
-attempt learned, and decides completion from fresh verification, never from
-your word. It works the same from Claude Code, Codex CLI, OpenCode, Grok,
-or a shell.
+`at` is the task engine for this repository: it hands you one claimed task
+at a time, remembers what the previous attempt learned, and decides
+completion from fresh verification, never from your word. It works the
+same from Claude Code, Codex CLI, OpenCode, Grok, or a shell. Every `at`
+command prints one JSON envelope when `AT_OUTPUT=json` is set; read
+`error.details` when one fails.
 
-Your host sets `AT_OUTPUT=json` and starts you inside the task's own Git
-worktree (branch `at/<id>`). The session token lives in that worktree, so
-`at` commands run there need no token; `AT_SESSION` is only needed from
-elsewhere. Every `at` command prints one JSON envelope; read `error.details`
-when one fails.
+## How work gets done here
+
+Everything that changes this repository goes through `at`.
+
+- A question, an explanation, or a review is not a task: answer it.
+- Anything else starts with the plan: `at context` (or `at status` and
+  `at list`). If a task already covers the request, claim it. Otherwise
+  add tasks, each with a check that proves it, then claim one:
+  `at add "title" --check "id: cmd"`, several at once with
+  `at add -f plan.yaml`, and `at add "title" --check "..." --claim` for
+  one small change. Run `at doctor` before planning in a repository you
+  have not worked in.
+- Never edit the target branch directly; a passing `at verify complete`
+  promotes verified work there.
+- One task = one independently verifiable outcome. Plan the checks before
+  the code; the regression suite carries the weight, task checks prove
+  the outcome, and `--pin` protects files the task must not touch.
+
+## Verbs
 
 ```
-at context                                           your task: outcome, checks, workspace, state, handoff
+at context                                           your task: outcome, checks, workspace, state, handoff (or the plan, with no task in hand)
+at claim [REF] [--wait]                              one leased task, its worktree on at/<id>; the token is stored there
 at log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first
 at verify task                                       run this task's checks (diagnostic, repeatable)
 at verify regression                                 run the project's regression checks (diagnostic)
@@ -53,6 +71,29 @@ Exit
 
 - `at claim --wait` ends with DONE (everything is complete) or STALLED (a planner is needed); both are normal exits for a worker loop.
 - Never claim success without a passing final verification.
-Planning verbs (`at add`, `at update`, `at show`, `at list`) are for the
-planner; `docs/agent-contract.md` has the full reference, and
-`examples/embedded_runner` shows the host loop.
+<!-- at:end -->
+
+# Engineering guidelines
+
+Edit this section for the repository; the block above is owned by `at init`.
+
+- Prefer the smallest complete change that satisfies the task; follow the
+  existing architecture and conventions; avoid unrelated refactoring,
+  formatting, or dependency changes.
+- Handle errors explicitly; preserve existing behaviour and public
+  contracts unless the task requires otherwise.
+- Test observable behaviour, including failure paths, with deterministic
+  tests; fix defects rather than weakening assertions.
+- Read the code and documentation the task needs, not the repository by
+  default; keep documentation consistent when a documented contract changes.
+- Report results and blockers concisely; distinguish verified results from
+  assumptions.
+
+# This repository
+
+`at` is developed here; the block above is what `at init` installs into
+any repository. Planning verbs (`at add`, `at update`, `at show`,
+`at list`) are the planner's; `docs/agent-contract.md` is the full
+reference, `docs/integrations.md` says how each harness is wired, and
+`examples/embedded_runner` shows the host loop. Run `go test ./...`
+before `at verify complete`; `gofmt` and `go vet` are regression checks.

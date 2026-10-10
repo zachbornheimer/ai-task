@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	register("init", "register the current directory (or --path) as a Git project (runs `git init` if needed; writes nothing into the repository)", runInit)
+	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import [--no-instructions] [--claude: Claude Code hooks]; re-run to refresh", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --regression-json, --integration, --target-branch, --max-attempts", runProject)
 	register("add", "plan a task or group: at add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | at add -f plan.yaml|plan.json|- | at add --plan '{...}'", runAdd)
@@ -69,6 +69,8 @@ func (c *ctxt) changeSet(ctx context.Context, pid project.ID, pf planFlags, ops 
 func runInit(ctx context.Context, c *ctxt, args []string) error {
 	name := c.fs.String("name", "", "display name (default: directory name)")
 	path := c.fs.String("path", "", "directory to register (default: current directory)")
+	noInstructions := c.fs.Bool("no-instructions", false, "do not write AGENTS.md / CLAUDE.md")
+	claude := c.fs.Bool("claude", false, "also install the Claude Code hooks (.claude/settings.json: context at session start, edits kept in task worktrees, no stopping with an unfinished claim)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -85,15 +87,59 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	p := res.Project
-	return c.emit(res, func(w io.Writer) {
-		fmt.Fprintf(w, "✓ Registered project %s · %s\n", p.ID, p.Name)
+	type out struct {
+		app.InitResult
+		Instructions *app.InstallResult `json:"instructions,omitempty"`
+		ClaudeHooks  string             `json:"claude_hooks,omitempty"`
+	}
+	o := out{InitResult: res}
+	if !*noInstructions {
+		ir, err := app.InstallInstructions(p.RootPath)
+		if err != nil {
+			return err
+		}
+		o.Instructions = &ir
+	}
+	hooksChanged := false
+	if *claude {
+		path, changed, err := app.InstallClaudeHooks(p.RootPath)
+		if err != nil {
+			return err
+		}
+		o.ClaudeHooks, hooksChanged = path, changed
+	}
+	return c.emit(o, func(w io.Writer) {
+		if res.Existing {
+			fmt.Fprintf(w, "✓ Project %s · %s (already registered)\n", p.ID, p.Name)
+		} else {
+			fmt.Fprintf(w, "✓ Registered project %s · %s\n", p.ID, p.Name)
+		}
 		fmt.Fprintf(w, "Root:        %s\n", p.RootPath)
 		if res.CreatedRepo {
 			fmt.Fprintln(w, "Repository:  created (git init + initial commit)")
 		}
 		fmt.Fprintf(w, "Target:      %s (integration: %s; task branches at/<id>)\n", p.TargetBranch, p.Integration)
 		fmt.Fprintf(w, "State:       %s\n", e.Path())
-		fmt.Fprintln(w, "Next:        define regression checks with `at project --regression-check \"id: cmd\"` (required before any claim)")
+		if ir := o.Instructions; ir != nil {
+			switch {
+			case ir.Created:
+				fmt.Fprintf(w, "Agents:      wrote %s (edit the guidelines below the at block) and CLAUDE.md (@AGENTS.md)\n", ir.AgentsMD)
+			case ir.Updated:
+				fmt.Fprintf(w, "Agents:      refreshed the at block in %s\n", ir.AgentsMD)
+			default:
+				fmt.Fprintf(w, "Agents:      %s is current\n", ir.AgentsMD)
+			}
+		}
+		if o.ClaudeHooks != "" {
+			if hooksChanged {
+				fmt.Fprintf(w, "Claude Code: hooks installed in %s\n", o.ClaudeHooks)
+			} else {
+				fmt.Fprintf(w, "Claude Code: hooks already in %s\n", o.ClaudeHooks)
+			}
+		}
+		if len(p.Regression) == 0 {
+			fmt.Fprintln(w, "Next:        define regression checks with `at project --regression-check \"id: cmd\"` (required before any claim), then `at doctor`")
+		}
 	})
 }
 
