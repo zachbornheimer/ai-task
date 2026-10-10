@@ -40,6 +40,21 @@ required task check failed. Outcomes: `passed`, `failed`, `timeout`,
 `error` (could not run), `skipped`. Only `passed` counts; optional checks
 never compensate.
 
+## Run logs
+
+Evidence keeps the head and tail of each stream (32 KiB each), which can
+drop the middle of a long run, where `go test` prints a `--- FAIL`
+among the passes. So every run also writes a directory beside the
+database, `logs/<project>/run-<id>/`: one `<check>.log` per executed
+check with its complete stdout and stderr, interleaved in arrival order
+between a header (the command, directory and revision) and a footer (the
+outcome), and `result.json` holding the verify result in the shape of the
+JSON envelope. The result carries the directory as `log_dir` and each
+evidence row its file as `log`; the human output names a failing check's
+log and the directory, and the next attempt's handoff names the failing
+checks' logs. Each project keeps its newest 100 run directories; a
+missing log never fails a run.
+
 ## No reuse
 
 Every invocation executes its checks. Stored evidence is history for

@@ -424,6 +424,9 @@ func renderHandoff(w io.Writer, h execution.Handoff) {
 					}
 				}
 			}
+			if c.Log != "" {
+				fmt.Fprintf(w, "      full output: %s\n", c.Log)
+			}
 		}
 	}
 	if h.TotalLogs > 0 {
@@ -487,6 +490,9 @@ func renderEvidence(w io.Writer, evidence []verification.Evidence, full bool) {
 					fmt.Fprintf(w, "      %s\n", l)
 				}
 			}
+			if ev.Log != "" {
+				fmt.Fprintf(w, "      full output: %s\n", ev.Log)
+			}
 		}
 	}
 }
@@ -521,6 +527,9 @@ func renderVerify(w io.Writer, res app.VerifyResult) {
 		fmt.Fprintf(w, "Warning:   %s\n", warn)
 	}
 	renderEvidence(w, res.Evidence, false)
+	if res.LogDir != "" {
+		fmt.Fprintf(w, "Logs:      %s (result.json and one log per check)\n", res.LogDir)
+	}
 }
 
 func renderSummary(w io.Writer, s app.Summary) {

@@ -110,5 +110,6 @@ your worktree tooling.
 
 `$XDG_STATE_HOME/at/at.db` (Linux), `~/Library/Application Support/at/`
 (macOS), `%LOCALAPPDATA%\at\` (Windows), or `AT_DB`. Worktrees live beside
-the database unless the project sets `workspace_root`. One file holds every
+the database unless the project sets `workspace_root`; verification run
+logs live beside it in `logs/`. One file holds every
 project. Network filesystems are unsupported.

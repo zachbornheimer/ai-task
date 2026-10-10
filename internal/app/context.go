@@ -334,6 +334,9 @@ func renderState(w *strings.Builder, c Context) {
 					fmt.Fprintf(w, "  %s: %s\n", tail.name, strings.ReplaceAll(t, "\n", "\n  "))
 				}
 			}
+			if ch.Log != "" {
+				fmt.Fprintf(w, "  full output: %s\n", ch.Log)
+			}
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package checkexec
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"runtime"
@@ -71,5 +72,25 @@ func TestRunDirAndBoundedOutput(t *testing.T) {
 	bad := Run(context.Background(), Spec{Argv: []string{"true"}, Dir: filepath.Join(dir, "missing")})
 	if bad.Started || bad.Err == nil {
 		t.Fatalf("%+v", bad)
+	}
+}
+
+func TestRunTeesFullOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs sh")
+	}
+	var log bytes.Buffer
+	res := Run(context.Background(), Spec{Argv: []string{"sh", "-c", `i=0; while [ $i -lt 6000 ]; do echo "line $i"; i=$((i+1)); done; echo MIDDLE >&2; echo done`}, Log: &log})
+	if res.ExitCode != 0 {
+		t.Fatalf("%+v", res)
+	}
+	if !strings.Contains(res.Stdout, "truncated") || strings.Contains(res.Stdout, "line 3000\n") {
+		t.Fatal("captured stdout should be bounded")
+	}
+	out := log.String()
+	for _, want := range []string{"line 0\n", "line 3000\n", "line 5999\n", "MIDDLE\n", "done\n"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("log lacks %q (%d bytes)", want, len(out))
+		}
 	}
 }

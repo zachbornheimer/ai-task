@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sync"
 	"time"
@@ -24,6 +25,9 @@ type Spec struct {
 	Timeout time.Duration
 	// Env, when non-nil, replaces the inherited environment.
 	Env []string
+	// Log, when non-nil, also receives both streams in full, interleaved
+	// in the order they arrive: the untruncated record of the run.
+	Log io.Writer
 }
 
 // Result records what happened. ExitCode is -1 when the process did not
@@ -69,6 +73,10 @@ func Run(ctx context.Context, spec Spec) Result {
 	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr boundedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if spec.Log != nil {
+		log := &lockedWriter{w: spec.Log}
+		cmd.Stdout, cmd.Stderr = io.MultiWriter(&stdout, log), io.MultiWriter(&stderr, log)
+	}
 
 	err := cmd.Run()
 	res.FinishedAt = time.Now().UTC()
@@ -93,6 +101,20 @@ func Run(ctx context.Context, spec Spec) Result {
 		res.Err = err
 	}
 	return res
+}
+
+// lockedWriter serializes the two streams' writes into one log. A failing
+// log never fails the check: its errors are dropped.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, _ = l.w.Write(p)
+	return len(p), nil
 }
 
 // boundedBuffer keeps the first and last OutputLimit/2 bytes written.

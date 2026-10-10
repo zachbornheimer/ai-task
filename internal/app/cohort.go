@@ -534,6 +534,7 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 			return nil, err
 		}
 		defer cleanup()
+		opts.logDir = e.runLogDir(job.proj.ID, runID)
 		return e.runChecks(ctx, dir, policy, runID, candidate, fence, opts)
 	}
 	finishAll := func(status sqlite.RunStatus, summary string) error {

@@ -245,6 +245,9 @@ type VerifyResult struct {
 	Conflicts []string `json:"conflicts,omitempty"`
 	// Warnings: checks that passed but used more than half their budget.
 	Warnings []string `json:"warnings,omitempty"`
+	// LogDir is the run's directory: one <check>.log per executed check
+	// with its complete output, and result.json with this result.
+	LogDir string `json:"log_dir,omitempty"`
 }
 
 func rel(r sqlite.Record, st task.Status) Rel {

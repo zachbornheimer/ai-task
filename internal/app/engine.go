@@ -37,6 +37,8 @@ type Config struct {
 	// WorkspaceRoot holds per-attempt worktrees for projects that do not
 	// set their own; empty means DefaultWorkspaceRoot().
 	WorkspaceRoot string
+	// LogRoot holds verification run logs; empty means DefaultLogRoot().
+	LogRoot string
 	// PollInterval bounds how long a waiting Claim sleeps between checks
 	// when no in-process notification arrives (other processes may have
 	// changed the store). Zero means 2s.
@@ -49,11 +51,12 @@ type Config struct {
 // Engine is the single entry point for every use case. One Engine per
 // process is the norm; it is safe for concurrent use.
 type Engine struct {
-	store  *sqlite.Store
-	now    func() time.Time
-	newID  func() task.ID
-	wsRoot string
-	poll   time.Duration
+	store   *sqlite.Store
+	now     func() time.Time
+	newID   func() task.ID
+	wsRoot  string
+	logRoot string
+	poll    time.Duration
 	// heartbeatEvery is the lease renewal interval of long operations.
 	heartbeatEvery time.Duration
 
@@ -89,6 +92,10 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if wsRoot == "" {
 		wsRoot = DefaultWorkspaceRoot(path)
 	}
+	logRoot := cfg.LogRoot
+	if logRoot == "" {
+		logRoot = DefaultLogRoot(path)
+	}
 	poll := cfg.PollInterval
 	if poll <= 0 {
 		poll = 2 * time.Second
@@ -101,7 +108,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	// caller sees identical to what a later read returns.
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
-		newID: newID, wsRoot: wsRoot, poll: poll, heartbeatEvery: hb, changed: make(chan struct{}),
+		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, changed: make(chan struct{}),
 	}, nil
 }
 
@@ -145,6 +152,14 @@ func DefaultWorkspaceRoot(dbPath string) string {
 		return filepath.Join(os.TempDir(), "at-workspaces")
 	}
 	return filepath.Join(filepath.Dir(dbPath), "workspaces")
+}
+
+// DefaultLogRoot places verification run logs beside the database.
+func DefaultLogRoot(dbPath string) string {
+	if dbPath == ":memory:" {
+		return filepath.Join(os.TempDir(), "at-logs")
+	}
+	return filepath.Join(filepath.Dir(dbPath), "logs")
 }
 
 func stateDir() (string, error) {

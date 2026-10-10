@@ -318,7 +318,10 @@ that `status` reports as cooling, never as a stall.
 
 A failed `verify complete` returns `VERIFICATION_FAILED` with the evidence
 in `error.details`; the claim stays live for repair and the task's failure
-count and cooldown are recorded. Replaying `verify complete` with the same
+count and cooldown are recorded. Evidence keeps each stream's head and
+tail; the complete output is in `details.evidence[].log`, and
+`details.log_dir` holds those logs and `result.json` (see
+`docs/verification.md`, Run logs). Replaying `verify complete` with the same
 token after a committed completion returns the stored result.
 
 ## Reading

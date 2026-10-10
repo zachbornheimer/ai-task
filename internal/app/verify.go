@@ -46,10 +46,15 @@ func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verific
 	if _, err := verification.ParseMode(string(mode)); err != nil {
 		return VerifyResult{}, err
 	}
+	var res VerifyResult
+	var err error
 	if mode == verification.ModeComplete {
-		return e.verifyComplete(ctx, token)
+		res, err = e.verifyComplete(ctx, token)
+	} else {
+		res, err = e.verifyDiagnostic(ctx, token, mode)
 	}
-	return e.verifyDiagnostic(ctx, token, mode)
+	writeRunResult(res, err)
+	return res, err
 }
 
 // prepared is what the preparation read gathers before any Git call.
@@ -130,6 +135,8 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 		}
 	}
 	taskOpts, regOpts := suiteOpts(p.rec.Task, p.proj, changed)
+	logDir := e.runLogDir(p.proj.ID, runID)
+	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	opts := taskOpts
 	if mode == verification.ModeRegression {
 		opts = regOpts
@@ -138,7 +145,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	if terr := stop(); terr != nil && err != nil {
 		err = fault.Wrap(terr, fault.CodeOf(terr), "verification aborted: claim authority was lost while checks ran")
 	}
-	res := VerifyResult{TaskID: p.rec.Task.ID, Mode: mode, RunID: runID, Revision: revision, Evidence: evidence}
+	res := VerifyResult{TaskID: p.rec.Task.ID, Mode: mode, RunID: runID, Revision: revision, Evidence: evidence, LogDir: logDir}
 	if err != nil {
 		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(runID, sqlite.RunError, err.Error(), e.now()) })
 		return res, err
@@ -178,6 +185,8 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 	var out []verification.Evidence
 	changed, _ := workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
 	taskOpts, regOpts := suiteOpts(t, proj, changed)
+	logDir := e.runLogDir(proj.ID, runID)
+	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	taskPolicy := verification.Policy{TaskChecks: policy.TaskChecks}
 	if len(taskPolicy.TaskChecks) > 0 {
 		dir, cleanup, err := mgr.Snapshot(ctx, revision)
@@ -219,7 +228,7 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 func (e *Engine) runChecksSkipping(ctx context.Context, policy verification.Policy, runID int64, revision, digest string, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
 	var out []verification.Evidence
 	for _, step := range verification.Plan(policy) {
-		ev := e.execStep(ctx, "", step, runID, revision, digest, true, 0, nil)
+		ev := e.execStep(ctx, "", step, runID, revision, digest, true, 0, nil, "")
 		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 			if err := fence(tx); err != nil {
 				return err
@@ -244,6 +253,8 @@ type runOpts struct {
 	budgetName string
 	changed    []string
 	target     string
+	// logDir receives each check's full output; empty writes none.
+	logDir string
 }
 
 // suiteOpts derives the task-check and regression budgets for a task
@@ -282,7 +293,7 @@ func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.
 				limit, budgetLimited = left, true
 			}
 		}
-		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed, limit, extra)
+		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed, limit, extra, opts.logDir)
 		// A check recorded without running (limit <= 0; execStep says why)
 		// keeps its own message: these describe a check that started.
 		if limit > 0 && ev.Outcome == verification.OutcomeTimeout {
@@ -310,7 +321,7 @@ func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.
 	return out, nil
 }
 
-func (e *Engine) execStep(ctx context.Context, dir string, step verification.Step, runID int64, revision, policyDigest string, skipRegression bool, timeout time.Duration, extraEnv []string) verification.Evidence {
+func (e *Engine) execStep(ctx context.Context, dir string, step verification.Step, runID int64, revision, policyDigest string, skipRegression bool, timeout time.Duration, extraEnv []string, logDir string) verification.Evidence {
 	c := step.Check
 	now := e.now()
 	ev := verification.Evidence{RunID: runID, CheckID: c.ID, CheckVersion: c.Version, CheckDigest: c.Digest(), Required: c.Required, Revision: revision, PolicyDigest: policyDigest, StartedAt: now, FinishedAt: now, ExitCode: -1}
@@ -328,7 +339,18 @@ func (e *Engine) execStep(ctx context.Context, dir string, step verification.Ste
 	if timeout <= 0 {
 		timeout = c.EffectiveTimeout()
 	}
-	res := checkexec.Run(ctx, checkexec.Spec{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Timeout: timeout, Env: append(checkEnv(dir), extraEnv...)})
+	spec := checkexec.Spec{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Timeout: timeout, Env: append(checkEnv(dir), extraEnv...)}
+	logFile, logPath := openCheckLog(logDir, c.ID)
+	if logFile != nil {
+		defer logFile.Close()
+		where := c.Dir
+		if where == "" {
+			where = "."
+		}
+		fmt.Fprintf(logFile, "$ %s\n# check %s in %s at %s\n\n", shellJoin(c.Command), c.ID, where, revision)
+		spec.Log, ev.Log = logFile, logPath
+	}
+	res := checkexec.Run(ctx, spec)
 	ev.StartedAt, ev.FinishedAt = res.StartedAt, res.FinishedAt
 	ev.ExitCode, ev.Stdout, ev.Stderr = res.ExitCode, res.Stdout, res.Stderr
 	switch {
@@ -346,6 +368,13 @@ func (e *Engine) execStep(ctx context.Context, dir string, step verification.Ste
 		if res.Err != nil {
 			ev.Message = res.Err.Error()
 		}
+	}
+	if logFile != nil {
+		fmt.Fprintf(logFile, "\n# %s: exit=%d after %s", ev.Outcome, ev.ExitCode, ev.FinishedAt.Sub(ev.StartedAt).Round(time.Millisecond))
+		if ev.Message != "" {
+			fmt.Fprintf(logFile, " (%s)", ev.Message)
+		}
+		fmt.Fprintln(logFile)
 	}
 	return ev
 }
@@ -508,7 +537,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 // executeFinal runs both suites on an immutable snapshot, integrates, and
 // finalises. It is used by the single-task path; cohorts have their own.
 func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, error) {
-	res := VerifyResult{TaskID: fr.rec.Task.ID, Mode: verification.ModeComplete, RunID: fr.runID, Revision: fr.revision, SubmissionID: fr.submission}
+	res := VerifyResult{TaskID: fr.rec.Task.ID, Mode: verification.ModeComplete, RunID: fr.runID, Revision: fr.revision, SubmissionID: fr.submission, LogDir: e.runLogDir(fr.proj.ID, fr.runID)}
 	fence := func(tx *sqlite.Tx) error {
 		if _, err := e.authorize(tx, fr.token, e.now()); err != nil {
 			return err

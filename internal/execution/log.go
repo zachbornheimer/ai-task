@@ -107,6 +107,8 @@ type FailedCheck struct {
 	Message    string `json:"message,omitempty"`
 	StderrTail string `json:"stderr_tail,omitempty"`
 	StdoutTail string `json:"stdout_tail,omitempty"`
+	// Log is the file with the check's complete output, while it is kept.
+	Log string `json:"log,omitempty"`
 }
 
 // Bounds for inherited context so a claim payload stays small.

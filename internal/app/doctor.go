@@ -138,7 +138,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 			var failed []verification.Evidence
 			started := time.Now()
 			for _, step := range verification.Plan(regression) {
-				ev := e.execStep(ctx, dir, step, 0, rep.TargetRevision, regression.Digest(), false, 0, nil)
+				ev := e.execStep(ctx, dir, step, 0, rep.TargetRevision, regression.Digest(), false, 0, nil, "")
 				if ev.Required && ev.Outcome != verification.OutcomePassed {
 					failed = append(failed, ev)
 				}

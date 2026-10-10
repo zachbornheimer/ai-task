@@ -278,6 +278,9 @@ func (c *ctxt) fail(err error) int {
 			if vr.Message != "" {
 				fmt.Fprintf(c.env.Stderr, "  %s\n", vr.Message)
 			}
+			if vr.LogDir != "" {
+				fmt.Fprintf(c.env.Stderr, "  logs: %s (result.json and one log per check)\n", vr.LogDir)
+			}
 		}
 		if rep, ok := details.(app.DoctorReport); ok {
 			renderDoctor(c.env.Stderr, rep)

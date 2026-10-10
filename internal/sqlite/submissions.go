@@ -195,9 +195,9 @@ func (t *Tx) InsertEvidence(e verification.Evidence) (int64, error) {
 		reusedFrom = e.ReusedFrom
 	}
 	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_results
-		(run_id, check_id, check_version, check_digest, required, revision, policy_digest, started_at, finished_at, exit_code, outcome, reused, reused_from, message, stdout, stderr)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.RunID, e.CheckID, e.CheckVersion, e.CheckDigest, e.Required, e.Revision, e.PolicyDigest, ms(e.StartedAt), ms(e.FinishedAt), e.ExitCode, e.Outcome, e.Reused, reusedFrom, e.Message, e.Stdout, e.Stderr)
+		(run_id, check_id, check_version, check_digest, required, revision, policy_digest, started_at, finished_at, exit_code, outcome, reused, reused_from, message, stdout, stderr, log)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.RunID, e.CheckID, e.CheckVersion, e.CheckDigest, e.Required, e.Revision, e.PolicyDigest, ms(e.StartedAt), ms(e.FinishedAt), e.ExitCode, e.Outcome, e.Reused, reusedFrom, e.Message, e.Stdout, e.Stderr, e.Log)
 	if err != nil {
 		return 0, wrapInternal(err, "insert evidence")
 	}
@@ -205,13 +205,13 @@ func (t *Tx) InsertEvidence(e verification.Evidence) (int64, error) {
 	return id, nil
 }
 
-const evidenceColumns = `id, run_id, check_id, check_version, check_digest, required, revision, policy_digest, started_at, finished_at, exit_code, outcome, reused, reused_from, message, stdout, stderr`
+const evidenceColumns = `id, run_id, check_id, check_version, check_digest, required, revision, policy_digest, started_at, finished_at, exit_code, outcome, reused, reused_from, message, stdout, stderr, log`
 
 func scanEvidence(sc interface{ Scan(...any) error }) (verification.Evidence, error) {
 	var e verification.Evidence
 	var started, finished int64
 	var reusedFrom nullInt
-	err := sc.Scan(&e.ID, &e.RunID, &e.CheckID, &e.CheckVersion, &e.CheckDigest, &e.Required, &e.Revision, &e.PolicyDigest, &started, &finished, &e.ExitCode, &e.Outcome, &e.Reused, &reusedFrom, &e.Message, &e.Stdout, &e.Stderr)
+	err := sc.Scan(&e.ID, &e.RunID, &e.CheckID, &e.CheckVersion, &e.CheckDigest, &e.Required, &e.Revision, &e.PolicyDigest, &started, &finished, &e.ExitCode, &e.Outcome, &e.Reused, &reusedFrom, &e.Message, &e.Stdout, &e.Stderr, &e.Log)
 	if err != nil {
 		return e, err
 	}

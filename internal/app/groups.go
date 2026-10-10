@@ -324,7 +324,7 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) error {
 		size = task.SizeLarge
 	}
 	policy := verification.Policy{TaskChecks: job.rec.Task.Verification.TaskChecks}
-	opts := runOpts{budget: job.proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s budget of the group", size), target: job.proj.TargetBranch}
+	opts := runOpts{budget: job.proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s budget of the group", size), target: job.proj.TargetBranch, logDir: e.runLogDir(job.proj.ID, job.runID)}
 	evidence, err := e.runChecks(checkCtx, dir, policy, job.runID, job.head, fence, opts)
 	if err != nil {
 		_ = finish(sqlite.RunError, "error", "group verification interrupted: "+fault.MessageOf(err), false)

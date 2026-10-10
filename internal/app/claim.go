@@ -264,7 +264,7 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 			if row.Outcome == verification.OutcomePassed || row.Outcome == verification.OutcomeSkipped {
 				continue
 			}
-			f.Checks = append(f.Checks, execution.FailedCheck{CheckID: row.CheckID, Outcome: string(row.Outcome), Message: row.Message, StderrTail: execution.Tail(row.Stderr, execution.FailureTailBytes), StdoutTail: execution.Tail(row.Stdout, execution.FailureTailBytes)})
+			f.Checks = append(f.Checks, execution.FailedCheck{CheckID: row.CheckID, Outcome: string(row.Outcome), Message: row.Message, StderrTail: execution.Tail(row.Stderr, execution.FailureTailBytes), StdoutTail: execution.Tail(row.Stdout, execution.FailureTailBytes), Log: row.Log})
 		}
 		h.LastFailure = f
 	}

@@ -41,6 +41,10 @@ type Evidence struct {
 	Message    string `json:"message,omitempty"`
 	Stdout     string `json:"stdout,omitempty"`
 	Stderr     string `json:"stderr,omitempty"`
+	// Log is the file holding the check's complete output (Stdout and
+	// Stderr keep only its head and tail); empty when none was written.
+	// Old run logs are pruned, so the file may be gone.
+	Log string `json:"log,omitempty"`
 }
 
 // Digest identifies the content of a check: command, directory, timeout,
