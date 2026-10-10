@@ -124,16 +124,18 @@ func InstallInstructions(root string) (InstallResult, error) {
 		s := string(existing)
 		b, e := strings.Index(s, InstructionsBegin), strings.Index(s, InstructionsEnd)
 		if b >= 0 && e > b {
-			content = s[:b] + block + strings.TrimLeft(s[e+len(InstructionsEnd):], "\n")
-			if strings.TrimSpace(content) == strings.TrimSpace(s) {
-				content = s
-			} else {
-				res.Updated = true
+			rest := strings.TrimLeft(s[e+len(InstructionsEnd):], "\n")
+			if rest != "" {
+				rest = "\n" + rest // one blank line separates the block from the text after it
 			}
+			content = s[:b] + block + rest
 		} else {
+			// No complete block: a stray marker left by a hand edit would
+			// otherwise survive next to the new block and make two.
+			s = dropMarkerLines(s)
 			content = strings.TrimRight(s, "\n") + "\n\n" + block
-			res.Updated = true
 		}
+		res.Updated = content != string(existing)
 	}
 	if res.Updated {
 		if err := os.WriteFile(res.AgentsMD, []byte(content), 0o644); err != nil {
@@ -214,6 +216,17 @@ func InstallClaudeHooks(root string) (string, bool, error) {
 		return path, false, fault.Wrap(err, fault.CodeInternal, "write %s", path)
 	}
 	return path, true, nil
+}
+
+// dropMarkerLines removes lines that are only a block marker.
+func dropMarkerLines(s string) string {
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != InstructionsBegin && t != InstructionsEnd {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 func hasHookCommand(list []any, cmd string) bool {
