@@ -165,7 +165,9 @@ acceptance criteria, what "done" means, the task checks and regression
 checks verbatim, the target branch, prerequisites, the project's other
 open tasks (not yours), the workspace, branch and lease, files the branch
 already changed, uncommitted changes left by an earlier attempt, and the
-handoff. Without a reference it describes the current session's task
+handoff, and the commit and rebase steps to use: `wt step commit` and
+`wt step rebase` when Worktrunk's `wt` is on PATH (`worktrunk: true` in
+JSON), plain git otherwise. Without a reference it describes the current session's task
 (worktree token, `AT_SESSION`, or a token argument); with one it
 describes that task for anyone, read-only. `--with-rules` appends the
 rules of the road for an agent that does not read AGENTS.md.

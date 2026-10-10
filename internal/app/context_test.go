@@ -1,6 +1,8 @@
 package app_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,6 +35,13 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 		t.Fatal(err)
 	}
 	s2 := f.claim(string(a))
+	// Leave an uncommitted edit: the context lists the path, not Git's
+	// status code.
+	os.WriteFile(filepath.Join(s2.Workspace, "store.go"), []byte("package store // wip\n"), 0o644)
+	// Worktrunk present: the prompt names its steps; absent: plain git.
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "wt"), []byte("#!/bin/sh\n"), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cx, err := f.e.Context(f.ctx, f.proj.ID, "", s2.Token, false)
 	if err != nil {
 		t.Fatal(err)
@@ -52,13 +61,20 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 		"Files this branch has already changed: store.go",
 		string(b) + " other", // sibling, not yours
 		"Record progress as you go",
+		"Uncommitted changes left by an earlier attempt (review with `git status` before editing): store.go\n",
+		"Commit with `wt step commit`",
+		"`wt step rebase main`",
 	} {
 		if !strings.Contains(cx.Prompt, want) {
 			t.Fatalf("context lacks %q:\n%s", want, cx.Prompt)
 		}
 	}
-	if strings.Contains(cx.Prompt, "Rules of the road") || cx.LeaseUntil == nil || len(cx.ChangedFiles) != 1 || len(cx.Siblings) != 1 || cx.Siblings[0].ID != b {
+	if strings.Contains(cx.Prompt, "Rules of the road") || cx.LeaseUntil == nil || len(cx.ChangedFiles) != 1 || len(cx.Siblings) != 1 || cx.Siblings[0].ID != b || !cx.Worktrunk {
 		t.Fatalf("%+v", cx)
+	}
+	t.Setenv("PATH", "/nonexistent")
+	if plain, err := f.e.Context(f.ctx, f.proj.ID, "", s2.Token, false); err != nil || plain.Worktrunk || !strings.Contains(plain.Prompt, "Commit with git") || !strings.Contains(plain.Prompt, "`git merge main`") {
+		t.Fatalf("without wt: %v %s", err, plain.Prompt)
 	}
 	// Groups are never siblings; a group is not a task.
 	if _, err := f.e.Context(f.ctx, f.proj.ID, "g", "", false); fault.CodeOf(err) != fault.CodeInvalidInput {

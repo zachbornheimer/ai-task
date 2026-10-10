@@ -26,12 +26,15 @@ Rules of the road:
 - You never set status. `verify complete` is the only path to completion
   and it re-runs everything; `VERIFICATION_FAILED` leaves your claim live
   with the evidence in `error.details`. Fix, commit, verify again.
-- Commit before `verify complete`; the tree must be clean and nothing is
-  committed for you.
+- Commit before `verify complete`: `wt step commit` where Worktrunk is
+  installed (it stages, runs the project's pre-commit hooks and writes
+  the message), plain git otherwise. The tree must be clean and nothing
+  is committed for you.
 - `INTEGRATION_FAILED` means your branch no longer merges into the target
   branch (the claim printed it as `target_branch`; `error.details.conflicts`
-  lists the files). In the worktree run `git merge <target>`, resolve,
-  commit, and `verify complete` again. It is not counted against you.
+  lists the files). In the worktree run `wt step rebase <target>` (or
+  `git merge <target>`), resolve, commit, and `verify complete` again. It
+  is not counted against you.
 - A passing `verify complete` promotes your branch to the target. When the
   target had moved, the engine merges for you and reports the merge as
   `integrated_revision`; later claims start from it.
@@ -41,7 +44,7 @@ Rules of the road:
 - Your lease is 30 minutes and every `at` command renews it; `at log`
   progress at least that often.
 - Start with `at context`: it prints everything the task needs you to
-  know, including the handoff from previous attempts (their next step
+  know, which git or `wt` steps to use, and the handoff from previous attempts (their next step
   and learnings, learnings inherited from prerequisites, and the last
   failed checks with their output).
 - `LEASE_EXPIRED` or `SESSION_SUPERSEDED`: stop editing immediately. The

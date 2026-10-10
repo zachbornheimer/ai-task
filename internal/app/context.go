@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +36,9 @@ type Context struct {
 	DirtyFiles   []string `json:"dirty_files,omitempty"`
 	// Siblings are the project's other open tasks: what not to implement.
 	Siblings []Rel `json:"siblings,omitempty"`
+	// Worktrunk reports that `wt` is on PATH, so the prompt names its
+	// commit and rebase steps instead of raw git.
+	Worktrunk bool `json:"worktrunk"`
 }
 
 // SiblingLimit bounds the open tasks listed in a context.
@@ -114,9 +118,16 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 		lease := a.LeaseExpiresAt
 		c.LeaseUntil = &lease
 	}
+	_, wtErr := exec.LookPath("wt")
+	c.Worktrunk = wtErr == nil
 	if c.Workspace != "" {
 		if st, err := workspace.Inspect(ctx, c.Workspace); err == nil {
-			c.DirtyFiles = st.Dirty
+			for _, line := range st.Dirty {
+				// Porcelain lines are "XY path"; the path is what matters.
+				if len(line) > 3 {
+					c.DirtyFiles = append(c.DirtyFiles, line[3:])
+				}
+			}
 		}
 		c.ChangedFiles, _ = workspace.ChangedFiles(ctx, c.Workspace, "refs/heads/"+proj.TargetBranch)
 	}
@@ -234,7 +245,12 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	w.WriteString("Record progress as you go: `at log --done \"...\" --next \"...\" --learned \"...\"`. Commit, then `at verify complete`.\n")
+	w.WriteString("Record progress as you go: `at log --done \"...\" --next \"...\" --learned \"...\"`.\n")
+	if c.Worktrunk {
+		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk stages everything, runs the project's pre-commit hooks and writes the message; `wt step diff` shows all changes since branching, `wt step squash` folds many commits into one). Then `at verify complete`. If it reports INTEGRATION_FAILED, `wt step rebase %s`, resolve, and verify again.\n", c.TargetBranch)
+	} else {
+		fmt.Fprintf(&w, "Commit with git (`git add -A && git commit`), then `at verify complete`. If it reports INTEGRATION_FAILED, `git merge %s`, resolve, commit, and verify again.\n", c.TargetBranch)
+	}
 	return w.String()
 }
 
@@ -243,8 +259,8 @@ func renderContext(c Context) string {
 const Rules = `## Rules of the road
 
 - You never set status. ` + "`at verify complete`" + ` is the only path to completion and it re-runs everything; VERIFICATION_FAILED leaves your claim live with the evidence in error.details. Fix, commit, verify again.
-- Commit before ` + "`at verify complete`" + `; the tree must be clean and nothing is committed for you.
-- INTEGRATION_FAILED means your branch no longer merges into the target branch; in the worktree run ` + "`git merge <target>`" + `, resolve error.details.conflicts, commit, verify again. It is not counted against you.
+- Commit before ` + "`at verify complete`" + ` (` + "`wt step commit`" + ` with Worktrunk, else git); the tree must be clean and nothing is committed for you.
+- INTEGRATION_FAILED means your branch no longer merges into the target branch; in the worktree run ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve error.details.conflicts, commit, verify again. It is not counted against you.
 - Your lease is 30 minutes and every at command renews it; ` + "`at log --done .. --next .. --learned ..`" + ` at least that often.
 - If the task needs work that is not yours: ` + "`at add \"prereq\" --blocks <task> --check \"id: cmd\"`" + `, log the handoff, ` + "`at claim release`" + `.
 - LEASE_EXPIRED or SESSION_SUPERSEDED: stop editing immediately.
