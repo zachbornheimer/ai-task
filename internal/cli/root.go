@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -59,6 +60,7 @@ type ctxt struct {
 	env  Env
 	g    globals
 	fs   *flag.FlagSet
+	name string      // the subcommand being run
 	eng  *app.Engine // opened lazily
 	args []string    // positional arguments after interleaved parsing
 }
@@ -94,12 +96,20 @@ func Main(env Env) int {
 	if !ok {
 		return c.usageError(fmt.Errorf("unknown command %q", name))
 	}
+	c.name = name
 	c.fs = flag.NewFlagSet(name, flag.ContinueOnError)
 	c.fs.SetOutput(io.Discard)
 	c.bindGlobals(c.fs)
 	err := cmd.run(ctx, c, args)
 	if c.eng != nil {
 		c.eng.Close()
+	}
+	var h *helpRequest
+	if errors.As(err, &h) {
+		if err := c.printCommandHelp(cmd); err != nil {
+			return c.fail(err)
+		}
+		return ExitOK
 	}
 	if err != nil {
 		return c.fail(err)
@@ -133,6 +143,9 @@ func (c *ctxt) parse(args []string) error {
 	var pos []string
 	for {
 		if err := c.fs.Parse(args); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return &helpRequest{}
+			}
 			return &usageErr{err}
 		}
 		rest := c.fs.Args()
@@ -150,6 +163,36 @@ func (c *ctxt) parse(args []string) error {
 	}
 	c.args = pos
 	return nil
+}
+
+// helpRequest is returned by parse for --help / -h: the command's flags are
+// declared by then, so Main prints them and exits 0.
+type helpRequest struct{}
+
+func (*helpRequest) Error() string { return "help requested" }
+
+// printCommandHelp prints the command's usage line and every flag with its
+// description: on stdout, or as a JSON envelope.
+func (c *ctxt) printCommandHelp(cmd command) error {
+	type flagHelp struct {
+		Name    string `json:"name"`
+		Usage   string `json:"usage"`
+		Default string `json:"default,omitempty"`
+	}
+	type commandHelp struct {
+		Command string     `json:"command"`
+		Usage   string     `json:"usage"`
+		Flags   []flagHelp `json:"flags"`
+	}
+	h := commandHelp{Command: cmd.name, Usage: cmd.summary}
+	c.fs.VisitAll(func(f *flag.Flag) {
+		h.Flags = append(h.Flags, flagHelp{f.Name, f.Usage, f.DefValue})
+	})
+	return c.emit(h, func(w io.Writer) {
+		fmt.Fprintf(w, "Usage: at %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
+		c.fs.SetOutput(w)
+		c.fs.PrintDefaults()
+	})
 }
 
 type usageErr struct{ err error }
