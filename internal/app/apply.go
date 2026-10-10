@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -589,6 +590,18 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			return err
 		}
 		t.Pins, t.Size = spec.Pins, spec.Size
+		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Size != nil) {
+			if w := planBudgetWarnings(spec, a.proj); len(w) > 0 {
+				if a.result.Warnings == nil {
+					a.result.Warnings = map[string][]string{}
+				}
+				name := t.Key
+				if name == "" {
+					name = string(t.ID)
+				}
+				a.result.Warnings[name] = w
+			}
+		}
 		if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 			return fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check", cid)
 		}
@@ -824,7 +837,10 @@ func referenceOrder(ops []plan.Change) ([]int, error) {
 	return order, nil
 }
 
-// budgetWarnings flags a small task whose check looks like a whole-suite
+// runFilter matches a go test -run (or -test.run) flag in a check command.
+var runFilter = regexp.MustCompile(`(^|\s)-{1,2}(test\.)?run([=\s]|$)`)
+
+// planBudgetWarnings flags a small task whose check looks like a whole-suite
 // run: it must finish within the small budget, so either narrow the
 // check to what proves this outcome or declare a larger size.
 func planBudgetWarnings(spec task.Spec, proj project.Project) []string {
@@ -834,7 +850,10 @@ func planBudgetWarnings(spec task.Spec, proj project.Project) []string {
 	var w []string
 	for _, c := range spec.Verification.TaskChecks {
 		cmd := strings.Join(c.Command, " ")
-		if strings.Contains(cmd, "./...") || strings.Contains(cmd, " test ./") && !strings.Contains(cmd, "-run") {
+		if runFilter.MatchString(cmd) {
+			continue // already narrowed to the tests that prove the outcome
+		}
+		if strings.Contains(cmd, "./...") || strings.Contains(cmd, " test ./") {
 			w = append(w, fmt.Sprintf("check %q looks like a whole-suite run; a small task's checks must finish within %s (narrow it to this outcome, e.g. -run, or set --size medium|large)", c.ID, proj.Budgets.ForSize(task.SizeSmall)))
 		}
 	}
