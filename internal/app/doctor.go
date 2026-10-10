@@ -100,14 +100,12 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 		}
 	}
 
-	// Git identity: agents commit in the task worktrees and Git refuses a
-	// commit without one.
-	name, _ := exec.CommandContext(ctx, "git", "-C", p.RootPath, "config", "user.name").Output()
-	email, _ := exec.CommandContext(ctx, "git", "-C", p.RootPath, "config", "user.email").Output()
-	if strings.TrimSpace(string(name)) == "" || strings.TrimSpace(string(email)) == "" {
-		add("git_identity", false, "warning", "no Git user.name/user.email configured for the repository; agents cannot commit until one exists", fmt.Sprintf("git -C %s config user.name <name> && git -C %s config user.email <email>", p.RootPath, p.RootPath))
+	// Git identity: agents commit in the task worktrees, and at records
+	// integration merges as the same identity; Git refuses both without one.
+	if ident, err := workspace.Identity(ctx, p.RootPath); err != nil {
+		add("git_identity", false, "error", "no Git identity for the repository: agents cannot commit and at cannot record integration merges", fmt.Sprintf("git -C %s config user.name <name> && git -C %s config user.email <email>", p.RootPath, p.RootPath))
 	} else {
-		add("git_identity", true, "info", fmt.Sprintf("commits as %s <%s>", strings.TrimSpace(string(name)), strings.TrimSpace(string(email))), "")
+		add("git_identity", true, "info", "commits and integration merges as "+ident, "")
 	}
 
 	// Regression suite defined.

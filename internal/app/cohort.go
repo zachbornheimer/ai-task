@@ -272,11 +272,13 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 	for attempt := 0; attempt < 3; attempt++ {
 		evidence = map[int64][]verification.Evidence{}
 		var sources []string
+		message := fmt.Sprintf("at: integrate cohort %s\n", job.cohort)
 		for _, m := range job.members {
 			sources = append(sources, m.revision)
+			message += "\nAt-Task: " + string(m.rec.Task.ID)
 		}
 		var err error
-		cand, err = mgr.PrepareMerge(ctx, job.proj.TargetBranch, sources, fmt.Sprintf("at: integrate cohort %s", job.cohort))
+		cand, err = mgr.PrepareMerge(ctx, job.proj.TargetBranch, sources, message)
 		if err != nil {
 			// A conflicting merge is for the members to resolve, not a strike.
 			_ = finishAll(sqlite.RunFailed, "cohort candidate could not be assembled: "+err.Error(), false)

@@ -237,13 +237,18 @@ func (m Manager) PrepareMerge(ctx context.Context, target string, sources []stri
 			return cand, nil
 		}
 	}
+	// The merge commit is recorded by whoever runs the verification, as
+	// git merge would: a missing identity is a setup problem, not a conflict.
+	if _, err := Identity(ctx, m.Repo); err != nil {
+		return Candidate{}, err
+	}
 	path, cleanup, err := m.Snapshot(ctx, base)
 	if err != nil {
 		return Candidate{}, err
 	}
 	cand.cleanup = cleanup
 	for _, src := range sources {
-		if _, err := git(ctx, path, "-c", "user.name=at", "-c", "user.email=at@localhost", "merge", "--no-ff", "--no-edit", "-m", message, src); err != nil {
+		if _, err := git(ctx, path, "merge", "--no-ff", "--no-edit", "-m", message, src); err != nil {
 			conflicts, _ := git(ctx, path, "diff", "--name-only", "--diff-filter=U")
 			_, _ = git(ctx, path, "merge", "--abort")
 			cleanup()
@@ -424,8 +429,8 @@ func InitRepo(ctx context.Context, dir string) (bool, error) {
 			return false, nil
 		}
 		// Repository without commits: give it a root so branches can start.
-		if _, err := git(ctx, dir, "-c", "user.name=at", "-c", "user.email=at@localhost", "commit", "-q", "--allow-empty", "-m", "at: initialize repository"); err != nil {
-			return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create initial commit in %s", dir)
+		if err := rootCommit(ctx, dir); err != nil {
+			return false, err
 		}
 		return false, nil
 	}
@@ -434,10 +439,24 @@ func InitRepo(ctx context.Context, dir string) (bool, error) {
 			return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "git init in %s", dir)
 		}
 	}
-	if _, err := git(ctx, dir, "-c", "user.name=at", "-c", "user.email=at@localhost", "commit", "-q", "--allow-empty", "-m", "at: initialize repository"); err != nil {
-		return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create initial commit in %s", dir)
+	if err := rootCommit(ctx, dir); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+// rootCommit records the empty root commit a new project starts from, as
+// the repository's Git identity; only when Git has none does it fall back
+// to "at", so creating a project never fails for want of one.
+func rootCommit(ctx context.Context, dir string) error {
+	args := []string{"commit", "-q", "--allow-empty", "-m", "at: initialize repository"}
+	if _, err := Identity(ctx, dir); err != nil {
+		args = append([]string{"-c", "user.name=at", "-c", "user.email=at@localhost"}, args...)
+	}
+	if _, err := git(ctx, dir, args...); err != nil {
+		return fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create initial commit in %s", dir)
+	}
+	return nil
 }
 
 // UncommittedFiles lists the paths in dir's work tree that differ from

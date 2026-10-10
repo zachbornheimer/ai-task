@@ -67,7 +67,11 @@ after a committed completion returns the stored result and runs nothing.
 5. In `promote` projects: merge the revision onto the target in a scratch
    worktree; if the merge changed content, run both suites on the merge
    too. Conflicts fail with `INTEGRATION_FAILED` and the target never
-   moves.
+   moves. The merge commit (`at: integrate <task> (<title>)`, with an
+   `At-Task: <id>` trailer per merged task) is recorded as the Git
+   identity of whoever runs the verification, from the repository's
+   configuration or `GIT_COMMITTER_*`, as `git merge` would; without one
+   it fails with `WORKSPACE_UNAVAILABLE` naming the fix, never a strike.
 6. **Intent.** One short transaction re-checks the session, prerequisites,
    the task's contract revision, the project regression digest, archive
    state, submission identity, and that stored evidence proves the

@@ -151,6 +151,22 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
+// Identity returns the "Name <email>" Git commits as in dir, from its
+// configuration or the GIT_COMMITTER_* environment. It fails with
+// WORKSPACE_UNAVAILABLE naming the fix when Git cannot determine one.
+func Identity(ctx context.Context, dir string) (string, error) {
+	out, err := git(ctx, dir, "var", "GIT_COMMITTER_IDENT")
+	if err != nil {
+		return "", fault.Wrap(err, fault.CodeWorkspaceUnavailable, "no Git identity in %s: at records integration merges as the identity Git uses there; set one with git -C %s config user.name <name> && git -C %s config user.email <email>", dir, dir, dir)
+	}
+	// "Name <email> 1700000000 +0000": drop the timestamp.
+	ident := strings.TrimSpace(out)
+	if i := strings.LastIndex(ident, ">"); i >= 0 {
+		ident = ident[:i+1]
+	}
+	return ident, nil
+}
+
 // ChangedFiles lists the paths that dir's HEAD has changed relative to the
 // merge base with ref (the task branch's own work so far).
 func ChangedFiles(ctx context.Context, dir, ref string) ([]string, error) {

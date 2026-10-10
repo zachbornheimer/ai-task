@@ -324,3 +324,46 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 		t.Fatalf("checkout changed by refused promotions: %v", st.Dirty)
 	}
 }
+
+func TestPrepareMergeWithoutIdentity(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(empty, nil, 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", empty)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	r := newRepo(t)
+	r.git(r.dir, "config", "user.useConfigOnly", "true")
+	r.git(r.dir, "checkout", "-q", "-b", "side")
+	rev := r.commit(r.dir, "side.txt", "side")
+	r.git(r.dir, "checkout", "-q", "main")
+	r.commit(r.dir, "main.txt", "main")
+
+	// A merge is needed and Git has no identity: a setup error naming the
+	// fix, not a conflict.
+	_, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev}, "merge side\n\nAt-Task: at-aaaaaa")
+	if fault.CodeOf(err) != fault.CodeWorkspaceUnavailable || !strings.Contains(fault.MessageOf(err), "config user.email") {
+		t.Fatalf("want WORKSPACE_UNAVAILABLE naming the fix, got %v", err)
+	}
+	var ce *ConflictError
+	if errors.As(err, &ce) {
+		t.Fatal("missing identity reported as a conflict")
+	}
+
+	// With one, the merge is recorded as that identity.
+	r.git(r.dir, "config", "user.name", "Repo Owner")
+	r.git(r.dir, "config", "user.email", "owner@example.com")
+	cand, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev}, "merge side\n\nAt-Task: at-aaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cand.Cleanup()
+	if who := r.git(r.dir, "log", "-1", "--format=%an <%ae>|%cn <%ce>", cand.Revision); who != "Repo Owner <owner@example.com>|Repo Owner <owner@example.com>" {
+		t.Fatalf("merge recorded as %q", who)
+	}
+	if id, err := Identity(r.ctx, r.dir); err != nil || id != "Repo Owner <owner@example.com>" {
+		t.Fatalf("Identity = %q, %v", id, err)
+	}
+}

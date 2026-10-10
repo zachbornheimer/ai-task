@@ -79,7 +79,7 @@ session beside the plan result: the fast path for a small change.
 starting workers: repository and target branch resolve, the target
 checkout has no uncommitted or untracked files (a warning: checks and
 worktrees run on the committed revision), a Git identity
-exists for commits, the regression suite is defined and passes on the
+exists for commits and integration merges (an error without one), the regression suite is defined and passes on the
 target branch within the regression budget (over budget is an error,
 over half is a warning: CI is slower), so no worker is charged for a
 broken or slow baseline, the

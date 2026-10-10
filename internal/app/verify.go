@@ -560,6 +560,11 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// conflict records the conflicting files of a merge failure on the
 	// result before fail renders it.
 	conflict := func(err error) (VerifyResult, error) {
+		if code := fault.CodeOf(err); code != fault.CodeIntegrationFailed {
+			// Not a merge outcome (no Git identity, an unusable repository):
+			// the environment's problem, reported with its own code.
+			return fail(sqlite.RunError, code, fault.MessageOf(err), res.Evidence)
+		}
 		var ce *workspace.ConflictError
 		if errors.As(err, &ce) {
 			res.Conflicts = ce.Files
@@ -582,7 +587,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			return fail(sqlite.RunFailed, fault.CodeVerificationFailed, "pinned path(s) changed by this task: "+strings.Join(hit, ", ")+"; the task may not modify them (revert the change, or ask the planner to unpin)", nil)
 		}
 	}
-	integrate := fmt.Sprintf("at: integrate %s (%s)", fr.rec.Task.ID, fr.rec.Task.Description)
+	integrate := fmt.Sprintf("at: integrate %s (%s)\n\nAt-Task: %s", fr.rec.Task.ID, fr.rec.Task.Description, fr.rec.Task.ID)
 	// A submission that cannot merge into the target is refused before any
 	// check runs: the holder has a merge to resolve, and the checks would
 	// only be repeated on the merged result. The candidate built here is
