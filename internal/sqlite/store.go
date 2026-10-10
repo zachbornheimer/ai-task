@@ -124,12 +124,27 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 	}()
 	if err := fn(&Tx{tx: tx, ctx: ctx}); err != nil {
 		_ = tx.Rollback()
+		if cerr := ctx.Err(); cerr != nil && fault.CodeOf(err) == fault.CodeInternal {
+			return cancelled(cerr)
+		}
 		return err
 	}
 	if err := tx.Commit(); err != nil {
+		// database/sql rolls a transaction back by itself when its context
+		// ends; the commit then reports "already rolled back". That is the
+		// caller's cancellation, not an internal fault: nothing was written.
+		if cerr := ctx.Err(); cerr != nil {
+			return cancelled(cerr)
+		}
 		return fault.Wrap(err, fault.CodeInternal, "commit transaction")
 	}
 	return nil
+}
+
+// cancelled reports a transaction abandoned because its context ended; it
+// unwraps to the context error (context.Canceled or DeadlineExceeded).
+func cancelled(cerr error) error {
+	return fault.Wrap(cerr, fault.CodeCancelled, "transaction abandoned: the caller's context ended (nothing was written)")
 }
 
 func (s *Store) migrate(ctx context.Context) error {
