@@ -440,6 +440,30 @@ func InitRepo(ctx context.Context, dir string) (bool, error) {
 	return true, nil
 }
 
+// UncommittedFiles lists the paths in dir's work tree that differ from
+// HEAD or are untracked (ignored files excluded), in Git's order. Untracked
+// directories are listed once, with a trailing slash.
+func UncommittedFiles(ctx context.Context, dir string) ([]string, error) {
+	out, err := git(ctx, dir, "status", "--porcelain", "-z", "--untracked-files=normal")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 {
+			continue
+		}
+		files = append(files, e[3:])
+		// A rename or copy carries its source as the next entry.
+		if e[0] == 'R' || e[0] == 'C' || e[1] == 'R' || e[1] == 'C' {
+			i++
+		}
+	}
+	return files, nil
+}
+
 func short(rev string) string {
 	if len(rev) > 12 {
 		return rev[:12]

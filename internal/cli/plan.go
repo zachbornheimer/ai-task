@@ -118,6 +118,12 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 		if res.CreatedRepo {
 			fmt.Fprintln(w, "Repository:  created (git init + initial commit)")
 		}
+		if res.Warning != "" {
+			fmt.Fprintf(w, "Warning:     %s\n", res.Warning)
+			for _, f := range res.UntrackedFiles {
+				fmt.Fprintf(w, "             untracked: %s\n", f)
+			}
+		}
 		fmt.Fprintf(w, "Target:      %s (integration: %s; task branches at/<id>)\n", p.TargetBranch, p.Integration)
 		fmt.Fprintf(w, "State:       %s\n", e.Path())
 		if ir := o.Instructions; ir != nil {
