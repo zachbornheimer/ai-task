@@ -20,6 +20,11 @@ Each check is an argv array (no shell), optional directory, timeout
 canonical JSON with a `sha256:` digest; the digest in force is recorded on
 every run.
 
+Because there is no shell, a check written as `[id:] command args...` that
+has a bare `&&`, `||`, `|`, `;`, `>`, `>>` or `<` among its words is
+rejected (`INVALID_INPUT`); wrap it as `sh -c '...'`. Quoted operators
+inside an argument are fine.
+
 ## Modes
 
 | Invocation | Inputs | Effect |

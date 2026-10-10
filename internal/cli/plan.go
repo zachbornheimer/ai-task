@@ -270,6 +270,9 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	})
 }
 
+// shellOperators are the words that mean something only to a shell.
+var shellOperators = map[string]bool{"&&": true, "||": true, "|": true, ";": true, ">": true, ">>": true, "<": true}
+
 var checkIDPrefix = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // parseCheck reads "[id:] command args..." into a CheckSpec. A label is
@@ -282,9 +285,14 @@ func parseCheck(raw string, n int, required bool) (verification.CheckSpec, error
 	if i := strings.Index(raw, ":"); i > 0 && i+1 < len(raw) && (raw[i+1] == ' ' || raw[i+1] == '\t') && checkIDPrefix.MatchString(raw[:i]) {
 		id, cmd = raw[:i], raw[i+1:]
 	}
-	argv, err := splitWords(cmd)
+	argv, quoted, err := splitWordsMarked(cmd)
 	if err != nil || len(argv) == 0 {
 		return verification.CheckSpec{}, usage("--check %q: expected \"[id:] command args...\"", raw)
+	}
+	for i, w := range argv {
+		if !quoted[i] && shellOperators[w] {
+			return verification.CheckSpec{}, usage("check %q: '%s' is a shell operator, and checks run without a shell, so it would be passed to %s as an argument; wrap the command as sh -c '...'", raw, w, argv[0])
+		}
 	}
 	return verification.CheckSpec{ID: id, Command: argv, Required: required}, nil
 }
