@@ -1,0 +1,76 @@
+package app_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/execution"
+	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/task"
+	"github.com/zachbornheimer/ai-task/internal/verification"
+)
+
+// TestUnchargedFailuresAreNotShownAsFailed: a final run that failed
+// without a strike (a timeout, a failed integration) leaves the task
+// claimable as interrupted (attempt still open) or ready (released), with
+// last_error kept and no [failed] annotation; verification_failed is only
+// for a run charged against the attempt.
+func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
+	f := newGitFixture(t)
+	f.proj.Budgets = project.Budgets{Small: 300 * time.Millisecond, Medium: 5 * time.Second, Regression: 5 * time.Second}
+	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
+		t.Fatal(err)
+	}
+	notFailed := func(what string, id task.ID, want task.Status, errPart string) {
+		t.Helper()
+		v := f.show(string(id))
+		if v.Status != want || v.Status.Annotation() == "[failed]" || v.Failures != 0 || !strings.Contains(v.LastError, errPart) {
+			t.Fatalf("%s: status=%s failures=%d last_error=%q; want %s, no strike, last_error containing %q", what, v.Status, v.Failures, v.LastError, want, errPart)
+		}
+	}
+
+	// A timeout, then the lease runs out: interrupted. Released instead: ready.
+	a := f.addWith("slow", "sleep 1")
+	s := f.claim(string(a))
+	f.commit(s.Workspace, "a.txt", "a")
+	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeVerificationTimeout)
+	f.c.Advance(execution.DefaultLease + time.Minute)
+	notFailed("timeout, lease expired", a, task.StatusInterrupted, "VERIFICATION_TIMEOUT")
+	s2 := f.claim(string(a))
+	if _, err := f.e.Release(f.ctx, s2.Token, app.ReleaseOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	notFailed("timeout, released", a, task.StatusReady, "")
+
+	// A failed integration (an untracked file in the way on the target).
+	b := f.add("b")
+	sb := f.claim(string(b))
+	f.commit(sb.Workspace, "b.txt", "b")
+	scratch := filepath.Join(f.repo, "b.txt")
+	os.WriteFile(scratch, []byte("local draft"), 0o644)
+	_, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeIntegrationFailed)
+	f.c.Advance(execution.DefaultLease + time.Minute)
+	notFailed("integration failed, lease expired", b, task.StatusInterrupted, "INTEGRATION_FAILED")
+	os.Remove(scratch)
+
+	// A failed proof is charged and still shows as failed.
+	c := f.addWith("c", "false")
+	sc := f.claim(string(c))
+	f.commit(sc.Workspace, "c.txt", "c")
+	_, err = f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
+	wantCode(t, err, fault.CodeVerificationFailed)
+	if _, err := f.e.Release(f.ctx, sc.Token, app.ReleaseOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	f.c.Advance(11 * time.Minute)
+	if v := f.show(string(c)); v.Status != task.StatusVerificationFailed || v.Failures != 1 {
+		t.Fatalf("a charged failure must stay verification_failed: status=%s failures=%d", v.Status, v.Failures)
+	}
+}

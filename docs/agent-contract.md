@@ -206,7 +206,11 @@ the same lease adds nothing) and only for the attempt that is still the
 task's current generation. Environment problems (snapshot or worktree
 trouble, a dirty or moving target, a merge to resolve) and authority or
 contract conflicts (superseded session, planner edit, new prerequisite)
-stop the run, are reported as `last_error`, and are never a strike. A
+stop the run, are reported as `last_error`, and are never a strike; so is
+a timeout. Such a task is not shown as `verification_failed`/`[failed]`:
+it is `interrupted` while its attempt is still open and `ready` once it is
+released. Only a run charged against its attempt derives to
+`verification_failed`. A
 `verify complete` fired while the attempt's previous one is still running
 is refused with `VERIFICATION_RUNNING`; after completion it returns the
 stored acknowledgement.

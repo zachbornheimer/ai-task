@@ -125,7 +125,11 @@ func (r Record) Facts(now time.Time, maxAttempts int) task.Facts {
 		case RunRunning:
 			f.Verifying = true
 		case RunFailed, RunError:
-			f.VerificationFailed = true
+			// Only a run charged against its attempt is "failed"; a
+			// timeout, a failed integration or an environment error
+			// leaves the task claimable (ready or interrupted) with the
+			// reason in last_error.
+			f.VerificationFailed = r.LastFailureAttemptID == s.AttemptID
 		default: // pending or none
 			f.SubmissionPending = true
 		}

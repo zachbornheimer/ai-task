@@ -43,8 +43,9 @@ type Facts struct {
 	SubmissionPending bool
 	// AwaitingIntegration: judged passed, integration not yet recorded.
 	AwaitingIntegration bool
-	// VerificationFailed: the newest final judgement failed and no claim
-	// is live.
+	// VerificationFailed: the newest final judgement failed, was charged
+	// against its attempt, and no claim is live. A failure without a
+	// strike (timeout, integration, environment) does not set it.
 	VerificationFailed bool
 	// Exhausted: failures reached the project's attempt limit.
 	Exhausted bool
