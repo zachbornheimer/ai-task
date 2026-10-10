@@ -902,7 +902,7 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudg
 	}
 	var parts []string
 	if len(taskIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task, or the code it runs hangs; make the check prove only this outcome, split the task, or have the planner set a larger --size", strings.Join(taskIDs, ", "), size, taskBudget))
+		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task, or the code it runs hangs; make the check prove only this outcome, or make it fast first as its own task (`at add \"fast check for ...\" --blocks <task> --check ...`, then `at claim release`) so the slow proof never lands, or have the planner set a larger --size", strings.Join(taskIDs, ", "), size, taskBudget))
 	}
 	if len(regIDs) > 0 {
 		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (AT_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))
