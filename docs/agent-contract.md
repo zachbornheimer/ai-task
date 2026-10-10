@@ -47,6 +47,7 @@ stdout (an envelope in JSON mode) and exits `0`.
 | `VERIFICATION_RUNNING` | this attempt's `verify complete` is still running; wait for its result |
 | `INTEGRATION_FAILED` | merge conflict (`details.conflicts` lists the files; merge the target branch into the task branch, commit, verify again), moved target that kept moving, or dirty target checkout; never a strike |
 | `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes at `verify complete` / the worktree is gone |
+| `CANCELLED` | the caller's context ended mid-operation (a host's deadline or interrupt); nothing was written |
 | `INTERNAL` | bug or I/O failure |
 
 ## Planning (planner authority)

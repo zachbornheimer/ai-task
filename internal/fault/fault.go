@@ -63,6 +63,9 @@ const (
 
 	// Anything else: a bug, an I/O failure, a corrupt store.
 	CodeInternal Code = "INTERNAL"
+	// CodeCancelled: the caller's context ended during the operation;
+	// nothing was written. Unwraps to the context error.
+	CodeCancelled Code = "CANCELLED"
 )
 
 // Error is a coded error. Message is safe to show to users and agents.
