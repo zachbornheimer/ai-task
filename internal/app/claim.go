@@ -168,7 +168,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		if err != nil {
 			return err
 		}
-		view, err := e.buildView(tx, r2, proj, now, false)
+		view, err := e.buildView(tx, r2, proj, now, false, targetHead{})
 		if err != nil {
 			return err
 		}
@@ -409,7 +409,7 @@ func (e *Engine) Release(ctx context.Context, token execution.Token, opts Releas
 				return err
 			}
 		}
-		v, err = e.buildView(tx, r, proj, now, false)
+		v, err = e.buildView(tx, r, proj, now, false, targetHead{})
 		return err
 	})
 	if err == nil {
@@ -457,7 +457,7 @@ func (e *Engine) Whoami(ctx context.Context, token execution.Token) (TaskView, e
 		if err != nil {
 			return err
 		}
-		v, err = e.buildView(tx, r, proj, now, false)
+		v, err = e.buildView(tx, r, proj, now, false, targetHead{})
 		return err
 	})
 	return v, err
