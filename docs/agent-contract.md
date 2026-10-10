@@ -60,7 +60,24 @@ at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 
 `REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
 plan revision; the Go `Apply` takes a whole batch; a batch that changes
-nothing is not a revision. An `--idempotency-key` is bound to the exact
+nothing is not a revision. `at add -f plan.yaml` (or `.json`, or `-` for
+stdin) and `at add --plan '…'` apply a whole plan in one revision: one
+item, a list, or `{tasks: [...]}`, each item with the field names `at
+show` prints (`kind` task|group, `key`, `title`, `outcome`, `parent`,
+`cohort`, `constraints`, `acceptance`, `requires`, `blocks`, `checks`,
+`optional_checks`; a check is `"[id:] cmd args"` or `{id, command (string
+or argv), dir, timeout_ms, required}`). A bad item rejects the whole
+file. `--claim` on a single-task add claims it at once and prints the
+session beside the plan result: the fast path for a small change.
+
+`at doctor [--skip-baseline]` checks a project before planning or
+starting workers: repository and target branch resolve, a Git identity
+exists for commits, the regression suite is defined and passes on the
+target branch (so no worker is charged for a broken baseline), the
+workspace root is writable, quarantined worktrees, tasks needing
+attention, a stalled plan, and Worktrunk's commit-message setup when
+`wt` is installed. An error-severity finding makes it `UNHEALTHY` with
+the report in `details`; JSON carries the report either way. An `--idempotency-key` is bound to the exact
 request: an identical replay returns the committed result (even with a
 stale `--expect-rev`), a different request under the same key is
 `IDEMPOTENCY_CONFLICT`, and a new request with a stale `--expect-rev` is
@@ -167,7 +184,10 @@ open tasks (not yours), the workspace, branch and lease, files the branch
 already changed, uncommitted changes left by an earlier attempt, and the
 handoff, and the commit and rebase steps to use: `wt step commit` and
 `wt step rebase` when Worktrunk's `wt` is on PATH (`worktrunk: true` in
-JSON), plain git otherwise. Without a reference it describes the current session's task
+JSON), plain git otherwise. With no task in hand at all (no reference, no
+token anywhere) it describes the plan instead: counts, what is claimable,
+and whether to claim or to plan (`summary` and `claimable` in JSON, no
+`task`). Without a reference it describes the current session's task
 (worktree token, `AT_SESSION`, or a token argument); with one it
 describes that task for anyone, read-only. `--with-rules` appends the
 rules of the road for an agent that does not read AGENTS.md.

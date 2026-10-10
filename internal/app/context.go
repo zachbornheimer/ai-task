@@ -23,7 +23,7 @@ import (
 type Context struct {
 	Prompt       string                   `json:"prompt"`
 	Project      project.ID               `json:"project"`
-	Task         TaskView                 `json:"task"`
+	Task         *TaskView                `json:"task,omitempty"`
 	Workspace    string                   `json:"workspace,omitempty"`
 	Branch       string                   `json:"branch,omitempty"`
 	LeaseUntil   *time.Time               `json:"lease_until,omitempty"`
@@ -39,6 +39,9 @@ type Context struct {
 	// Worktrunk reports that `wt` is on PATH, so the prompt names its
 	// commit and rebase steps instead of raw git.
 	Worktrunk bool `json:"worktrunk"`
+	// Summary and Claimable describe the plan when no task is in hand.
+	Summary   *Summary `json:"summary,omitempty"`
+	Claimable []Rel    `json:"claimable,omitempty"`
 }
 
 // SiblingLimit bounds the open tasks listed in a context.
@@ -50,7 +53,7 @@ const SiblingLimit = 15
 // a headless agent that never reads that file.
 func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token execution.Token, withRules bool) (Context, error) {
 	if ref == "" && token == "" {
-		return Context{}, fault.New(fault.CodeInvalidInput, "no task here: run `at claim` and `cd` into its workspace, or give a task id")
+		return e.projectContext(ctx, pid, withRules)
 	}
 	if err := e.reconcile(ctx); err != nil {
 		return Context{}, err
@@ -112,7 +115,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 	if len(sibs) > SiblingLimit {
 		sibs = sibs[:SiblingLimit]
 	}
-	c := Context{Project: proj.ID, Task: v, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Siblings: sibs}
+	c := Context{Project: proj.ID, Task: &v, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Siblings: sibs}
 	if a := v.Attempt; a != nil && a.EndedAt == nil {
 		c.Workspace, c.Branch = a.Workspace, a.Branch
 		lease := a.LeaseExpiresAt
@@ -138,9 +141,66 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 	return c, nil
 }
 
+// projectContext is what a session with no task in hand gets: the state
+// of the plan and what to do next (claim, or plan).
+func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules bool) (Context, error) {
+	if pid == "" {
+		return Context{}, fault.New(fault.CodeNoProject, "no project here: run `at init` in the repository, or pass --project")
+	}
+	proj, err := e.Project(ctx, pid)
+	if err != nil {
+		return Context{}, err
+	}
+	sum, err := e.Summary(ctx, pid)
+	if err != nil {
+		return Context{}, err
+	}
+	snap, err := e.List(ctx, ListQuery{ProjectID: pid, Filter: FilterReady})
+	if err != nil {
+		return Context{}, err
+	}
+	c := Context{Project: proj.ID, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Summary: &sum}
+	for _, t := range snap.Tasks {
+		c.Claimable = append(c.Claimable, Rel{ID: t.ID, Key: t.Key, Title: t.Title, Status: t.Status})
+	}
+	_, wtErr := exec.LookPath("wt")
+	c.Worktrunk = wtErr == nil
+	var w strings.Builder
+	fmt.Fprintf(&w, "# Project %s: no task in hand\n\n", proj.Name)
+	fmt.Fprintf(&w, "Plan: %d task(s), %d open, %d claimable, %d active", sum.Total, sum.Open, sum.Claimable, sum.Active)
+	if sum.Cooling > 0 {
+		fmt.Fprintf(&w, ", %d cooling down", sum.Cooling)
+	}
+	w.WriteString(".\n")
+	switch {
+	case sum.Total == 0:
+		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`at add \"title\" --check \"id: cmd\"`, several at once with `at add -f plan.yaml` or `--plan`), then claim one. `at add ... --claim` adds and claims a single task in one step. Run `at doctor` first in a repository you have not worked in.\n")
+	case sum.Done:
+		w.WriteString("Every task is complete. New work needs new tasks (`at add`).\n")
+	case len(c.Claimable) > 0:
+		w.WriteString("Claimable now (`at claim <id>`, or `at claim --wait` for the oldest):\n")
+		for _, r := range c.Claimable {
+			fmt.Fprintf(&w, "- %s %s\n", r.ID, r.Title)
+		}
+	case sum.Stalled:
+		w.WriteString("The plan is stalled; a planner must act:\n")
+		for _, r := range sum.Reasons {
+			fmt.Fprintf(&w, "- %s\n", r)
+		}
+	default:
+		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `at claim --wait` blocks until something is.\n")
+	}
+	fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `at context` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+	c.Prompt = w.String()
+	if withRules {
+		c.Prompt += "\n" + Rules
+	}
+	return c, nil
+}
+
 func renderContext(c Context) string {
 	var w strings.Builder
-	v := c.Task
+	v := *c.Task
 	fmt.Fprintf(&w, "# Task %s: %s\n\n", v.ID, v.Title)
 	if v.Outcome != "" && v.Outcome != v.Title {
 		fmt.Fprintf(&w, "Outcome: %s\n\n", v.Outcome)

@@ -59,8 +59,12 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 			return err
 		}
 		a := &applier{e: e, tx: tx, cs: cs, proj: proj, now: now, refs: map[string]task.ID{}, result: plan.Result{PlanRev: current, Created: map[string]task.ID{}}}
-		for i, op := range cs.Operations {
-			if err := a.apply(ctx, i, op); err != nil {
+		order, err := referenceOrder(cs.Operations)
+		if err != nil {
+			return err
+		}
+		for _, i := range order {
+			if err := a.apply(ctx, i, cs.Operations[i]); err != nil {
 				return err
 			}
 		}
@@ -714,4 +718,86 @@ func (a *applier) checkArchives() error {
 		}
 	}
 	return nil
+}
+
+// referenceOrder returns the indices of ops in an order where every add
+// that refers to a key created in the same set (parent, requires,
+// blocks) comes after that key's add, so a plan file can list tasks in
+// any order. Operations that refer to nothing in the set keep their
+// relative order; a cycle among the set's own keys is DEPENDENCY_CYCLE.
+func referenceOrder(ops []plan.Change) ([]int, error) {
+	byKey := map[string]int{}
+	for i, op := range ops {
+		switch c := op.(type) {
+		case plan.AddGroup:
+			if c.Key != "" {
+				byKey[c.Key] = i
+			}
+		case plan.AddTask:
+			if c.Key != "" {
+				byKey[c.Key] = i
+			}
+		}
+	}
+	deps := make([][]int, len(ops)) // deps[i]: indices that must be applied before i
+	for i, op := range ops {
+		var refs []plan.Ref
+		switch c := op.(type) {
+		case plan.AddGroup:
+			refs = append(refs, c.Parent)
+		case plan.AddTask:
+			refs = append(append(append(refs, c.Parent), c.Requires...), c.Blocks...)
+		}
+		for _, r := range refs {
+			if r == "" || r.IsID() {
+				continue
+			}
+			if j, ok := byKey[string(r)]; ok && j != i {
+				deps[i] = append(deps[i], j)
+			}
+		}
+	}
+	// Kahn's algorithm, always taking the lowest ready index: stable for
+	// sets without in-batch references.
+	indeg := make([]int, len(ops))
+	for i := range ops {
+		indeg[i] = len(deps[i])
+	}
+	dependents := make([][]int, len(ops))
+	for i, ds := range deps {
+		for _, j := range ds {
+			dependents[j] = append(dependents[j], i)
+		}
+	}
+	order := make([]int, 0, len(ops))
+	done := make([]bool, len(ops))
+	for len(order) < len(ops) {
+		next := -1
+		for i := range ops {
+			if !done[i] && indeg[i] == 0 {
+				next = i
+				break
+			}
+		}
+		if next < 0 {
+			var names []string
+			for i := range ops {
+				if !done[i] {
+					switch c := ops[i].(type) {
+					case plan.AddGroup:
+						names = append(names, c.Key)
+					case plan.AddTask:
+						names = append(names, c.Key)
+					}
+				}
+			}
+			return nil, fault.New(fault.CodeDependencyCycle, "the change set's own tasks depend on each other in a cycle: %s", strings.Join(names, ", "))
+		}
+		done[next] = true
+		order = append(order, next)
+		for _, i := range dependents[next] {
+			indeg[i]--
+		}
+	}
+	return order, nil
 }

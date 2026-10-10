@@ -22,6 +22,9 @@ go install github.com/zachbornheimer/ai-task/cmd/at@latest
 export AT_OUTPUT=json
 cd my-repo && at init                                  # Git project (git init if needed): target branch, promote policy; writes nothing into the repo
 at project --regression-check "test: go test ./..."    # trusted project gate (required before any claim)
+at doctor                                              # repository, target, identity, regression suite green on the target, worktrees
+at add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
+at add "Fix the typo" --check "unit: go test ./..." --claim   # one small change: add and claim in one step
 at add "Identity Core" --group --key identity
 at add "Confirm OAuth API compatibility" --key compat --parent identity --check "unit: go test ./auth/..."
 at add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."

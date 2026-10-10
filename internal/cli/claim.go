@@ -161,44 +161,47 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.emit(s, func(w io.Writer) {
-		verb := "Claimed"
-		if s.Resumed {
-			verb = "Resumed"
+	return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+}
+
+// renderSession is the human acknowledgement of a claim.
+func renderSession(w io.Writer, s app.Session) {
+	verb := "Claimed"
+	if s.Resumed {
+		verb = "Resumed"
+	}
+	fmt.Fprintf(w, "✓ %s %s · %s (attempt %d)\n", verb, s.Task.ID, s.Task.Title, s.AttemptSeq)
+	fmt.Fprintf(w, "Lease:     until %s (renew with `at claim renew`)\n", s.LeaseUntil.Format(time.RFC3339))
+	if s.Workspace != "" {
+		fmt.Fprintf(w, "Workspace: %s", s.Workspace)
+		if s.Branch != "" {
+			fmt.Fprintf(w, " (branch %s)", s.Branch)
 		}
-		fmt.Fprintf(w, "✓ %s %s · %s (attempt %d)\n", verb, s.Task.ID, s.Task.Title, s.AttemptSeq)
-		fmt.Fprintf(w, "Lease:     until %s (renew with `at claim renew`)\n", s.LeaseUntil.Format(time.RFC3339))
-		if s.Workspace != "" {
-			fmt.Fprintf(w, "Workspace: %s", s.Workspace)
-			if s.Branch != "" {
-				fmt.Fprintf(w, " (branch %s)", s.Branch)
-			}
-			fmt.Fprintln(w)
-		}
-		if s.TargetBranch != "" {
-			fmt.Fprintf(w, "Target:    %s", s.TargetBranch)
-			if s.TargetRevision != "" {
-				fmt.Fprintf(w, " at %s", s.TargetRevision[:min(12, len(s.TargetRevision))])
-			}
-			fmt.Fprintln(w, " (verified work is promoted there; on INTEGRATION_FAILED merge it into your branch)")
-		}
-		if len(s.Regression) > 0 {
-			fmt.Fprintf(w, "Regression: %d check(s) run by `verify complete` after the task checks:\n", len(s.Regression))
-			for _, ch := range s.Regression {
-				fmt.Fprintf(w, "  - %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
-			}
-		}
-		if s.WorkspaceDirty {
-			fmt.Fprintln(w, "Warning:   workspace has uncommitted changes from a previous attempt; review `git status` before editing")
-		}
-		if s.QuarantinedWorkspace != "" {
-			fmt.Fprintf(w, "Previous:  attempt did not end cleanly; its worktree was quarantined at %s\n", s.QuarantinedWorkspace)
-		}
-		fmt.Fprintf(w, "Token:     %s (also stored in the worktree; `at` commands run there need no token)\n", s.Token)
 		fmt.Fprintln(w)
-		renderShow(w, s.Task, false)
-		renderHandoff(w, s.Handoff)
-	})
+	}
+	if s.TargetBranch != "" {
+		fmt.Fprintf(w, "Target:    %s", s.TargetBranch)
+		if s.TargetRevision != "" {
+			fmt.Fprintf(w, " at %s", s.TargetRevision[:min(12, len(s.TargetRevision))])
+		}
+		fmt.Fprintln(w, " (verified work is promoted there; on INTEGRATION_FAILED merge it into your branch)")
+	}
+	if len(s.Regression) > 0 {
+		fmt.Fprintf(w, "Regression: %d check(s) run by `verify complete` after the task checks:\n", len(s.Regression))
+		for _, ch := range s.Regression {
+			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
+		}
+	}
+	if s.WorkspaceDirty {
+		fmt.Fprintln(w, "Warning:   workspace has uncommitted changes from a previous attempt; review `git status` before editing")
+	}
+	if s.QuarantinedWorkspace != "" {
+		fmt.Fprintf(w, "Previous:  attempt did not end cleanly; its worktree was quarantined at %s\n", s.QuarantinedWorkspace)
+	}
+	fmt.Fprintf(w, "Token:     %s (also stored in the worktree; `at` commands run there need no token)\n", s.Token)
+	fmt.Fprintln(w)
+	renderShow(w, s.Task, false)
+	renderHandoff(w, s.Handoff)
 }
 
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
@@ -308,18 +311,17 @@ func runContext(ctx context.Context, c *ctxt, args []string) error {
 		return usage("context takes at most one task reference")
 	case len(c.args) == 1 && c.args[0] != "-" && !strings.HasPrefix(c.args[0], "sess-"):
 		ref = c.args[0]
+	case len(c.args) == 0 && *session == "" && c.env.Getenv("AT_SESSION") == "" && workspace.LoadToken(ctx, c.env.Cwd) == "":
+		// No task in hand anywhere: the project's context.
 	default:
 		// The session's own task: the worktree's stored token, AT_SESSION,
 		// a positional token, '-' for stdin, or --session.
 		if tok, err = c.token(ctx, c.args, *session); err != nil {
-			if *session == "" && len(c.args) == 0 && c.env.Getenv("AT_SESSION") == "" {
-				return usage("no task here: run `at claim` and `cd` into its workspace, or give a task id")
-			}
 			return err
 		}
 	}
 	pid := project.ID("")
-	if ref != "" && !task.IsID(ref) {
+	if (ref != "" && !task.IsID(ref)) || (ref == "" && tok == "") {
 		if pid, err = c.resolveProject(ctx); err != nil {
 			return err
 		}
@@ -354,5 +356,5 @@ func runWhoami(ctx context.Context, c *ctxt, args []string) error {
 var _ = project.ID("")
 
 func init() {
-	register("context", "the working context of a task for a coding agent: at context [REF] [--with-rules] (no REF: the current session's task)", runContext)
+	register("context", "working context for a coding agent: at context [REF] [--with-rules] (no REF: this session's task, or the plan when none is in hand)", runContext)
 }

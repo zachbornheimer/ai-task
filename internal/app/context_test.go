@@ -91,7 +91,23 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	if cb.Workspace != "" || !strings.Contains(cb.Prompt, "at claim "+string(b)) || !strings.HasSuffix(strings.TrimSpace(cb.Prompt), "final verification.") || !strings.Contains(cb.Prompt, "## Agent execution contract") {
 		t.Fatalf("%s", cb.Prompt)
 	}
-	if _, err := f.e.Context(f.ctx, f.proj.ID, "", "", false); fault.CodeOf(err) != fault.CodeInvalidInput {
-		t.Fatalf("no ref, no token: %v", err)
+	if pc, err := f.e.Context(f.ctx, f.proj.ID, "", "", false); err != nil || pc.Task != nil || pc.Summary == nil {
+		t.Fatalf("no ref, no token must describe the plan: %v %+v", err, pc)
+	}
+}
+
+func TestProjectContextSaysWhatToDoNext(t *testing.T) {
+	f := newGitFixture(t)
+	empty, err := f.e.Context(f.ctx, f.proj.ID, "", "", false)
+	if err != nil || empty.Task != nil || !strings.Contains(empty.Prompt, "Nothing is planned yet") || !strings.Contains(empty.Prompt, "at doctor") {
+		t.Fatalf("%v %s", err, empty.Prompt)
+	}
+	a := f.add("a")
+	ready, err := f.e.Context(f.ctx, f.proj.ID, "", "", true)
+	if err != nil || len(ready.Claimable) != 1 || ready.Claimable[0].ID != a || !strings.Contains(ready.Prompt, "Claimable now") || !strings.Contains(ready.Prompt, "## Agent execution contract") {
+		t.Fatalf("%v %s", err, ready.Prompt)
+	}
+	if _, err := f.e.Context(f.ctx, "", "", "", false); fault.CodeOf(err) != fault.CodeNoProject {
+		t.Fatalf("no project: %v", err)
 	}
 }

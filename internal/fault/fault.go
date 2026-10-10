@@ -129,3 +129,7 @@ func MessageOf(err error) string {
 	}
 	return err.Error()
 }
+
+// CodeUnhealthy: `at doctor` found a problem that stops the project from
+// being worked safely; the report is in the error details.
+const CodeUnhealthy Code = "UNHEALTHY"

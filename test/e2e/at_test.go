@@ -196,7 +196,9 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if cx := e.ok("context", b, "--with-rules"); !strings.Contains(cx["prompt"].(string), "Agent execution contract") || cx["workspace"] != nil {
 		t.Fatalf("context by id: %v", cx)
 	}
-	e.fails("INVALID_INPUT", "context")
+	if cx := e.ok("context"); cx["task"] != nil || cx["summary"] == nil || !strings.Contains(cx["prompt"].(string), "no task in hand") {
+		t.Fatalf("project context: %v", cx)
+	}
 	if r := e.runIn(ws, "", []string{"AT_OUTPUT="}, "context"); r.code != 0 || !strings.HasPrefix(r.stdout, "# Task "+a) {
 		t.Fatalf("human context: %s %s", r.stdout, r.stderr)
 	}
@@ -463,5 +465,91 @@ func TestCLICorners(t *testing.T) {
 	pr := e.ok("prune")
 	if removed := pr["removed"].([]any); len(removed) != 1 || removed[0].(string) != s["workspace"].(string) {
 		t.Fatalf("prune: %v", pr)
+	}
+}
+
+// TestPlanFilesClaimAndDoctor covers the planner's batch input (`add -f`
+// with YAML and JSON, `--json`), the `add --claim` fast path, and
+// `doctor` on a healthy and on an unhealthy project.
+func TestPlanFilesClaimAndDoctor(t *testing.T) {
+	e := gitEnv(t)
+	e.git(e.cwd, "config", "user.name", "t")
+	e.git(e.cwd, "config", "user.email", "t@t")
+	// Healthy: regression passes on main.
+	rep := e.ok("doctor")
+	if rep["healthy"] != true {
+		t.Fatalf("doctor: %v", rep)
+	}
+	yamlPlan := filepath.Join(t.TempDir(), "plan.yaml")
+	os.WriteFile(yamlPlan, []byte(`tasks:
+  - kind: group
+    key: core
+    title: Core
+  - key: parse
+    title: Parse tokens
+    parent: core
+    outcome: tokens are parsed
+    constraints: [no cgo]
+    acceptance: ["bad input is rejected"]
+    checks:
+      - "unit: test -f parse.txt"
+      - id: shape
+        command: [sh, -c, "test -f parse.txt"]
+        required: false
+  - key: reject
+    title: Reject expired tokens
+    requires: [parse]
+    checks: ["unit: test -f reject.txt"]
+`), 0o644)
+	res := e.ok("add", "-f", yamlPlan)
+	if res["changed"].(float64) != 3 || len(res["created"].(map[string]any)) != 3 {
+		t.Fatalf("yaml plan: %v", res)
+	}
+	parse := e.ok("show", "parse")
+	if len(parse["task_checks"].([]any)) != 2 || parse["group"].(map[string]any)["title"] != "Core" || len(parse["constraints"].([]any)) != 1 {
+		t.Fatalf("parse: %v", parse)
+	}
+	// Atomic: a bad item means nothing is added.
+	e.fails("DEPENDENCY_CYCLE", "add", "--plan", `[{"key":"a","title":"A","requires":["b"],"checks":["u: true"]},{"key":"b","title":"B","requires":["a"],"checks":["u: true"]}]`)
+	e.fails("NOT_FOUND", "show", "a")
+	// JSON on stdin, one object, and --claim hands back the session.
+	r := e.runIn(e.cwd, `{"key":"docs","title":"Document tokens","checks":["readme: test -f README.md"]}`, nil, "add", "-f", "-", "--claim")
+	if r.code != 0 || r.env["ok"] != true {
+		t.Fatalf("add -f - --claim: %s %s", r.stdout, r.stderr)
+	}
+	out := r.env["result"].(map[string]any)
+	sess, _ := out["session"].(map[string]any)
+	if sess == nil || sess["workspace"] == "" || taskID(sess) != taskID(out) {
+		t.Fatalf("claim in add: %v", out)
+	}
+	if e.ok("show", "docs")["status"] != "claimed" {
+		t.Fatal("not claimed")
+	}
+	// Flags with --claim too.
+	fast := e.ok("add", "Fast path", "--check", "u: true", "--claim")
+	if fast["session"] == nil {
+		t.Fatalf("flags --claim: %v", fast)
+	}
+	e.fails("INVALID_INPUT", "add", "-f", yamlPlan, "--check", "u: true")
+	// Unhealthy: the regression suite fails on main; doctor says so and
+	// names the check, before any task is charged for it.
+	e.ok("project", "--regression-check", "regress: false")
+	rr := e.fails("UNHEALTHY", "doctor")
+	det := rr.env["error"].(map[string]any)["details"].(map[string]any)
+	if det["healthy"] != false {
+		t.Fatalf("doctor details: %v", det)
+	}
+	found := false
+	for _, ch := range det["checks"].([]any) {
+		m := ch.(map[string]any)
+		if m["id"] == "baseline" && m["ok"] == false && strings.Contains(m["message"].(string), "regress") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("baseline not reported: %v", det["checks"])
+	}
+	if e.ok("doctor", "--skip-baseline")["healthy"] != true {
+		t.Fatal("--skip-baseline should not run the suite")
 	}
 }
