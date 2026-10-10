@@ -154,7 +154,7 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 // ChangedFiles lists the paths that dir's HEAD has changed relative to the
 // merge base with ref (the task branch's own work so far).
 func ChangedFiles(ctx context.Context, dir, ref string) ([]string, error) {
-	out, err := git(ctx, dir, "diff", "--name-only", ref+"...HEAD")
+	out, err := git(ctx, dir, "diff", "--name-only", "--no-renames", ref+"...HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +170,7 @@ func ChangedFiles(ctx context.Context, dir, ref string) ([]string, error) {
 // ChangedBetween lists the paths rev changed relative to its merge base
 // with base, as seen from the repository at repo.
 func ChangedBetween(ctx context.Context, repo, base, rev string) ([]string, error) {
-	out, err := git(ctx, repo, "diff", "--name-only", base+"..."+rev)
+	out, err := git(ctx, repo, "diff", "--name-only", "--no-renames", base+"..."+rev)
 	if err != nil {
 		return nil, err
 	}
