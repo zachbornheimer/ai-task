@@ -188,6 +188,18 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(ws, "", nil, "whoami"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
 		t.Fatalf("whoami in worktree: %s %s", r.stdout, r.stderr)
 	}
+	// The working context: resolved from the worktree, or by reference
+	// from anywhere; the human form is the prompt itself.
+	if r := e.runIn(ws, "", nil, "context"); r.code != 0 || !strings.Contains(r.env["result"].(map[string]any)["prompt"].(string), "# Task "+a) {
+		t.Fatalf("context in worktree: %s %s", r.stdout, r.stderr)
+	}
+	if cx := e.ok("context", b, "--with-rules"); !strings.Contains(cx["prompt"].(string), "Rules of the road") || cx["workspace"] != nil {
+		t.Fatalf("context by id: %v", cx)
+	}
+	e.fails("INVALID_INPUT", "context")
+	if r := e.runIn(ws, "", []string{"AT_OUTPUT="}, "context"); r.code != 0 || !strings.HasPrefix(r.stdout, "# Task "+a) {
+		t.Fatalf("human context: %s %s", r.stdout, r.stderr)
+	}
 	if !strings.HasSuffix(sess["branch"].(string), "/"+a) || !strings.HasPrefix(sess["branch"].(string), "at/") {
 		t.Fatalf("branch %v", sess["branch"])
 	}

@@ -11,6 +11,7 @@ worktree (branch `at/<id>`). The session token lives in that worktree, so
 elsewhere.
 
 ```
+at context                                           your task's working context: contract, checks, workspace, handoff, sibling tasks
 at log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first
 at verify task                                       run this task's checks (diagnostic, repeatable)
 at verify regression                                 run the project's regression checks (diagnostic)
@@ -39,9 +40,10 @@ Rules of the road:
   a worker loop, not failures.
 - Your lease is 30 minutes and every `at` command renews it; `at log`
   progress at least that often.
-- Read the handoff the claim printed: previous attempts' next step and
-  learnings, learnings inherited from prerequisites, and the last failed
-  checks with their output.
+- Start with `at context`: it prints everything the task needs you to
+  know, including the handoff from previous attempts (their next step
+  and learnings, learnings inherited from prerequisites, and the last
+  failed checks with their output).
 - `LEASE_EXPIRED` or `SESSION_SUPERSEDED`: stop editing immediately. The
   next `at claim <task>` returns your handoff.
 - One task = one independently verifiable outcome.

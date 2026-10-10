@@ -27,6 +27,7 @@ at add "Confirm OAuth API compatibility" --key compat --parent identity --check 
 at add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
 at list                                                # ○ ◐ ● hierarchy
 cd "$(at claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on at/<id>, token stored inside
+at context                                             # the task as one prompt: contract, checks, workspace, handoff, sibling tasks
 at log --done "..." --next "..."                       # inside the worktree no token is needed; every command renews the lease
 at verify task                                         # diagnostic
 # commit in the worktree, then:

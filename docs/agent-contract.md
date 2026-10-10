@@ -96,6 +96,7 @@ stale `--expect-rev`), a different request under the same key is
 ## Execution (session authority)
 
 ```
+at context [REF] [--with-rules]          a task's working context as one prompt (no REF: this session's task)
 at claim [REF] [--wait] [--lease 30m]    one atomic leased attempt; prints the token once
 at claim renew [token|-]                 extend the lease (inside the worktree no token is needed)
 at claim release [token|-] [--note ..] [--failed]
@@ -156,6 +157,18 @@ stop the run, are reported as `last_error`, and are never a strike. A
 `verify complete` fired while the attempt's previous one is still running
 is refused with `VERIFICATION_RUNNING`; after completion it returns the
 stored acknowledgement.
+
+**Context.** `at context` prints the working context of a task as one
+block of text an agent can take as its prompt, and in JSON mode the same
+text as `prompt` beside the task view: title, outcome, constraints,
+acceptance criteria, what "done" means, the task checks and regression
+checks verbatim, the target branch, prerequisites, the project's other
+open tasks (not yours), the workspace, branch and lease, files the branch
+already changed, uncommitted changes left by an earlier attempt, and the
+handoff. Without a reference it describes the current session's task
+(worktree token, `AT_SESSION`, or a token argument); with one it
+describes that task for anyone, read-only. `--with-rules` appends the
+rules of the road for an agent that does not read AGENTS.md.
 
 **Handoff.** The claim result carries the previous attempts' `latest_next`,
 learnings and recent log, plus `inherited` learnings recorded on the

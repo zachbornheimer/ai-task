@@ -289,6 +289,48 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(res, func(w io.Writer) { renderVerify(w, res) })
 }
 
+func runContext(ctx context.Context, c *ctxt, args []string) error {
+	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
+	withRules := c.fs.Bool("with-rules", false, "append the standing rules (AGENTS.md) for an agent that does not read that file")
+	if err := c.parse(args); err != nil {
+		return err
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	var (
+		ref string
+		tok execution.Token
+	)
+	switch {
+	case len(c.args) > 1:
+		return usage("context takes at most one task reference")
+	case len(c.args) == 1 && c.args[0] != "-" && !strings.HasPrefix(c.args[0], "sess-"):
+		ref = c.args[0]
+	default:
+		// The session's own task: the worktree's stored token, AT_SESSION,
+		// a positional token, '-' for stdin, or --session.
+		if tok, err = c.token(ctx, c.args, *session); err != nil {
+			if *session == "" && len(c.args) == 0 && c.env.Getenv("AT_SESSION") == "" {
+				return usage("no task here: run `at claim` and `cd` into its workspace, or give a task id")
+			}
+			return err
+		}
+	}
+	pid := project.ID("")
+	if ref != "" && !task.IsID(ref) {
+		if pid, err = c.resolveProject(ctx); err != nil {
+			return err
+		}
+	}
+	cx, err := e.Context(ctx, pid, ref, tok, *withRules)
+	if err != nil {
+		return err
+	}
+	return c.emit(cx, func(w io.Writer) { io.WriteString(w, cx.Prompt) })
+}
+
 func runWhoami(ctx context.Context, c *ctxt, args []string) error {
 	session := c.fs.String("session", "", "session token (default: AT_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
@@ -310,3 +352,7 @@ func runWhoami(ctx context.Context, c *ctxt, args []string) error {
 }
 
 var _ = project.ID("")
+
+func init() {
+	register("context", "the working context of a task for a coding agent: at context [REF] [--with-rules] (no REF: the current session's task)", runContext)
+}

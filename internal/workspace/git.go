@@ -150,3 +150,19 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	}
 	return out.String(), nil
 }
+
+// ChangedFiles lists the paths that dir's HEAD has changed relative to the
+// merge base with ref (the task branch's own work so far).
+func ChangedFiles(ctx context.Context, dir, ref string) ([]string, error) {
+	out, err := git(ctx, dir, "diff", "--name-only", ref+"...HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, f := range strings.Split(strings.TrimSpace(out), "\n") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
