@@ -19,6 +19,8 @@ indents it):
 Human mode prints an acknowledgement on stdout after commit and
 `error [CODE]: message` on stderr. Exit status: `0` success, `1` coded
 domain failure, `2` usage error. Progress never goes to JSON stdout.
+`at <command> --help` (or `-h`) prints the command's usage and flags on
+stdout (an envelope in JSON mode) and exits `0`.
 
 ## Error codes
 

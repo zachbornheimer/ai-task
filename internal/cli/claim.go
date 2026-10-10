@@ -20,7 +20,7 @@ import (
 func init() {
 	register("claim", "claim work: at claim [REF] [--wait] | at claim renew [token|-] | at claim release [token|-] [--note ..] [--failed]", runClaim)
 	register("log", "record progress under the current session: at log --done .. --next .. --learned .. --note ..", runLog)
-	register("verify", "run checks under the current session: at verify task|regression|complete", runVerify)
+	register("verify", "run checks under the current session: at verify task|regression|complete | at verify groups [REF]", runVerify)
 	register("whoami", "show the task of the current session token", runWhoami)
 }
 
