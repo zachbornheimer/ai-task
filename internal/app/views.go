@@ -287,12 +287,12 @@ const (
 )
 
 // buildView assembles a TaskView inside a transaction.
-func (e *Engine) buildView(tx *sqlite.Tx, r sqlite.Record, p project.Project, now time.Time, full bool) (TaskView, error) {
+func (e *Engine) buildView(tx *sqlite.Tx, r sqlite.Record, p project.Project, now time.Time, full bool, head targetHead) (TaskView, error) {
 	depth := viewShow
 	if full {
 		depth = viewFull
 	}
-	return e.buildViewDepth(tx, r, p, now, depth)
+	return e.buildViewDepth(tx, r, p, now, depth, head)
 }
 
 // relFor loads the light relation row for a neighbour.
@@ -307,7 +307,7 @@ func relFor(tx *sqlite.Tx, id task.ID, p project.Project, now time.Time) (Rel, b
 	return rel(n, n.Status(now, p.MaxAttempts)), true, nil
 }
 
-func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Project, now time.Time, depth viewDepth) (TaskView, error) {
+func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Project, now time.Time, depth viewDepth, head targetHead) (TaskView, error) {
 	st := r.Status(now, p.MaxAttempts)
 	t := r.Task
 	v := TaskView{
@@ -390,7 +390,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		}
 		v.Progress = prog
 		if verification.HasRequired(t.Verification.TaskChecks) {
-			gv, err := e.groupVerification(tx, r, p, now)
+			gv, err := e.groupVerification(tx, r, p, now, head)
 			if err != nil {
 				return v, err
 			}

@@ -87,7 +87,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 		if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
 			return err
 		}
-		if v, err = e.buildView(tx, r, proj, now, true); err != nil {
+		if v, err = e.buildView(tx, r, proj, now, true, targetHead{}); err != nil {
 			return err
 		}
 		// The same enrichment the claim prints: prerequisite learnings

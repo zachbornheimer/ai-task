@@ -45,6 +45,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		return PlanSnapshot{}, err
 	}
 	now := e.now()
+	head := e.resolveTargetHead(ctx, q.ProjectID)
 	var snap PlanSnapshot
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		proj, err := tx.GetProject(q.ProjectID)
@@ -73,7 +74,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				}
 				g := GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt, LastError: r.LastError}
 				if verification.HasRequired(r.Task.Verification.TaskChecks) {
-					gv, err := e.groupVerification(tx, r, proj, now)
+					gv, err := e.groupVerification(tx, r, proj, now, head)
 					if err != nil {
 						return err
 					}
@@ -104,13 +105,13 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					continue
 				}
 			}
-			v, err := e.buildViewDepth(tx, r, proj, now, viewList)
+			v, err := e.buildViewDepth(tx, r, proj, now, viewList, head)
 			if err != nil {
 				return err
 			}
 			snap.Tasks = append(snap.Tasks, v)
 		}
-		snap.Summary, err = e.summaryIn(tx, proj, now)
+		snap.Summary, err = e.summaryIn(tx, proj, now, head)
 		return err
 	})
 	return snap, err
@@ -122,6 +123,15 @@ func (e *Engine) Show(ctx context.Context, pid project.ID, ref string, full bool
 		return TaskView{}, err
 	}
 	now := e.now()
+	// Groups with checks compare against the target head, which is
+	// resolved before the read opens; a task view never consults it.
+	var head targetHead
+	_ = e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		if r, err := e.lookup(tx, pid, ref); err == nil && r.Task.Kind == task.KindGroup {
+			head = e.resolveTargetHead(ctx, r.Task.ProjectID)
+		}
+		return nil
+	})
 	var v TaskView
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		r, err := e.lookup(tx, pid, ref)
@@ -132,7 +142,7 @@ func (e *Engine) Show(ctx context.Context, pid project.ID, ref string, full bool
 		if err != nil {
 			return err
 		}
-		v, err = e.buildView(tx, r, proj, now, full)
+		v, err = e.buildView(tx, r, proj, now, full, head)
 		return err
 	})
 	return v, err
@@ -162,19 +172,20 @@ func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 		return Summary{}, err
 	}
 	now := e.now()
+	head := e.resolveTargetHead(ctx, pid)
 	var s Summary
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		proj, err := tx.GetProject(pid)
 		if err != nil {
 			return err
 		}
-		s, err = e.summaryIn(tx, proj, now)
+		s, err = e.summaryIn(tx, proj, now, head)
 		return err
 	})
 	return s, err
 }
 
-func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ IsZero() bool }) (Summary, error) {
+func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ IsZero() bool }, head targetHead) (Summary, error) {
 	n := e.now()
 	s := Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}
 	records, err := tx.ListRecords(proj.ID, sqlite.ScopeLive, n, proj.MaxAttempts)
@@ -215,10 +226,11 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		}
 	}
 	var exhausted, blockedByExhausted, workspaceBlocked, unverifiable int
-	var epicsPending, epicsFailed int
+	var epicsPending, epicsFailed, epicsErrored int
+	var epicErrors []string
 	for _, r := range records {
 		if r.Task.Kind == task.KindGroup && verification.HasRequired(r.Task.Verification.TaskChecks) && r.CompletedAt == nil {
-			gv, err := e.groupVerification(tx, r, proj, n)
+			gv, err := e.groupVerification(tx, r, proj, n, head)
 			if err != nil {
 				return s, err
 			}
@@ -236,6 +248,9 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 				}
 			case "failed":
 				epicsFailed++
+			case "error":
+				epicsErrored++
+				epicErrors = append(epicErrors, fmt.Sprintf("epic %s: %s", r.Task.Description, gv.Summary))
 			}
 			continue
 		}
@@ -293,12 +308,13 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	}
 	sort.Strings(s.PendingCohorts)
 	s.PendingEpics = epicsPending
-	s.Done = s.Open == 0 && epicsPending == 0 && epicsFailed == 0
-	s.Stalled = (s.Open > 0 || epicsFailed > 0) && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
+	s.Done = s.Open == 0 && epicsPending == 0 && epicsFailed == 0 && epicsErrored == 0
+	s.Stalled = (s.Open > 0 || epicsFailed > 0 || epicsErrored > 0) && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
 	if s.Stalled {
 		if epicsFailed > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d epic(s) failed their own checks on the current target; see the group's last_error, then add follow-up member tasks or fix the checks (`at update <group> --check ...`)", epicsFailed))
 		}
+		s.Reasons = append(s.Reasons, epicErrors...)
 		if exhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `at update <task> --reset-attempts`", exhausted))
 		}

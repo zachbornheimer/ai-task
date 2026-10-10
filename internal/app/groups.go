@@ -39,6 +39,32 @@ type GroupVerification struct {
 	NextRetry *time.Time `json:"next_retry,omitempty"`
 }
 
+// targetHead is the target branch's head as resolved before a database
+// transaction opens: Git never runs inside store.Read or store.Write.
+// The zero value means it was not resolved (only task views, which never
+// consult it, are built that way).
+type targetHead struct {
+	rev   string
+	err   error
+	known bool
+}
+
+// resolveTargetHead reads the project and resolves its target branch
+// outside any transaction. A project that cannot be read yields the zero
+// value; the caller's own read reports that error.
+func (e *Engine) resolveTargetHead(ctx context.Context, pid project.ID) targetHead {
+	var proj project.Project
+	if err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) { proj, err = tx.GetProject(pid); return }); err != nil {
+		return targetHead{}
+	}
+	return e.targetHeadOf(ctx, proj)
+}
+
+func (e *Engine) targetHeadOf(ctx context.Context, proj project.Project) targetHead {
+	rev, err := e.manager(proj).Revision(ctx, "refs/heads/"+proj.TargetBranch)
+	return targetHead{rev: rev, err: err, known: true}
+}
+
 // groupReady reports whether a group's checks may run now: not archived,
 // checks defined, at least one executable member, every member complete
 // and every sub-group with checks verified.
@@ -92,7 +118,7 @@ func latestGroupRun(tx *sqlite.Tx, id task.ID) (*sqlite.Run, error) {
 
 // groupVerification derives the verification state of a group with
 // checks for views and the summary.
-func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj project.Project, now time.Time) (GroupVerification, error) {
+func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj project.Project, now time.Time, head targetHead) (GroupVerification, error) {
 	var gv GroupVerification
 	if !verification.HasRequired(rec.Task.Verification.TaskChecks) {
 		return gv, nil
@@ -121,11 +147,20 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 	if err != nil || !ready {
 		return gv, err
 	}
+	if !head.known {
+		return gv, fault.New(fault.CodeInternal, "group %s: the target head was not resolved for this view", rec.Task.ID)
+	}
+	if head.err != nil {
+		// Without the target the epic can neither run nor be judged
+		// current: say so rather than reading as waiting for a verifier.
+		gv.Status = "error"
+		gv.Summary = fmt.Sprintf("cannot resolve target branch %s: %s", proj.TargetBranch, fault.MessageOf(head.err))
+		return gv, nil
+	}
 	gv.Status = "pending"
 	if run != nil && (run.Status == sqlite.RunFailed || run.Status == sqlite.RunError) {
 		// Failed on the current target and contract: a planner must act.
-		head, _ := e.manager(proj).Revision(context.Background(), "refs/heads/"+proj.TargetBranch)
-		if run.Revision == head && run.Status == sqlite.RunFailed {
+		if run.Revision == head.rev && run.Status == sqlite.RunFailed {
 			gv.Status = "failed"
 			return gv, nil
 		}
@@ -177,12 +212,14 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 	owner := execution.NewToken()
 	var job groupJob
 	found := false
+	// Resolve the target before the transaction: Git never runs inside
+	// the database lock. A failure is the caller's error, not "pending".
+	head := e.resolveTargetHead(ctx, pid)
+	if head.known && head.err != nil {
+		return job, false, head.err
+	}
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		proj, err := tx.GetProject(pid)
-		if err != nil {
-			return err
-		}
-		head, err := e.manager(proj).Revision(ctx, "refs/heads/"+proj.TargetBranch)
 		if err != nil {
 			return err
 		}
@@ -213,7 +250,7 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			}
 			// Nothing changed since a failure on this very revision and
 			// contract: the planner has to act, not the verifier.
-			if last != nil && last.Status == sqlite.RunFailed && last.Revision == head && last.PolicyDigest == r.Task.Verification.Digest() && only == "" {
+			if last != nil && last.Status == sqlite.RunFailed && last.Revision == head.rev && last.PolicyDigest == r.Task.Verification.Digest() && only == "" {
 				continue
 			}
 			if next, _, err := cohortBackoff(tx, pid, name); err != nil {
@@ -226,11 +263,11 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 				return err
 			}
 			policy := verification.Policy{TaskChecks: r.Task.Verification.TaskChecks}
-			runID, err := tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, JobID: jobID, Mode: verification.ModeGroup, Status: sqlite.RunRunning, Revision: head, Policy: policy, Environment: environmentFingerprint()}, now)
+			runID, err := tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, JobID: jobID, Mode: verification.ModeGroup, Status: sqlite.RunRunning, Revision: head.rev, Policy: policy, Environment: environmentFingerprint()}, now)
 			if err != nil {
 				return err
 			}
-			job = groupJob{id: jobID, owner: owner, proj: proj, rec: r, runID: runID, head: head}
+			job = groupJob{id: jobID, owner: owner, proj: proj, rec: r, runID: runID, head: head.rev}
 			found = true
 			return nil
 		}
