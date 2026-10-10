@@ -283,10 +283,14 @@ func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.
 			}
 		}
 		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed, limit, extra)
-		if ev.Outcome == verification.OutcomeTimeout && budgetLimited {
-			ev.Message = fmt.Sprintf("exceeded %s (%s for the whole suite); the check is too slow for the task's size, or the code it runs hangs", opts.budgetName, opts.budget)
-		} else if ev.Outcome == verification.OutcomeTimeout {
-			ev.Message = fmt.Sprintf("exceeded the check's own timeout (%s)", limit)
+		// A check recorded without running (limit <= 0; execStep says why)
+		// keeps its own message: these describe a check that started.
+		if limit > 0 && ev.Outcome == verification.OutcomeTimeout {
+			if budgetLimited {
+				ev.Message = fmt.Sprintf("exceeded %s (%s for the whole suite); the check is too slow for the task's size, or the code it runs hangs", opts.budgetName, opts.budget)
+			} else {
+				ev.Message = fmt.Sprintf("exceeded the check's own timeout (%s)", limit)
+			}
 		}
 		if !step.Regression && step.Check.Required && ev.Outcome != verification.OutcomePassed {
 			requiredTaskFailed = true
