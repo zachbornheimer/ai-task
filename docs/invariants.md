@@ -41,7 +41,8 @@ Precedence: archived > complete > awaiting_integration > verifying >
 awaiting_verification > claimed > blocked > needs_attention >
 cooldown > verification_failed > interrupted > ready (a cooling task is
 not claimable however its last proof ended). Claimable: ready,
-interrupted, verification_failed. Active (keeps a waiting worker waiting):
+interrupted, verification_failed (only a run charged against its attempt;
+a timeout or failed integration derives to interrupted or ready). Active (keeps a waiting worker waiting):
 claimed, verifying, and submissions whose cohort can be verified.
 (`task.TestDerivePrecedence`, `TestWaitingClaimDoneAndStalled`)
 

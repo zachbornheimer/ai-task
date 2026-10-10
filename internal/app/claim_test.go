@@ -226,8 +226,9 @@ func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true, TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-x", "true", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
-	// The last judgement stays visible, but the task is claimable again.
-	if st := f.status(string(x)); !st.Claimable() || st != task.StatusVerificationFailed {
+	// The reset clears the strikes, so the old failure is no longer charged
+	// and the task is simply ready; its last judgement stays in the handoff.
+	if st := f.status(string(x)); !st.Claimable() || st != task.StatusReady {
 		t.Fatalf("%s", st)
 	}
 	sx2 := f.claim(string(x))

@@ -260,7 +260,7 @@ func TestCohortRegressionFailureChargesNobody(t *testing.T) {
 	wantCode(t, err, fault.CodeVerificationFailed)
 	for _, id := range []task.ID{api, ui} {
 		v := f.show(string(id))
-		if v.Status != task.StatusVerificationFailed || v.Failures != 0 || !strings.Contains(v.LastError, "no single member") {
+		if v.Status != task.StatusReady || v.Failures != 0 || !strings.Contains(v.LastError, "no single member") {
 			t.Fatalf("%s: %s failures=%d last_error=%q", id, v.Status, v.Failures, v.LastError)
 		}
 	}
