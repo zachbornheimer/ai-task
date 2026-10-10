@@ -42,7 +42,8 @@ type Result struct {
 }
 
 // Run executes the spec. It never uses a shell. The process is killed when
-// the timeout elapses or ctx is cancelled; Go's WaitDelay guarantees Run
+// the timeout elapses or ctx is cancelled (on Unix the whole process group,
+// so background children do not outlive the check); Go's WaitDelay guarantees Run
 // returns even if the process ignores the signal and its children hold the
 // pipes open.
 func Run(ctx context.Context, spec Spec) Result {
@@ -64,6 +65,7 @@ func Run(ctx context.Context, spec Spec) Result {
 	if spec.Env != nil {
 		cmd.Env = spec.Env
 	}
+	isolate(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr boundedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
