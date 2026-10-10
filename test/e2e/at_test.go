@@ -525,6 +525,18 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 	if e.ok("show", "docs")["status"] != "claimed" {
 		t.Fatal("not claimed")
 	}
+	// Pins are part of the contract and reach the agent's context.
+	pinned := e.ok("add", "Pinned", "--key", "pinned", "--check", "u: true", "--pin", "checks/", "--pin", "go.mod")
+	if pins := pinned["task"].(map[string]any)["pins"].([]any); len(pins) != 2 || pins[0] != "checks" {
+		t.Fatalf("pins: %v", pinned)
+	}
+	if !strings.Contains(e.ok("context", "pinned")["prompt"].(string), "Pinned (this task may not change them") {
+		t.Fatal("context lacks pins")
+	}
+	e.ok("update", "pinned", "--pin", "", "--planner")
+	if e.ok("show", "pinned")["pins"] != nil {
+		t.Fatal("pins not cleared")
+	}
 	// Flags with --claim too.
 	fast := e.ok("add", "Fast path", "--check", "u: true", "--claim")
 	if fast["session"] == nil {

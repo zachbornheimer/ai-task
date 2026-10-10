@@ -200,7 +200,7 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 		return "", fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check; task checks cannot shadow regression checks", cid)
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, Pins: spec.Pins, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := 0; attempt < 5; attempt++ {
 		t.ID = a.e.newID()
 		err := a.tx.InsertTask(t)
@@ -228,7 +228,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks}}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins}
 	for _, acc := range c.Acceptance {
 		spec.Acceptance = append(spec.Acceptance, task.AcceptanceCriterion{Description: acc})
 	}
@@ -317,7 +317,7 @@ func (a *applier) sameDefinition(existing sqlite.Record, spec task.Spec, require
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return false, err
 	}
-	if !reflect.DeepEqual(nonEmpty(t.Constraints), nonEmpty(spec.Constraints)) || len(t.Acceptance) != len(spec.Acceptance) {
+	if !reflect.DeepEqual(nonEmpty(t.Constraints), nonEmpty(spec.Constraints)) || !reflect.DeepEqual(nonEmpty(t.Pins), nonEmpty(spec.Pins)) || len(t.Acceptance) != len(spec.Acceptance) {
 		return false, nil
 	}
 	for i := range t.Acceptance {
@@ -462,7 +462,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil
+	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) {
 		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
@@ -537,6 +537,9 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if c.Cohort != nil {
 		t.Cohort, changed = *c.Cohort, true
 	}
+	if c.Pins.Set {
+		t.Pins, changed = c.Pins.Value, true
+	}
 	if c.TaskChecks.Set {
 		if t.Kind == task.KindTask {
 			if err := verification.RequireGate(c.TaskChecks.Value, "task checks"); err != nil {
@@ -563,10 +566,11 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		t.ParentID, changed = parent, true
 	}
 	if contract {
-		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Cohort: t.Cohort}
+		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Cohort: t.Cohort, Pins: t.Pins}
 		if err := spec.Validate(); err != nil {
 			return err
 		}
+		t.Pins = spec.Pins
 		if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 			return fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check", cid)
 		}

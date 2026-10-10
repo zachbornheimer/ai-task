@@ -257,6 +257,12 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 			fmt.Fprintf(w, "%s %s %s\n", r.Status.Glyph(), r.ID, r.Title)
 		}
 	}
+	if len(v.Pins) > 0 {
+		fmt.Fprintln(w, "\nPINNED (must not change)")
+		for _, p := range v.Pins {
+			fmt.Fprintf(w, "• %s\n", p)
+		}
+	}
 	if len(v.Checks) > 0 {
 		fmt.Fprintln(w, "\nTASK CHECKS")
 		for _, ch := range v.Checks {

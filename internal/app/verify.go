@@ -445,6 +445,17 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	if checkCtx == nil {
 		checkCtx = ctx
 	}
+	// Pinned paths are part of the contract: a submission that changed one
+	// fails as the attempt's own failure, before any check runs.
+	if len(fr.rec.Task.Pins) > 0 {
+		changed, err := workspace.ChangedBetween(ctx, fr.proj.RootPath, "refs/heads/"+fr.proj.TargetBranch, fr.revision)
+		if err != nil {
+			return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, "list changed files: "+fault.MessageOf(err), nil)
+		}
+		if hit := pinnedChanges(fr.rec.Task.Pins, changed); len(hit) > 0 {
+			return fail(sqlite.RunFailed, fault.CodeVerificationFailed, "pinned path(s) changed by this task: "+strings.Join(hit, ", ")+"; the task may not modify them (revert the change, or ask the planner to unpin)", nil)
+		}
+	}
 	integrate := fmt.Sprintf("at: integrate %s (%s)", fr.rec.Task.ID, fr.rec.Task.Description)
 	// A submission that cannot merge into the target is refused before any
 	// check runs: the holder has a merge to resolve, and the checks would
@@ -723,4 +734,19 @@ func integrateStep(target string) string {
 		return "`wt step rebase " + target + "`"
 	}
 	return "`git merge " + target + "`"
+}
+
+// pinnedChanges returns the changed paths that fall under a pin (exact
+// path, or inside a pinned directory).
+func pinnedChanges(pins, changed []string) []string {
+	var hit []string
+	for _, f := range changed {
+		for _, p := range pins {
+			if f == p || strings.HasPrefix(f, p+"/") {
+				hit = append(hit, f)
+				break
+			}
+		}
+	}
+	return hit
 }

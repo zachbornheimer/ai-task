@@ -47,6 +47,8 @@ type AddTask struct {
 	Blocks      []Ref // existing tasks that will require the new one
 	Cohort      string
 	TaskChecks  []verification.CheckSpec
+	// Pins are paths the task's branch must leave untouched.
+	Pins []string
 }
 
 // UpdateTask patches a task or group. nil means leave unchanged; a pointer
@@ -61,6 +63,7 @@ type UpdateTask struct {
 	Acceptance     Patch[string]
 	Cohort         *string
 	TaskChecks     Patch[verification.CheckSpec]
+	Pins           Patch[string]
 	Requires       Patch[Ref] // replace the whole prerequisite set
 	AddRequires    []Ref
 	RemoveRequires []Ref

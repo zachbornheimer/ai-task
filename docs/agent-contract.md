@@ -51,10 +51,11 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 ```
 at add "title" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--cohort C]
        [--outcome ..] [--constraint ..]* [--accept ..]* [--check "[id:] cmd"]* [--optional-check ..]*
+       [--pin PATH]* [--claim]
        [--expect-rev N] [--idempotency-key K] [--planner]
 at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
        [--requires REF]* [--remove-requires REF]* [--set-requires REF]*
-       [--accept ..]* [--constraint ..]* [--check ..]*
+       [--accept ..]* [--constraint ..]* [--check ..]* [--pin PATH|""]*
        [--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
 ```
 
@@ -86,6 +87,13 @@ stale `--expect-rev`), a different request under the same key is
 - Every task carries at least one task check (`--check`). `add` without
   one is `MISSING_VERIFICATION`; `update --check` replaces the set but
   cannot empty it. A trivial check (`true`) is the planner's own risk.
+- `--pin PATH` names files, or directories by prefix, the task may not
+  change: test files and check scripts it does not own, generated files,
+  lockfiles. `verify complete` refuses a submission that touched one
+  (`VERIFICATION_FAILED`, counted as the attempt's failure, before any
+  check runs), so an agent cannot pass by weakening the checks. Pins are
+  part of the contract (`pins` in `at show` and in the context); `update
+  --pin ""` clears them. Cohort members are not pinned yet.
 - `B --requires A` means B cannot be claimed until A is complete. Hard
   edges form a DAG; cycles, self-edges, and cross-project edges are
   rejected and nothing is written.

@@ -150,7 +150,7 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
-       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error
+       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.pins_json
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
 LEFT JOIN submissions s ON s.id = t.latest_submission_id
@@ -162,7 +162,7 @@ LEFT JOIN verification_runs vr ON vr.id = (
 func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var r Record
 	var key, parent sql.NullString
-	var constraints, policy string
+	var constraints, policy, pins string
 	var archived, completed sql.NullInt64
 	var created, updated, nextEligible int64
 	var aID, aSeq, aStarted, aExpires, aEnded, aLease sql.NullInt64
@@ -178,7 +178,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch, &aLease,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
-		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError)
+		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &pins)
 	if err != nil {
 		return r, err
 	}
@@ -193,6 +193,9 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	}
 	if err := json.Unmarshal([]byte(constraints), &r.Task.Constraints); err != nil {
 		return r, wrapInternal(err, "decode constraints")
+	}
+	if err := json.Unmarshal([]byte(pins), &r.Task.Pins); err != nil {
+		return r, wrapInternal(err, "decode pins")
 	}
 	if r.Task.Verification, err = verification.Parse([]byte(policy)); err != nil {
 		return r, wrapInternal(err, "decode task policy")
@@ -260,9 +263,13 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if tk.ParentID != "" {
 		parent = tk.ParentID
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt))
+	pins, err := json.Marshal(nonNil(tk.Pins))
+	if err != nil {
+		return wrapInternal(err, "encode pins")
+	}
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at, pins_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins))
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return err // caller distinguishes id vs key collisions
@@ -299,8 +306,12 @@ func (t *Tx) UpdateTaskContract(tk task.Task, now time.Time) error {
 	if tk.ParentID != "" {
 		parent = tk.ParentID
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, cohort = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
-		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(now), tk.ID)
+	pins, err := json.Marshal(nonNil(tk.Pins))
+	if err != nil {
+		return wrapInternal(err, "encode pins")
+	}
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, cohort = ?, pins_json = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
+		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, string(pins), ms(now), tk.ID)
 	if err != nil {
 		return wrapInternal(err, "update task")
 	}

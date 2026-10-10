@@ -236,8 +236,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	parent := c.fs.String("parent", "", "enclosing group (id or key)")
 	outcome := c.fs.String("outcome", "", "the single intended outcome (default: the title)")
 	cohort := c.fs.String("cohort", "", "coupled-verification cohort name")
-	var constraints, accept, checks, optionalChecks, requires, blocks stringList
+	var constraints, accept, checks, optionalChecks, requires, blocks, pins stringList
 	c.fs.Var(&constraints, "constraint", "constraint (repeatable)")
+	c.fs.Var(&pins, "pin", "path (file, or directory prefix) this task may not change; verify complete refuses if it did (repeatable)")
 	c.fs.Var(&accept, "accept", "acceptance criterion (repeatable)")
 	c.fs.Var(&checks, "check", "required task check: \"[id:] command args...\" (repeatable)")
 	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable)")
@@ -265,12 +266,12 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
-		if len(checks)+len(optionalChecks)+len(requires)+len(blocks)+len(accept)+len(constraints) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" {
-			return usage("--group takes only --key and --parent; checks, prerequisites, blockers, cohort, outcome, acceptance and constraints belong to tasks")
+		if len(checks)+len(optionalChecks)+len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" {
+			return usage("--group takes only --key and --parent; checks, prerequisites, blockers, cohort, outcome, acceptance, constraints and pins belong to tasks")
 		}
 		op = plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent)}
 	} else {
-		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort}
+		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort, Pins: pins}
 		if *policyJSON != "" {
 			var pol verification.Policy
 			if err := json.Unmarshal([]byte(*policyJSON), &pol); err != nil {
@@ -435,8 +436,9 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	outcome := c.fs.String("outcome", "", "new outcome")
 	parent := c.fs.String("parent", "\x00", "move into a group (id or key); empty string clears")
 	cohort := c.fs.String("cohort", "\x00", "set cohort; empty string clears")
-	var constraints, accept, checks, optionalChecks, requires, remove, setRequires stringList
+	var constraints, accept, checks, optionalChecks, requires, remove, setRequires, pins stringList
 	c.fs.Var(&constraints, "constraint", "replace constraints (repeatable)")
+	c.fs.Var(&pins, "pin", "replace pinned paths (repeatable; use once with empty value to clear)")
 	c.fs.Var(&accept, "accept", "replace acceptance criteria (repeatable)")
 	c.fs.Var(&checks, "check", "replace task checks (repeatable)")
 	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable, with --check)")
@@ -463,7 +465,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
 		}
-		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires) > 0 || *reset || *withdraw {
+		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *reset || *withdraw {
 			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
@@ -484,6 +486,15 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		}
 		if len(constraints) > 0 {
 			u.Constraints = plan.Replace([]string(constraints))
+		}
+		if len(pins) > 0 {
+			var set []string
+			for _, p := range pins {
+				if strings.TrimSpace(p) != "" {
+					set = append(set, p)
+				}
+			}
+			u.Pins = plan.Replace(set)
 		}
 		if len(accept) > 0 {
 			u.Acceptance = plan.Replace([]string(accept))

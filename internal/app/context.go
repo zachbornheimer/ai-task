@@ -239,6 +239,9 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
+	if len(v.Pins) > 0 {
+		fmt.Fprintf(&w, "Pinned (this task may not change them; `at verify complete` refuses if it did): %s\n\n", strings.Join(v.Pins, ", "))
+	}
 	w.WriteString("Regression checks (`at verify regression`):\n")
 	for _, ch := range c.Regression {
 		fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, shellJoin(ch.Command))

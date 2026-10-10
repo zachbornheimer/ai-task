@@ -84,6 +84,9 @@ type Spec struct {
 	Constraints  []string
 	Acceptance   []AcceptanceCriterion
 	Verification verification.Policy
+	// Pins are paths (files, or directories by prefix) the task's branch
+	// must leave untouched; a change to one fails completion.
+	Pins []string
 	// Cohort names a coupled-verification cohort: members implement
 	// independently and are judged together on one assembled candidate.
 	Cohort string
@@ -101,6 +104,7 @@ type Task struct {
 	Constraints   []string              `json:"constraints,omitempty"`
 	Acceptance    []AcceptanceCriterion `json:"acceptance,omitempty"`
 	Verification  verification.Policy   `json:"verification"`
+	Pins          []string              `json:"pins,omitempty"`
 	Cohort        string                `json:"cohort,omitempty"`
 	ContractRev   int                   `json:"contract_rev"`
 	ArchivedAt    *time.Time            `json:"archived_at,omitempty"`
@@ -167,6 +171,23 @@ func (s *Spec) Validate() error {
 		cleaned = append(cleaned, c)
 	}
 	s.Constraints = cleaned
+	if len(s.Pins) > maxListItems {
+		return fault.New(fault.CodeInvalidInput, "at most %d pinned paths", maxListItems)
+	}
+	pins := s.Pins[:0]
+	seen := map[string]bool{}
+	for _, p := range s.Pins {
+		p = strings.Trim(strings.TrimSpace(p), "/")
+		if p == "" || seen[p] {
+			continue
+		}
+		if strings.HasPrefix(p, "../") || p == ".." || strings.Contains(p, "/../") {
+			return fault.New(fault.CodeInvalidInput, "pinned path %q must be inside the repository", p)
+		}
+		seen[p] = true
+		pins = append(pins, p)
+	}
+	s.Pins = pins
 	accepted := s.Acceptance[:0]
 	for _, a := range s.Acceptance {
 		a.Description = strings.TrimSpace(a.Description)

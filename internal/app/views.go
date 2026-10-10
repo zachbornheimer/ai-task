@@ -97,6 +97,7 @@ type TaskView struct {
 	Constraints []string                   `json:"constraints,omitempty"`
 	Acceptance  []task.AcceptanceCriterion `json:"acceptance,omitempty"`
 	Checks      []verification.CheckSpec   `json:"task_checks,omitempty"`
+	Pins        []string                   `json:"pins,omitempty"`
 	Cohort      string                     `json:"cohort,omitempty"`
 	ContractRev int                        `json:"contract_rev"`
 	Status      task.Status                `json:"status"`
@@ -296,7 +297,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	t := r.Task
 	v := TaskView{
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
-		Checks: t.Verification.TaskChecks, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
+		Checks: t.Verification.TaskChecks, Pins: t.Pins, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
 	}

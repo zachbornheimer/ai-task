@@ -166,3 +166,19 @@ func ChangedFiles(ctx context.Context, dir, ref string) ([]string, error) {
 	}
 	return files, nil
 }
+
+// ChangedBetween lists the paths rev changed relative to its merge base
+// with base, as seen from the repository at repo.
+func ChangedBetween(ctx context.Context, repo, base, rev string) ([]string, error) {
+	out, err := git(ctx, repo, "diff", "--name-only", base+"..."+rev)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, f := range strings.Split(strings.TrimSpace(out), "\n") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
