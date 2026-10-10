@@ -145,6 +145,14 @@ func renderContext(c Context) string {
 	if v.Outcome != "" && v.Outcome != v.Title {
 		fmt.Fprintf(&w, "Outcome: %s\n\n", v.Outcome)
 	}
+	// A retry reads its state before the contract: what exists, what the
+	// last attempt learned, and why it did not complete.
+	retry := v.Attempt != nil && v.Attempt.Seq > 1
+	if retry {
+		fmt.Fprintf(&w, "## Current state (attempt %d)\n\nResume from here; do not redo finished work.\n", v.Attempt.Seq)
+		renderState(&w, c)
+		w.WriteString("\n")
+	}
 	if len(v.Constraints) > 0 {
 		w.WriteString("Constraints:\n")
 		for _, c := range v.Constraints {
@@ -159,7 +167,7 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	w.WriteString("Done when `at verify complete` passes on your committed revision: every required task check, then every regression check, run fresh. The checks are the contract; read them.\n\n")
+	w.WriteString("Done when `at verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n\n")
 	if len(v.Checks) > 0 {
 		w.WriteString("Task checks (`at verify task`):\n")
 		for _, ch := range v.Checks {
@@ -167,102 +175,145 @@ func renderContext(c Context) string {
 			if !ch.Required {
 				req = "optional"
 			}
-			fmt.Fprintf(&w, "- %s (%s): %s\n", ch.ID, req, strings.Join(ch.Command, " "))
+			fmt.Fprintf(&w, "- %s (%s): `%s`\n", ch.ID, req, shellJoin(ch.Command))
 		}
 		w.WriteString("\n")
 	}
 	w.WriteString("Regression checks (`at verify regression`):\n")
 	for _, ch := range c.Regression {
-		fmt.Fprintf(&w, "- %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
+		fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, shellJoin(ch.Command))
 	}
 	w.WriteString("\n")
 	if len(v.Requires) > 0 {
-		w.WriteString("Prerequisites (complete; their work is already on the target branch):\n")
+		w.WriteString("Prerequisites (complete; their work is on the target branch):\n")
 		for _, r := range v.Requires {
 			fmt.Fprintf(&w, "- %s %s\n", r.ID, r.Title)
 		}
 		w.WriteString("\n")
 	}
 	if len(c.Siblings) > 0 {
-		w.WriteString("Other open tasks in this project (not yours: do not implement them; if your task cannot pass without one, add it as a blocker with `at add --blocks` and release):\n")
+		w.WriteString("Other open tasks (other workers' work; not yours to implement):\n")
 		for _, s := range c.Siblings {
 			fmt.Fprintf(&w, "- %s %s [%s]\n", s.ID, s.Title, s.Status)
 		}
 		w.WriteString("\n")
 	}
 	if c.Workspace != "" {
-		fmt.Fprintf(&w, "Workspace: %s (branch %s, promoted to %s on completion). Work only there; the session token is stored in it, so `at` commands run there need no token.", c.Workspace, c.Branch, c.TargetBranch)
+		fmt.Fprintf(&w, "Workspace: %s (branch %s; completion promotes it to %s).", c.Workspace, c.Branch, c.TargetBranch)
 		if c.LeaseUntil != nil {
-			fmt.Fprintf(&w, " Lease until %s; every `at` command renews it.", c.LeaseUntil.UTC().Format(time.RFC3339))
+			fmt.Fprintf(&w, " Lease until %s.", c.LeaseUntil.UTC().Format(time.RFC3339))
 		}
 		w.WriteString("\n")
-		if len(c.ChangedFiles) > 0 {
-			fmt.Fprintf(&w, "Files this branch has already changed: %s\n", strings.Join(c.ChangedFiles, ", "))
+		if !retry {
+			renderState(&w, c)
 		}
-		if len(c.DirtyFiles) > 0 {
-			fmt.Fprintf(&w, "Uncommitted changes left by an earlier attempt (review with `git status` before editing): %s\n", strings.Join(c.DirtyFiles, ", "))
-		}
-		w.WriteString("\n")
 	} else {
-		fmt.Fprintf(&w, "Verified work is promoted to branch %s. ", c.TargetBranch)
+		fmt.Fprintf(&w, "Completion promotes the task branch to %s. ", c.TargetBranch)
 		switch v.Status {
 		case task.StatusComplete:
-			fmt.Fprintf(&w, "This task is complete (revision %s); nothing is left to do.\n\n", short(v.CompletedRevision))
+			fmt.Fprintf(&w, "This task is complete (revision %s); nothing is left to do.\n", short(v.CompletedRevision))
 		case task.StatusReady, task.StatusInterrupted, task.StatusVerificationFailed:
-			fmt.Fprintf(&w, "Nobody holds this task; `at claim %s` gives you a workspace.\n\n", v.ID)
+			fmt.Fprintf(&w, "Nobody holds this task; `at claim %s` gives you a workspace.\n", v.ID)
 		default:
-			fmt.Fprintf(&w, "This task is %s and cannot be claimed right now.\n\n", v.Status)
+			fmt.Fprintf(&w, "This task is %s and cannot be claimed right now.\n", v.Status)
+		}
+		if !retry {
+			renderState(&w, c)
 		}
 	}
-	if v.Attempt != nil && v.Attempt.Seq > 1 {
-		fmt.Fprintf(&w, "This is attempt %d: read the handoff before touching the code.\n\n", v.Attempt.Seq)
-	}
-	if h := v.Handoff; h != nil && !h.Empty() {
-		w.WriteString("## Handoff from earlier attempts\n\n")
-		if h.LatestNext != "" {
-			fmt.Fprintf(&w, "Next step recorded last time: %s\n", h.LatestNext)
-		}
-		for _, l := range h.Learnings {
-			fmt.Fprintf(&w, "- learned: %s\n", l)
-		}
-		for _, l := range h.Inherited {
-			fmt.Fprintf(&w, "- learned on prerequisite %s: %s\n", l.TaskID, l.Learned)
-		}
-		if f := h.LastFailure; f != nil {
-			fmt.Fprintf(&w, "Last failed verification (%s): %s\n", f.Mode, f.Summary)
-			for _, ch := range f.Checks {
-				fmt.Fprintf(&w, "- %s %s", ch.CheckID, ch.Outcome)
-				if ch.Message != "" {
-					fmt.Fprintf(&w, ": %s", ch.Message)
-				}
-				w.WriteString("\n")
-				for _, tail := range []struct{ name, text string }{{"stdout", ch.StdoutTail}, {"stderr", ch.StderrTail}} {
-					if t := strings.TrimSpace(tail.text); t != "" {
-						fmt.Fprintf(&w, "  %s: %s\n", tail.name, strings.ReplaceAll(t, "\n", "\n  "))
-					}
-				}
-			}
-		}
-		w.WriteString("\n")
-	}
-	w.WriteString("Record progress as you go: `at log --done \"...\" --next \"...\" --learned \"...\"`.\n")
 	if c.Worktrunk {
-		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk stages everything, runs the project's pre-commit hooks and writes the message; `wt step diff` shows all changes since branching, `wt step squash` folds many commits into one). Then `at verify complete`. If it reports INTEGRATION_FAILED, `wt step rebase %s`, resolve, and verify again.\n", c.TargetBranch)
+		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk is installed: `wt step diff` shows all changes since branching, `wt step squash` folds commits; on INTEGRATION_FAILED use `wt step rebase %s`).\n", c.TargetBranch)
 	} else {
-		fmt.Fprintf(&w, "Commit with git (`git add -A && git commit`), then `at verify complete`. If it reports INTEGRATION_FAILED, `git merge %s`, resolve, commit, and verify again.\n", c.TargetBranch)
+		fmt.Fprintf(&w, "Commit with git; on INTEGRATION_FAILED use `git merge %s`.\n", c.TargetBranch)
 	}
 	return w.String()
 }
 
-// Rules is the standing worker contract, the same text as AGENTS.md's
-// rules of the road, for hosts whose agent does not read that file.
-const Rules = `## Rules of the road
+// renderState writes what exists already: files the branch changed,
+// uncommitted edits, and the handoff from earlier attempts.
+func renderState(w *strings.Builder, c Context) {
+	if len(c.ChangedFiles) > 0 {
+		fmt.Fprintf(w, "Files this branch has changed: %s\n", strings.Join(c.ChangedFiles, ", "))
+	}
+	if len(c.DirtyFiles) > 0 {
+		fmt.Fprintf(w, "Uncommitted changes in the workspace (review before editing): %s\n", strings.Join(c.DirtyFiles, ", "))
+	}
+	h := c.Task.Handoff
+	if h == nil || h.Empty() {
+		return
+	}
+	if h.LatestNext != "" {
+		fmt.Fprintf(w, "Next step recorded by the last attempt: %s\n", h.LatestNext)
+	}
+	for _, l := range h.Learnings {
+		fmt.Fprintf(w, "- learned: %s\n", l)
+	}
+	for _, l := range h.Inherited {
+		fmt.Fprintf(w, "- learned on prerequisite %s: %s\n", l.TaskID, l.Learned)
+	}
+	if f := h.LastFailure; f != nil {
+		fmt.Fprintf(w, "Last `at verify %s`: %s\n", f.Mode, f.Summary)
+		for _, ch := range f.Checks {
+			fmt.Fprintf(w, "- %s %s", ch.CheckID, ch.Outcome)
+			if ch.Message != "" {
+				fmt.Fprintf(w, ": %s", ch.Message)
+			}
+			w.WriteString("\n")
+			for _, tail := range []struct{ name, text string }{{"stdout", ch.StdoutTail}, {"stderr", ch.StderrTail}} {
+				if t := strings.TrimSpace(tail.text); t != "" {
+					fmt.Fprintf(w, "  %s: %s\n", tail.name, strings.ReplaceAll(t, "\n", "\n  "))
+				}
+			}
+		}
+	}
+}
 
-- You never set status. ` + "`at verify complete`" + ` is the only path to completion and it re-runs everything; VERIFICATION_FAILED leaves your claim live with the evidence in error.details. Fix, commit, verify again.
-- Commit before ` + "`at verify complete`" + ` (` + "`wt step commit`" + ` with Worktrunk, else git); the tree must be clean and nothing is committed for you.
-- INTEGRATION_FAILED means your branch no longer merges into the target branch; in the worktree run ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve error.details.conflicts, commit, verify again. It is not counted against you.
-- Your lease is 30 minutes and every at command renews it; ` + "`at log --done .. --next .. --learned ..`" + ` at least that often.
-- If the task needs work that is not yours: ` + "`at add \"prereq\" --blocks <task> --check \"id: cmd\"`" + `, log the handoff, ` + "`at claim release`" + `.
-- LEASE_EXPIRED or SESSION_SUPERSEDED: stop editing immediately.
-- Do not edit the at database, the check commands, or files outside the workspace.
+// shellJoin renders an argv the way a shell would need it typed, so a
+// check command in a prompt is copy-pastable.
+func shellJoin(argv []string) string {
+	parts := make([]string, len(argv))
+	for i, a := range argv {
+		if a != "" && !strings.ContainsAny(a, " \t\n'\"\\$`*?[]{}()<>|&;#~") {
+			parts[i] = a
+			continue
+		}
+		parts[i] = "'" + strings.ReplaceAll(a, "'", "'\\''") + "'"
+	}
+	return strings.Join(parts, " ")
+}
+
+// Rules is the agent execution contract, the same text as the
+// "Agent execution contract" section of AGENTS.md (a test keeps them in
+// sync), for hosts whose agent does not read that file.
+const Rules = `## Agent execution contract
+
+Complete one independently verifiable task at a time.
+
+Start
+
+- Run ` + "`at context`" + ` before working. Review the handoff, the existing changes and ` + "`git status`" + ` before editing; preserve useful prior work.
+- Work only in the assigned workspace. The session token is stored there, so ` + "`at`" + ` commands run there need no token.
+- Do not implement other tasks.
+
+Execute
+
+- Implement the outcome and satisfy its acceptance criteria.
+- The checks are the contract: never weaken, skip or bypass a check or the tests it runs.
+- Iterate with ` + "`at verify task`" + ` and ` + "`at verify regression`" + ` (diagnostic; they never complete anything).
+- Record progress with ` + "`at log --done \"...\" --next \"...\" --learned \"...\"`" + `; ` + "`--next`" + ` is what the next attempt reads first.
+- The lease lasts 30 minutes and every ` + "`at`" + ` command renews it; log before it runs out.
+- On LEASE_EXPIRED or SESSION_SUPERSEDED, stop editing immediately. The next ` + "`at claim <task>`" + ` returns your handoff.
+
+Complete
+
+- Commit before ` + "`at verify complete`" + ` (` + "`wt step commit`" + ` where Worktrunk is installed, plain git otherwise). The tree must be clean; nothing is committed for you.
+- You never set status. Only a passing ` + "`at verify complete`" + ` completes the task: it runs every required task check and regression check fresh on the committed revision, then promotes the branch to the target. When the target had moved it merges for you and reports ` + "`integrated_revision`" + `.
+- On VERIFICATION_FAILED, read ` + "`error.details`" + `, fix the cause, commit, verify again. Your claim stays live.
+- On INTEGRATION_FAILED, the target moved against you: ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve ` + "`error.details.conflicts`" + `, commit, verify again. It is not counted against you.
+- If completion depends on work that is not yours: ` + "`at add \"prereq\" --blocks <task> --check \"id: cmd\"`" + `, ` + "`at log`" + ` the handoff, ` + "`at claim release`" + `. Do not implement the blocking task.
+
+Exit
+
+- ` + "`at claim --wait`" + ` ends with DONE (everything is complete) or STALLED (a planner is needed); both are normal exits for a worker loop.
+- Never claim success without a passing final verification.
 `

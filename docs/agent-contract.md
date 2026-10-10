@@ -172,6 +172,26 @@ JSON), plain git otherwise. Without a reference it describes the current session
 describes that task for anyone, read-only. `--with-rules` appends the
 rules of the road for an agent that does not read AGENTS.md.
 
+**Prompt layers.** An agent runs under three layers and `at` supplies
+the third: (1) a bootstrap system prompt, set by the host where the
+harness allows it (Claude Code `-p --append-system-prompt`, a bare model's
+system message; Codex has none and relies on AGENTS.md); (2) the project
+instruction file, AGENTS.md (or a CLAUDE.md that imports it), holding the
+agent execution contract; (3) the task turn, `at context`, which carries
+only task facts and never repeats the contract. `--with-rules` appends
+the contract for an agent that gets no project file. The bootstrap is:
+
+```
+You are a coding agent responsible for one task in an isolated Git worktree.
+Use the shell and the `at` CLI to execute and manage the task; `at` is
+authoritative for task state, verification and completion. AT_OUTPUT=json is
+set: every `at` command returns one JSON envelope; inspect error.details when
+one fails. Start with `at context` and follow the project instructions.
+Commit before `at verify complete`; only a passing verification completes
+the task. If any `at` command returns LEASE_EXPIRED or SESSION_SUPERSEDED,
+stop editing immediately.
+```
+
 **Handoff.** The claim result carries the previous attempts' `latest_next`,
 learnings and recent log, plus `inherited` learnings recorded on the
 task's direct prerequisites and `last_failure`: the failed checks of the

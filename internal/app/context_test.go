@@ -48,20 +48,19 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	}
 	for _, want := range []string{
 		"# Task " + string(a),
-		"grep -q 'func Open' store.go", // the check is the contract
-		"regress: sh -c true",          // regression suite
-		"promoted to main",             // target branch
-		"Workspace: " + s2.Workspace,   // where to work
-		"Lease until",                  // when to log
-		"This is attempt 2",            // handoff is worth reading
-		"Next step recorded last time: add Open(path)",
+		"`sh -c 'test -f store.go && grep -q '\\''func Open'\\'' store.go'`", // the check, shell-quoted
+		"regress: `sh -c true`",
+		"promotes it to main",        // target branch
+		"Workspace: " + s2.Workspace, // where to work
+		"Lease until",                // when to log
+		"Next step recorded by the last attempt: add Open(path)",
 		"learned: needs the sqlite driver",
-		"Last failed verification (complete)",
+		"Last `at verify complete`",
+		"## Current state (attempt 2)",
 		"unit-store failed",
-		"Files this branch has already changed: store.go",
+		"Files this branch has changed: store.go",
 		string(b) + " other", // sibling, not yours
-		"Record progress as you go",
-		"Uncommitted changes left by an earlier attempt (review with `git status` before editing): store.go\n",
+		"Uncommitted changes in the workspace (review before editing): store.go\n",
 		"Commit with `wt step commit`",
 		"`wt step rebase main`",
 	} {
@@ -69,7 +68,10 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 			t.Fatalf("context lacks %q:\n%s", want, cx.Prompt)
 		}
 	}
-	if strings.Contains(cx.Prompt, "Rules of the road") || cx.LeaseUntil == nil || len(cx.ChangedFiles) != 1 || len(cx.Siblings) != 1 || cx.Siblings[0].ID != b || !cx.Worktrunk {
+	if strings.Index(cx.Prompt, "## Current state") > strings.Index(cx.Prompt, "Task checks") {
+		t.Fatalf("a retry must read its state before the contract:\n%s", cx.Prompt)
+	}
+	if strings.Contains(cx.Prompt, "Agent execution contract") || cx.LeaseUntil == nil || len(cx.ChangedFiles) != 1 || len(cx.Siblings) != 1 || cx.Siblings[0].ID != b || !cx.Worktrunk {
 		t.Fatalf("%+v", cx)
 	}
 	t.Setenv("PATH", gitOnlyPath(t))
@@ -86,7 +88,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cb.Workspace != "" || !strings.Contains(cb.Prompt, "at claim "+string(b)) || !strings.HasSuffix(strings.TrimSpace(cb.Prompt), "outside the workspace.") || !strings.Contains(cb.Prompt, "## Rules of the road") {
+	if cb.Workspace != "" || !strings.Contains(cb.Prompt, "at claim "+string(b)) || !strings.HasSuffix(strings.TrimSpace(cb.Prompt), "final verification.") || !strings.Contains(cb.Prompt, "## Agent execution contract") {
 		t.Fatalf("%s", cb.Prompt)
 	}
 	if _, err := f.e.Context(f.ctx, f.proj.ID, "", "", false); fault.CodeOf(err) != fault.CodeInvalidInput {

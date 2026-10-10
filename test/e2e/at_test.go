@@ -193,7 +193,7 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(ws, "", nil, "context"); r.code != 0 || !strings.Contains(r.env["result"].(map[string]any)["prompt"].(string), "# Task "+a) {
 		t.Fatalf("context in worktree: %s %s", r.stdout, r.stderr)
 	}
-	if cx := e.ok("context", b, "--with-rules"); !strings.Contains(cx["prompt"].(string), "Rules of the road") || cx["workspace"] != nil {
+	if cx := e.ok("context", b, "--with-rules"); !strings.Contains(cx["prompt"].(string), "Agent execution contract") || cx["workspace"] != nil {
 		t.Fatalf("context by id: %v", cx)
 	}
 	e.fails("INVALID_INPUT", "context")
