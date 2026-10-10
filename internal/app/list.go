@@ -11,6 +11,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
+	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
 // Filter selects which tasks a List returns.
@@ -70,10 +71,19 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				if err != nil {
 					return err
 				}
-				if q.Filter == FilterOpen && prog.Total > 0 && prog.Complete == prog.Total {
+				g := GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt, LastError: r.LastError}
+				if verification.HasRequired(r.Task.Verification.TaskChecks) {
+					gv, err := e.groupVerification(tx, r, proj, now)
+					if err != nil {
+						return err
+					}
+					g.Checks, g.Size, g.Verification = r.Task.Verification.TaskChecks, r.Task.Size, &gv
+					g.Complete = r.CompletedAt != nil
+				}
+				if q.Filter == FilterOpen && g.Complete {
 					continue
 				}
-				snap.Groups = append(snap.Groups, GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt})
+				snap.Groups = append(snap.Groups, g)
 				continue
 			}
 			switch q.Filter {
@@ -205,7 +215,30 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		}
 	}
 	var exhausted, blockedByExhausted, workspaceBlocked, unverifiable int
+	var epicsPending, epicsFailed int
 	for _, r := range records {
+		if r.Task.Kind == task.KindGroup && verification.HasRequired(r.Task.Verification.TaskChecks) && r.CompletedAt == nil {
+			gv, err := e.groupVerification(tx, r, proj, n)
+			if err != nil {
+				return s, err
+			}
+			switch gv.Status {
+			case "pending", "running":
+				epicsPending++
+				if gv.NextRetry != nil {
+					s.Cooling++
+					if s.NextEligibleAt == nil || gv.NextRetry.Before(*s.NextEligibleAt) {
+						ne := *gv.NextRetry
+						s.NextEligibleAt = &ne
+					}
+				} else {
+					s.Active++
+				}
+			case "failed":
+				epicsFailed++
+			}
+			continue
+		}
 		if r.Task.Kind != task.KindTask {
 			continue
 		}
@@ -259,9 +292,13 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		}
 	}
 	sort.Strings(s.PendingCohorts)
-	s.Done = s.Open == 0
-	s.Stalled = s.Open > 0 && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
+	s.PendingEpics = epicsPending
+	s.Done = s.Open == 0 && epicsPending == 0 && epicsFailed == 0
+	s.Stalled = (s.Open > 0 || epicsFailed > 0) && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
 	if s.Stalled {
+		if epicsFailed > 0 {
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d epic(s) failed their own checks on the current target; see the group's last_error, then add follow-up member tasks or fix the checks (`at update <group> --check ...`)", epicsFailed))
+		}
 		if exhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `at update <task> --reset-attempts`", exhausted))
 		}

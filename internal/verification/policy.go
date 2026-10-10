@@ -254,6 +254,9 @@ const (
 	// ModeCohort: both categories for every cohort member on one
 	// assembled candidate, run by a verifier job.
 	ModeCohort Mode = "cohort"
+	// ModeGroup: a group's own checks on the target branch once every
+	// member is complete (the integration tier).
+	ModeGroup Mode = "group"
 )
 
 // ParseMode validates a mode from user input; "" is rejected because a

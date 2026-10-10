@@ -51,6 +51,9 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 	}
 	for {
 		if req.ProjectID != "" {
+			if _, err := e.RunPendingGroups(ctx, req.ProjectID, ""); err != nil && ctx.Err() != nil {
+				return Session{}, ctx.Err()
+			}
 			if _, err := e.RunPendingCohorts(ctx, req.ProjectID); err != nil && ctx.Err() != nil {
 				return Session{}, ctx.Err()
 			}

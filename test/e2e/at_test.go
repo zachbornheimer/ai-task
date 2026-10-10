@@ -703,3 +703,39 @@ func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 		t.Fatalf("doctor did not flag the slow gate: %s", rr.stdout)
 	}
 }
+
+// TestEpicChecksFromTheCLI: a group with its own checks through add,
+// show, list, verify groups and status.
+func TestEpicChecksFromTheCLI(t *testing.T) {
+	e := gitEnv(t)
+	g := taskID(e.ok("add", "Identity", "--group", "--key", "identity", "--check", "e2e: test -f a.txt"))
+	a := taskID(e.ok("add", "A", "--key", "a", "--parent", "identity", "--check", "u: test -f a.txt"))
+	if sh := e.ok("show", "identity"); sh["size"] != "large" || sh["group_verification"].(map[string]any)["status"] != nil {
+		t.Fatalf("group: %v", sh)
+	}
+	vg := e.ok("verify", "groups")
+	if vg["ran"] != false {
+		t.Fatalf("nothing ready: %v", vg)
+	}
+	s := e.ok("claim", a)
+	e.commit(s["workspace"].(string), "a.txt", "a")
+	if r := e.runIn(s["workspace"].(string), "", nil, "verify", "complete"); r.code != 0 {
+		t.Fatalf("complete: %s %s", r.stdout, r.stderr)
+	}
+	// The member is done; the epic is pending until a verifier runs it.
+	if st := e.ok("status"); st["done"] != false || st["pending_epics"].(float64) != 1 {
+		t.Fatalf("status: %v", st)
+	}
+	vg = e.ok("verify", "groups", "identity")
+	if vg["ran"] != true || vg["groups"].([]any)[0].(map[string]any)["complete"] != true {
+		t.Fatalf("epic run: %v", vg)
+	}
+	if st := e.ok("status"); st["done"] != true {
+		t.Fatalf("status after epic: %v", st)
+	}
+	h := e.runIn(e.cwd, "", []string{"AT_OUTPUT="}, "list", "all")
+	if !strings.Contains(h.stdout, "● "+g) {
+		t.Fatalf("list glyph: %s", h.stdout)
+	}
+	_ = a
+}

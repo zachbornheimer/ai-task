@@ -141,3 +141,15 @@ candidate changed against the target, and `AT_TARGET_BRANCH`, so a
 regression gate can run only affected tests and leave the full suite to
 CI. The defaults follow Google's test sizes and Bazel's size-implied
 timeouts, tightened for an agent's feedback loop.
+
+## Epics: the integration tier
+
+A group with checks is verified once on the target branch when all its
+members are complete, under its own size budget (large, 15m, by default),
+as a durable job run by whichever worker has capacity or by `at verify
+groups`. Task checks prove one outcome in seconds, the regression gate
+guards the rest in two minutes, and the epic's checks are where the slow,
+whole-system verification lives, paid once per epic rather than once per
+task. A failed epic stalls the plan with its reason and is answered with
+follow-up member tasks (which reopen the group) or a corrected check; it
+does not rerun on the same revision and contract by itself.

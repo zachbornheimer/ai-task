@@ -204,6 +204,9 @@ func (s *Spec) Validate() error {
 	switch s.Size {
 	case "":
 		s.Size = SizeSmall
+		if s.Kind == KindGroup {
+			s.Size = SizeLarge
+		}
 	case SizeSmall, SizeMedium, SizeLarge:
 	default:
 		return fault.New(fault.CodeInvalidInput, "size must be small, medium or large (got %q)", s.Size)
@@ -225,8 +228,11 @@ func (s *Spec) Validate() error {
 		return fault.New(fault.CodeInvalidInput, "invalid cohort name %q", s.Cohort)
 	}
 	if s.Kind == KindGroup {
-		if !s.Verification.Empty() || s.Cohort != "" {
-			return fault.New(fault.CodeInvalidInput, "a group cannot have checks or a cohort; it is organizational only")
+		if s.Cohort != "" {
+			return fault.New(fault.CodeInvalidInput, "a group cannot have a cohort; cohorts couple tasks")
+		}
+		if len(s.Pins) > 0 {
+			return fault.New(fault.CodeInvalidInput, "a group cannot pin files; pins belong to the tasks that work")
 		}
 	}
 	if len(s.Verification.Regression) > 0 {

@@ -330,10 +330,25 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
-		if len(checks)+len(optionalChecks)+len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" || *size != "" {
-			return usage("--group takes only --key and --parent; checks, prerequisites, blockers, cohort, outcome, acceptance, constraints and pins belong to tasks")
+		if len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" {
+			return usage("--group takes --key, --parent, --check (the epic's own checks, run on the target once every member is complete) and --size; prerequisites, blockers, cohort, outcome, acceptance and pins belong to tasks")
 		}
-		op = plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent)}
+		g := plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent), Size: *size}
+		for i, raw := range checks {
+			cs, err := parseCheck(raw, i+1, true)
+			if err != nil {
+				return err
+			}
+			g.TaskChecks = append(g.TaskChecks, cs)
+		}
+		for i, raw := range optionalChecks {
+			cs, err := parseCheck(raw, len(checks)+i+1, false)
+			if err != nil {
+				return err
+			}
+			g.TaskChecks = append(g.TaskChecks, cs)
+		}
+		op = g
 	} else {
 		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort, Pins: pins, Size: *size}
 		if *policyJSON != "" {

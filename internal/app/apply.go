@@ -176,16 +176,19 @@ func (a *applier) addGroup(i int, c plan.AddGroup) error {
 		if existing, ok, err := a.tx.GetByKey(a.cs.ProjectID, c.Key); err != nil {
 			return err
 		} else if ok {
-			if existing.Task.Kind == task.KindGroup && !existing.Task.Archived() && existing.Task.Description == c.Title && existing.Task.ParentID == parent {
+			if existing.Task.Kind == task.KindGroup && !existing.Task.Archived() && existing.Task.Description == c.Title && existing.Task.ParentID == parent && existing.Task.Verification.Digest() == (verification.Policy{TaskChecks: c.TaskChecks}).Digest() {
 				a.refs[c.Key] = existing.Task.ID
 				return nil // identical replay
 			}
 			return fault.New(fault.CodeDuplicateKey, "key %q already names %s with a different definition", c.Key, existing.Task.ID)
 		}
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Size: c.Size}
 	id, err := a.insert(spec)
 	if err != nil {
+		return err
+	}
+	if err := reopenAncestors(a.tx, parent, a.now); err != nil {
 		return err
 	}
 	a.result.Created[a.createdName(i, c.Key)] = id
@@ -273,6 +276,9 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	}
 	id, err := a.insert(spec)
 	if err != nil {
+		return err
+	}
+	if err := reopenAncestors(a.tx, parent, a.now); err != nil {
 		return err
 	}
 	var edges []dependency.Edge
@@ -464,7 +470,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	}
 	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
-	if rec.CompletedAt != nil && (contract || edges) {
+	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
 		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
 	}
 	if contract || edges {
@@ -567,6 +573,15 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			}
 		}
 		t.ParentID, changed = parent, true
+		if err := reopenAncestors(a.tx, parent, a.now); err != nil {
+			return err
+		}
+	}
+	if contract && t.Kind == task.KindGroup && rec.CompletedAt != nil {
+		// A verified epic whose checks change must be verified again.
+		if err := a.tx.ClearComplete(t.ID, a.now); err != nil {
+			return err
+		}
 	}
 	if contract {
 		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Cohort: t.Cohort, Pins: t.Pins, Size: t.Size}

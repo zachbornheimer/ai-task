@@ -28,11 +28,14 @@ func (r Ref) IsID() bool { return task.IsID(string(r)) }
 // AddTask, UpdateTask, ArchiveTask.
 type Change interface{ change() }
 
-// AddGroup creates an organizational group.
+// AddGroup creates a group. With TaskChecks it is an epic with its own
+// verification, run on the target branch once every member is complete.
 type AddGroup struct {
-	Key    string
-	Title  string
-	Parent Ref // optional enclosing group
+	Key        string
+	Title      string
+	Parent     Ref // optional enclosing group
+	TaskChecks []verification.CheckSpec
+	Size       string
 }
 
 // AddTask creates an executable task.

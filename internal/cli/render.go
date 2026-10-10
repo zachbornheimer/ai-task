@@ -51,6 +51,9 @@ func groupLine(g app.GroupView) string {
 		glyph = "◐"
 	}
 	s := fmt.Sprintf("%s %s  %s (%d/%d complete)", glyph, g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
+	if gv := g.Verification; gv != nil && gv.Status != "" && gv.Status != "passed" {
+		s += fmt.Sprintf(" [epic checks %s]", gv.Status)
+	}
 	if g.ArchivedAt != nil {
 		s += " [archived]"
 	}
@@ -223,6 +226,26 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 	if v.Kind == task.KindGroup {
 		if v.Progress != nil {
 			fmt.Fprintf(w, "Progress: %d/%d complete\n", v.Progress.Complete, v.Progress.Total)
+		}
+		if len(v.Checks) > 0 {
+			fmt.Fprintf(w, "\nEPIC CHECKS (size %s; run on the target once every member is complete)\n", v.Size)
+			for _, ch := range v.Checks {
+				fmt.Fprintf(w, "• %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
+			}
+			if gv := v.GroupVerification; gv != nil {
+				status := gv.Status
+				if status == "" {
+					status = "waiting for members"
+				}
+				fmt.Fprintf(w, "Verification: %s", status)
+				if gv.Summary != "" {
+					fmt.Fprintf(w, " (%s)", gv.Summary)
+				}
+				fmt.Fprintln(w)
+			}
+			if v.LastError != "" {
+				fmt.Fprintf(w, "Last error: %s\n", v.LastError)
+			}
 		}
 		if len(v.Children) > 0 {
 			fmt.Fprintln(w, "\nMEMBERS")

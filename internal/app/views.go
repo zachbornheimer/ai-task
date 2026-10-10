@@ -114,6 +114,9 @@ type TaskView struct {
 	Submission   *SubmissionView     `json:"submission,omitempty"`
 	Verification VerificationSummary `json:"verification"`
 	Handoff      *execution.Handoff  `json:"handoff,omitempty"`
+	// GroupVerification is an epic's own verification state (groups with
+	// checks only).
+	GroupVerification *GroupVerification `json:"group_verification,omitempty"`
 	// Integration is the open promotion intent while the task is
 	// awaiting_integration: the candidate has been verified and is being
 	// (or was) promoted; completion follows.
@@ -140,8 +143,14 @@ type GroupView struct {
 	Title    string   `json:"title"`
 	ParentID task.ID  `json:"parent_id,omitempty"`
 	Progress Progress `json:"progress"`
-	// Complete is derived: a nonempty member set that is fully complete.
+	// Complete is derived: a nonempty member set that is fully complete,
+	// and, for a group with checks, those checks passed.
 	Complete bool `json:"complete"`
+	// Checks and Verification describe an epic's own verification.
+	Checks       []verification.CheckSpec `json:"checks,omitempty"`
+	Size         string                   `json:"size,omitempty"`
+	Verification *GroupVerification       `json:"verification,omitempty"`
+	LastError    string                   `json:"last_error,omitempty"`
 	// ArchivedAt is set for archived groups (listed by `list archived`).
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 }
@@ -162,6 +171,9 @@ type Summary struct {
 	// PendingCohorts names cohorts whose members have all submitted and
 	// whose verification job can run (or is running).
 	PendingCohorts []string `json:"pending_cohorts,omitempty"`
+	// PendingEpics counts groups whose members are complete and whose own
+	// checks are waiting for, or running under, a verifier.
+	PendingEpics int `json:"pending_epics,omitempty"`
 	// Cooling counts tasks in retry cooldown: not claimable now, claimable
 	// later without anyone's intervention.
 	Cooling int `json:"cooling,omitempty"`
@@ -377,6 +389,13 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 			}
 		}
 		v.Progress = prog
+		if verification.HasRequired(t.Verification.TaskChecks) {
+			gv, err := e.groupVerification(tx, r, p, now)
+			if err != nil {
+				return v, err
+			}
+			v.GroupVerification = &gv
+		}
 		return v, nil
 	}
 	reqs, err := tx.Requirements(t.ID)

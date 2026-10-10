@@ -113,6 +113,16 @@ stale `--expect-rev`), a different request under the same key is
   rejected and nothing is written.
 - Groups (`--group`, `--parent`) are organizational: membership never
   implies an edge, groups cannot be claimed, and group progress is derived.
+  A group may carry its own checks (`--group --check ...`, `--size`, large
+  by default): an epic whose checks run once, on the target branch, in a
+  durable leased job once every executable member is complete and every
+  sub-epic verified. Whichever worker is waiting in `at claim --wait`
+  runs it, or `at verify groups [REF]` runs it on demand. The group is
+  complete (●) only when its checks passed; `status` counts a waiting
+  epic as active (`pending_epics`) and a failed one as a stall with the
+  reason, and nothing is charged to any member. Adding or moving a
+  member into a verified group, or changing its checks, reopens it. A
+  timeout is the epic's construction problem, reported on the group.
 - `--cohort C` marks coupled verification: members implement independently
   and are judged together on one assembled candidate. It is not a blocker.
 - `--blocks C` on a claimed task needs C's session token (`AT_SESSION`) or

@@ -519,6 +519,12 @@ func (t *Tx) MarkComplete(id task.ID, submissionID int64, now time.Time) error {
 	return wrapInternal(err, "mark complete")
 }
 
+// MarkGroupComplete records that a group's own checks passed.
+func (t *Tx) MarkGroupComplete(id task.ID, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET completed_at = ?, last_error = '', updated_at = ? WHERE id = ? AND kind = 'group'`, ms(now), ms(now), id)
+	return wrapInternal(err, "mark group complete")
+}
+
 // ClearComplete withdraws the completion fact.
 func (t *Tx) ClearComplete(id task.ID, now time.Time) error {
 	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET completed_at = NULL, completed_submission_id = NULL, updated_at = ? WHERE id = ?`, ms(now), id)

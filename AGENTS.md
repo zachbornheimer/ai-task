@@ -31,6 +31,10 @@ Everything that changes this repository goes through `at`.
   code failure: prove only this outcome (`-run`, one package), split the
   task, or declare the size. Regression checks get `AT_CHANGED_FILES` to
   target affected tests; the full suite belongs in CI.
+- An epic is a group with its own checks (`at add "Epic" --group --check "e2e: ..."`,
+  size large by default): the integration tier, run once on the target
+  branch when every member is complete. The group is complete only when
+  they pass; a failure needs follow-up member tasks, not a bigger budget.
 
 ## Verbs
 
