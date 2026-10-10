@@ -565,6 +565,7 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 	}
 	regressionPassed := true
 	var regressionSummary string
+	var regressionVerdict verification.Verdict
 	if !anyTaskFailed {
 		// Record the shared regression evidence under every member run so
 		// each run's evidence alone proves its policy.
@@ -585,7 +586,7 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 			}
 		}
 		v := verification.Judge(verification.Policy{Regression: job.proj.Regression}, ev)
-		regressionPassed, regressionSummary = v.Passed, v.Summary
+		regressionPassed, regressionSummary, regressionVerdict = v.Passed, v.Summary, v
 	}
 	if !anyTaskFailed && regressionPassed {
 		return true, nil
@@ -604,7 +605,25 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "cohort regression failed on candidate "+short(candidate)+": "+regressionSummary, now); err != nil {
 					return err
 				}
-				if err := tx.SetLastError(m.rec.Task.ID, 0, "cohort regression failed on the combined candidate (no single member is to blame): "+regressionSummary, now); err != nil {
+				lastError := "cohort regression failed on the combined candidate (no single member is to blame): " + regressionSummary
+				if len(regressionVerdict.TimedOut) > 0 {
+					// The shared gate is too slow: the same planner's problem
+					// as on the single-task path, worded as a timeout.
+					_, regOpts := suiteOpts(m.rec.Task, job.proj, nil)
+					lastError = string(fault.CodeVerificationTimeout) + ": cohort regression timed out on the combined candidate (no single member is to blame): " + regressionSummary + "; " + timeoutMessage(regressionVerdict, verification.Policy{Regression: job.proj.Regression}, 0, regOpts.budget, m.rec.Task.Size)
+				}
+				if err := tx.SetLastError(m.rec.Task.ID, 0, lastError, now); err != nil {
+					return err
+				}
+			case len(verdicts[m.runID].TimedOut) > 0:
+				// A timeout is the verification being built too slow, never
+				// a strike (same contract as the single-task path).
+				taskOpts, _ := suiteOpts(m.rec.Task, job.proj, nil)
+				v := verdicts[m.runID]
+				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "task checks timed out on cohort candidate "+short(candidate)+": "+v.Summary, now); err != nil {
+					return err
+				}
+				if err := tx.SetLastError(m.rec.Task.ID, 0, string(fault.CodeVerificationTimeout)+": "+v.Summary+"; "+timeoutMessage(v, m.policy, taskOpts.budget, 0, m.rec.Task.Size), now); err != nil {
 					return err
 				}
 			case verdicts[m.runID].Summary != "":
