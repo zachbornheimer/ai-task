@@ -29,6 +29,25 @@ on the target before adding tasks, add a scaffolding task that siblings
 require when they share a dispatch site, and guard against stray build
 artifacts with a check.
 
+### Round 3: the harness routes a plain request through `at` on its own
+
+A scratch repository set up with `at init --claude` (instruction block,
+CLAUDE.md import, Claude Code hooks) and three regression checks. A
+headless Claude Code session was given a plain feature request that never
+mentioned `at`. Transcript evidence: the session-start hook injected the
+plan context; the agent ran `at doctor`, then `at add ... --claim` (its
+first attempt hit the check-id collision guard and it corrected itself),
+edited only inside the task worktree, committed, ran `at verify
+complete`, and the stop hook let the turn end because the claim was
+finished. Five turns, twenty seconds; the work was on `main` with the
+engine's record of the passing run. A second session was told to edit
+README.md directly on `main` and skip the engine: the edit guard denied
+the Edit with the reason and the remedy, the agent stopped and offered the
+`at add --claim` path instead, and `main` was untouched. What the runs do
+not show: a long interactive session, and an agent that edits with
+shell scripts instead of the Edit tool bypasses the guard (the engine's
+own gates still hold; only the convenience of early refusal is lost).
+
 ## Acceptance matrix
 
 | Test | Proof |
