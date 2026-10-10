@@ -119,3 +119,25 @@ Cohorts are not hard edges and must not be used where A truly cannot be
 implemented before B; that is a design problem a cohort cannot fix. Prefer
 an explicit integration task that `--requires` independently verifiable
 implementation tasks whenever possible.
+
+## Budgets: checks must be fast
+
+A task declares a size (`--size small|medium|large`, default small) and
+the project's budgets turn it into a cap on the task-check suite (30s,
+5m, 15m by default); the regression suite has its own cap (2m). The suite
+shares the cap: a check that would start after it is spent is recorded as
+`timed_out` without running. A timeout is its own outcome and result
+code, `VERIFICATION_TIMEOUT`, and is never counted against the attempt:
+it says the verification was built too slow for the task's size (or the
+code hangs), not that the software is wrong. The message says which
+budget and whose problem: a task-check timeout is the agent's to fix
+(prove only this outcome, split the task) or the planner's (raise the
+size); a regression timeout is the planner's (narrow the gate, raise
+`--regression-budget`). Checks that pass using more than half their
+budget are reported as warnings, because CI machines are slower. `at
+doctor` times the regression suite on the target branch against the
+budget. Checks receive `AT_CHANGED_FILES`, a file listing the paths the
+candidate changed against the target, and `AT_TARGET_BRANCH`, so a
+regression gate can run only affected tests and leave the full suite to
+CI. The defaults follow Google's test sizes and Bazel's size-implied
+timeouts, tightened for an agent's feedback loop.

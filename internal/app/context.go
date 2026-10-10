@@ -39,6 +39,8 @@ type Context struct {
 	// Worktrunk reports that `wt` is on PATH, so the prompt names its
 	// commit and rebase steps instead of raw git.
 	Worktrunk bool `json:"worktrunk"`
+	// Budgets are the project's verification time caps.
+	Budgets project.Budgets `json:"budgets"`
 	// Summary and Claimable describe the plan when no task is in hand.
 	Summary   *Summary `json:"summary,omitempty"`
 	Claimable []Rel    `json:"claimable,omitempty"`
@@ -115,7 +117,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 	if len(sibs) > SiblingLimit {
 		sibs = sibs[:SiblingLimit]
 	}
-	c := Context{Project: proj.ID, Task: &v, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Siblings: sibs}
+	c := Context{Project: proj.ID, Task: &v, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Siblings: sibs, Budgets: proj.Budgets}
 	if a := v.Attempt; a != nil && a.EndedAt == nil {
 		c.Workspace, c.Branch = a.Workspace, a.Branch
 		lease := a.LeaseExpiresAt
@@ -159,7 +161,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	if err != nil {
 		return Context{}, err
 	}
-	c := Context{Project: proj.ID, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Summary: &sum}
+	c := Context{Project: proj.ID, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Summary: &sum, Budgets: proj.Budgets}
 	for _, t := range snap.Tasks {
 		c.Claimable = append(c.Claimable, Rel{ID: t.ID, Key: t.Key, Title: t.Title, Status: t.Status})
 	}
@@ -227,7 +229,12 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	w.WriteString("Done when `at verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n\n")
+	w.WriteString("Done when `at verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n")
+	size := v.Size
+	if size == "" {
+		size = task.SizeSmall
+	}
+	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get AT_CHANGED_FILES (a file listing the paths this change touched) and AT_TARGET_BRANCH.\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size, budgetLabelFor(c.Budgets.RegressionBudget()))
 	if len(v.Checks) > 0 {
 		w.WriteString("Task checks (`at verify task`):\n")
 		for _, ch := range v.Checks {
@@ -380,3 +387,10 @@ Exit
 - ` + "`at claim --wait`" + ` ends with DONE (everything is complete) or STALLED (a planner is needed); both are normal exits for a worker loop.
 - Never claim success without a passing final verification.
 `
+
+func budgetLabelFor(d time.Duration) string {
+	if d <= 0 {
+		return "unlimited"
+	}
+	return d.String()
+}

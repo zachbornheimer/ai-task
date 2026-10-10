@@ -217,6 +217,9 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 	if v.Cohort != "" {
 		fmt.Fprintf(w, "Cohort: %s\n", v.Cohort)
 	}
+	if v.Size != "" && v.Kind != task.KindGroup {
+		fmt.Fprintf(w, "Size: %s\n", v.Size)
+	}
 	if v.Kind == task.KindGroup {
 		if v.Progress != nil {
 			fmt.Fprintf(w, "Progress: %d/%d complete\n", v.Progress.Complete, v.Progress.Total)
@@ -490,6 +493,9 @@ func renderVerify(w io.Writer, res app.VerifyResult) {
 	}
 	if res.Message != "" {
 		fmt.Fprintln(w, res.Message)
+	}
+	for _, warn := range res.Warnings {
+		fmt.Fprintf(w, "Warning:   %s\n", warn)
 	}
 	renderEvidence(w, res.Evidence, false)
 }

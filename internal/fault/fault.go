@@ -130,6 +130,11 @@ func MessageOf(err error) string {
 	return err.Error()
 }
 
+// CodeVerificationTimeout: a required check ran out of its budget. The
+// verification was built too slow for the task's size (or the code it
+// runs hangs); never counted against the attempt.
+const CodeVerificationTimeout Code = "VERIFICATION_TIMEOUT"
+
 // CodeUnhealthy: `at doctor` found a problem that stops the project from
 // being worked safely; the report is in the error details.
 const CodeUnhealthy Code = "UNHEALTHY"

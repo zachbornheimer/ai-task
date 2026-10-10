@@ -87,10 +87,21 @@ type Spec struct {
 	// Pins are paths (files, or directories by prefix) the task's branch
 	// must leave untouched; a change to one fails completion.
 	Pins []string
+	// Size declares how long the task's checks may take: small (the
+	// default), medium or large; the project's budgets give the seconds.
+	Size string
 	// Cohort names a coupled-verification cohort: members implement
 	// independently and are judged together on one assembled candidate.
 	Cohort string
 }
+
+// Sizes name how long a task's checks may take; the project's budgets
+// turn a size into seconds.
+const (
+	SizeSmall  = "small"
+	SizeMedium = "medium"
+	SizeLarge  = "large"
+)
 
 // Task is the stored contract.
 type Task struct {
@@ -105,6 +116,7 @@ type Task struct {
 	Acceptance    []AcceptanceCriterion `json:"acceptance,omitempty"`
 	Verification  verification.Policy   `json:"verification"`
 	Pins          []string              `json:"pins,omitempty"`
+	Size          string                `json:"size"`
 	Cohort        string                `json:"cohort,omitempty"`
 	ContractRev   int                   `json:"contract_rev"`
 	ArchivedAt    *time.Time            `json:"archived_at,omitempty"`
@@ -188,6 +200,14 @@ func (s *Spec) Validate() error {
 		pins = append(pins, p)
 	}
 	s.Pins = pins
+	s.Size = strings.ToLower(strings.TrimSpace(s.Size))
+	switch s.Size {
+	case "":
+		s.Size = SizeSmall
+	case SizeSmall, SizeMedium, SizeLarge:
+	default:
+		return fault.New(fault.CodeInvalidInput, "size must be small, medium or large (got %q)", s.Size)
+	}
 	accepted := s.Acceptance[:0]
 	for _, a := range s.Acceptance {
 		a.Description = strings.TrimSpace(a.Description)

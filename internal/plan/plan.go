@@ -49,6 +49,8 @@ type AddTask struct {
 	TaskChecks  []verification.CheckSpec
 	// Pins are paths the task's branch must leave untouched.
 	Pins []string
+	// Size: small (default), medium or large; caps the task checks' time.
+	Size string
 }
 
 // UpdateTask patches a task or group. nil means leave unchanged; a pointer
@@ -64,6 +66,7 @@ type UpdateTask struct {
 	Cohort         *string
 	TaskChecks     Patch[verification.CheckSpec]
 	Pins           Patch[string]
+	Size           *string
 	Requires       Patch[Ref] // replace the whole prerequisite set
 	AddRequires    []Ref
 	RemoveRequires []Ref

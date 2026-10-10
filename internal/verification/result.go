@@ -9,6 +9,9 @@ import (
 type Verdict struct {
 	Passed  bool
 	Summary string
+	// TimedOut lists required checks that ran out of time: a problem with
+	// how the verification was built (or a hang), not with what it tests.
+	TimedOut []string
 }
 
 // Judge decides whether a run passed from the policy it executed and the
@@ -25,7 +28,7 @@ func Judge(p Policy, evidence []Evidence) Verdict {
 	for _, e := range evidence {
 		byID[e.CheckID] = e
 	}
-	var failed, missing, optionalFailed []string
+	var failed, missing, optionalFailed, timedOut []string
 	passed := 0
 	for _, c := range p.RequiredChecks() {
 		e, ok := byID[c.ID]
@@ -34,6 +37,8 @@ func Judge(p Policy, evidence []Evidence) Verdict {
 			missing = append(missing, c.ID)
 		case e.Outcome == OutcomePassed:
 			passed++
+		case e.Outcome == OutcomeTimeout:
+			timedOut = append(timedOut, c.ID)
 		default:
 			failed = append(failed, fmt.Sprintf("%s (%s)", c.ID, e.Outcome))
 		}
@@ -48,9 +53,12 @@ func Judge(p Policy, evidence []Evidence) Verdict {
 			}
 		}
 	}
-	v := Verdict{Passed: len(failed) == 0 && len(missing) == 0}
+	v := Verdict{Passed: len(failed) == 0 && len(missing) == 0 && len(timedOut) == 0, TimedOut: timedOut}
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d/%d required checks passed", passed, len(p.RequiredChecks())))
+	if len(timedOut) > 0 {
+		parts = append(parts, "timed out: "+strings.Join(timedOut, ", "))
+	}
 	if len(failed) > 0 {
 		parts = append(parts, "failed: "+strings.Join(failed, ", "))
 	}

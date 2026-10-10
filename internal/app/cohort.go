@@ -525,13 +525,14 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 	// Every suite runs on its own disposable snapshot of the candidate so
 	// no member's checks can leave anything behind for another's, or for
 	// the shared regression suite.
-	runOn := func(policy verification.Policy, runID int64) ([]verification.Evidence, error) {
+	changed, _ := workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+job.proj.TargetBranch, candidate)
+	runOn := func(policy verification.Policy, runID int64, opts runOpts) ([]verification.Evidence, error) {
 		dir, cleanup, err := mgr.Snapshot(ctx, candidate)
 		if err != nil {
 			return nil, err
 		}
 		defer cleanup()
-		return e.runChecks(ctx, dir, policy, runID, candidate, fence)
+		return e.runChecks(ctx, dir, policy, runID, candidate, fence, opts)
 	}
 	finishAll := func(status sqlite.RunStatus, summary string) error {
 		now := e.now()
@@ -550,7 +551,8 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 	verdicts := map[int64]verification.Verdict{}
 	anyTaskFailed := false
 	for _, m := range job.members {
-		ev, err := runOn(verification.Policy{TaskChecks: m.policy.TaskChecks}, m.runID)
+		taskOpts, _ := suiteOpts(m.rec.Task, job.proj, changed)
+		ev, err := runOn(verification.Policy{TaskChecks: m.policy.TaskChecks}, m.runID, taskOpts)
 		evidence[m.runID] = ev
 		if err != nil {
 			_ = finishAll(sqlite.RunError, err.Error())
@@ -567,7 +569,8 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 		// Record the shared regression evidence under every member run so
 		// each run's evidence alone proves its policy.
 		first := job.members[0]
-		ev, err := runOn(verification.Policy{Regression: job.proj.Regression}, first.runID)
+		_, regOpts := suiteOpts(first.rec.Task, job.proj, changed)
+		ev, err := runOn(verification.Policy{Regression: job.proj.Regression}, first.runID, regOpts)
 		if err != nil {
 			_ = finishAll(sqlite.RunError, err.Error())
 			return false, err

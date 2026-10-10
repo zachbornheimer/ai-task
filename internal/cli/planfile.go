@@ -31,6 +31,7 @@ type planItem struct {
 	Checks         []checkItem `json:"checks"`
 	OptionalChecks []checkItem `json:"optional_checks"`
 	Pins           []string    `json:"pins"`
+	Size           string      `json:"size"`
 }
 
 // checkItem is a check as a plan file writes it: a string in the
@@ -197,7 +198,7 @@ func (it planItem) change(i int) (plan.Change, error) {
 		return nil, usage("item %d: title is required", i+1)
 	}
 	if it.Kind == "group" {
-		if len(it.Checks)+len(it.OptionalChecks)+len(it.Requires)+len(it.Blocks)+len(it.Acceptance)+len(it.Constraints)+len(it.Pins) > 0 || it.Cohort != "" || it.Outcome != "" {
+		if len(it.Checks)+len(it.OptionalChecks)+len(it.Requires)+len(it.Blocks)+len(it.Acceptance)+len(it.Constraints)+len(it.Pins) > 0 || it.Cohort != "" || it.Outcome != "" || it.Size != "" {
 			return nil, usage("item %d (%s): a group takes only key, title and parent", i+1, it.Title)
 		}
 		return plan.AddGroup{Key: it.Key, Title: it.Title, Parent: plan.Ref(it.Parent)}, nil
@@ -205,7 +206,7 @@ func (it planItem) change(i int) (plan.Change, error) {
 	if it.Kind != "" && it.Kind != "task" {
 		return nil, usage("item %d: kind must be task or group", i+1)
 	}
-	t := plan.AddTask{Key: it.Key, Title: it.Title, Outcome: it.Outcome, Parent: plan.Ref(it.Parent), Constraints: it.Constraints, Acceptance: it.Acceptance, Requires: refs(it.Requires), Blocks: refs(it.Blocks), Cohort: it.Cohort, Pins: it.Pins}
+	t := plan.AddTask{Key: it.Key, Title: it.Title, Outcome: it.Outcome, Parent: plan.Ref(it.Parent), Constraints: it.Constraints, Acceptance: it.Acceptance, Requires: refs(it.Requires), Blocks: refs(it.Blocks), Cohort: it.Cohort, Pins: it.Pins, Size: it.Size}
 	for n, c := range it.Checks {
 		cs, err := c.spec(n+1, true)
 		if err != nil {

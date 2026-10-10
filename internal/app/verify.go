@@ -121,7 +121,20 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	}
 	opCtx, stop := e.heartbeat(ctx, token)
 	fence := func(tx *sqlite.Tx) error { _, err := e.authorize(tx, token, e.now()); return err }
-	evidence, err := e.runChecks(opCtx, p.dir, policy, runID, revision, fence)
+	changed, _ := workspace.ChangedFiles(ctx, p.dir, "refs/heads/"+p.proj.TargetBranch)
+	if st, err := workspace.Inspect(ctx, p.dir); err == nil {
+		for _, line := range st.Dirty {
+			if len(line) > 3 {
+				changed = append(changed, line[3:])
+			}
+		}
+	}
+	taskOpts, regOpts := suiteOpts(p.rec.Task, p.proj, changed)
+	opts := taskOpts
+	if mode == verification.ModeRegression {
+		opts = regOpts
+	}
+	evidence, err := e.runChecks(opCtx, p.dir, policy, runID, revision, fence, opts)
 	if terr := stop(); terr != nil && err != nil {
 		err = fault.Wrap(terr, fault.CodeOf(terr), "verification aborted: claim authority was lost while checks ran")
 	}
@@ -145,6 +158,11 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	res.Passed, res.Summary = verdict.Passed, summary
 	res.Status = p.rec.Status(e.now(), p.proj.MaxAttempts)
 	res.Message = fmt.Sprintf("%s checks %s; this run does not complete the task", mode, status)
+	res.Warnings = budgetWarnings(evidence, policy, taskOpts.budget, regOpts.budget)
+	if len(verdict.TimedOut) > 0 {
+		res.Message = timeoutMessage(verdict, policy, taskOpts.budget, regOpts.budget, p.rec.Task.Size)
+		return res, &fault.Error{Code: fault.CodeVerificationTimeout, Message: fmt.Sprintf("%s checks timed out for %s: %s", mode, p.rec.Task.ID, summary), Details: res}
+	}
 	if !verdict.Passed {
 		return res, &fault.Error{Code: fault.CodeVerificationFailed, Message: fmt.Sprintf("%s checks failed for %s: %s", mode, p.rec.Task.ID, summary), Details: res}
 	}
@@ -156,15 +174,17 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // task check failed, in which case the regression rows are recorded as
 // skipped) the regression checks on a fresh snapshot. Nothing a task check
 // leaves behind can be the reason a regression check passes.
-func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
+func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project) ([]verification.Evidence, error) {
 	var out []verification.Evidence
+	changed, _ := workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
+	taskOpts, regOpts := suiteOpts(t, proj, changed)
 	taskPolicy := verification.Policy{TaskChecks: policy.TaskChecks}
 	if len(taskPolicy.TaskChecks) > 0 {
 		dir, cleanup, err := mgr.Snapshot(ctx, revision)
 		if err != nil {
 			return nil, err
 		}
-		ev, err := e.runChecks(ctx, dir, taskPolicy, runID, revision, fence)
+		ev, err := e.runChecks(ctx, dir, taskPolicy, runID, revision, fence, taskOpts)
 		cleanup()
 		out = append(out, ev...)
 		if err != nil {
@@ -189,7 +209,7 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 	if err != nil {
 		return out, err
 	}
-	ev, err := e.runChecks(ctx, dir, regPolicy, runID, revision, fence)
+	ev, err := e.runChecks(ctx, dir, regPolicy, runID, revision, fence, regOpts)
 	cleanup()
 	return append(out, ev...), err
 }
@@ -199,7 +219,7 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 func (e *Engine) runChecksSkipping(ctx context.Context, policy verification.Policy, runID int64, revision, digest string, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
 	var out []verification.Evidence
 	for _, step := range verification.Plan(policy) {
-		ev := e.execStep(ctx, "", step, runID, revision, digest, true)
+		ev := e.execStep(ctx, "", step, runID, revision, digest, true, 0, nil)
 		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 			if err := fence(tx); err != nil {
 				return err
@@ -215,17 +235,59 @@ func (e *Engine) runChecksSkipping(ctx context.Context, policy verification.Poli
 	return out, nil
 }
 
+// runOpts tunes one suite run: the time budget for the whole suite (0 =
+// none), what the budget is called in messages, and the files the
+// candidate changed against the target, handed to checks as
+// AT_CHANGED_FILES so a regression check can target affected tests.
+type runOpts struct {
+	budget     time.Duration
+	budgetName string
+	changed    []string
+	target     string
+}
+
+// suiteOpts derives the task-check and regression budgets for a task
+// from its size and the project.
+func suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, regOpts runOpts) {
+	size := t.Size
+	if size == "" {
+		size = task.SizeSmall
+	}
+	taskOpts = runOpts{budget: proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch}
+	regOpts = runOpts{budget: proj.Budgets.RegressionBudget(), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch}
+	return taskOpts, regOpts
+}
+
 // runChecks executes a policy's checks in dir in planner order, committing
 // each evidence row as it lands. fence is evaluated in each evidence
 // transaction; a failure (lost authority, superseded run) stops the run.
-func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.Policy, runID int64, revision string, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
+// The suite shares one budget: a check that would start after it is spent
+// is recorded as timed out without running.
+func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.Policy, runID int64, revision string, fence func(*sqlite.Tx) error, opts runOpts) ([]verification.Evidence, error) {
 	var out []verification.Evidence
 	requiredTaskFailed := false
+	var deadline time.Time
+	if opts.budget > 0 {
+		deadline = time.Now().Add(opts.budget)
+	}
+	extra := changedFilesEnv(dir, opts)
 	for _, step := range verification.Plan(policy) {
 		if err := ctx.Err(); err != nil {
 			return out, fault.Wrap(err, fault.CodeInternal, "verification interrupted")
 		}
-		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed)
+		limit := step.Check.EffectiveTimeout()
+		budgetLimited := false
+		if !deadline.IsZero() {
+			if left := time.Until(deadline); left < limit {
+				limit, budgetLimited = left, true
+			}
+		}
+		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed, limit, extra)
+		if ev.Outcome == verification.OutcomeTimeout && budgetLimited {
+			ev.Message = fmt.Sprintf("exceeded %s (%s for the whole suite); the check is too slow for the task's size, or the code it runs hangs", opts.budgetName, opts.budget)
+		} else if ev.Outcome == verification.OutcomeTimeout {
+			ev.Message = fmt.Sprintf("exceeded the check's own timeout (%s)", limit)
+		}
 		if !step.Regression && step.Check.Required && ev.Outcome != verification.OutcomePassed {
 			requiredTaskFailed = true
 		}
@@ -244,7 +306,7 @@ func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.
 	return out, nil
 }
 
-func (e *Engine) execStep(ctx context.Context, dir string, step verification.Step, runID int64, revision, policyDigest string, skipRegression bool) verification.Evidence {
+func (e *Engine) execStep(ctx context.Context, dir string, step verification.Step, runID int64, revision, policyDigest string, skipRegression bool, timeout time.Duration, extraEnv []string) verification.Evidence {
 	c := step.Check
 	now := e.now()
 	ev := verification.Evidence{RunID: runID, CheckID: c.ID, CheckVersion: c.Version, CheckDigest: c.Digest(), Required: c.Required, Revision: revision, PolicyDigest: policyDigest, StartedAt: now, FinishedAt: now, ExitCode: -1}
@@ -253,7 +315,16 @@ func (e *Engine) execStep(ctx context.Context, dir string, step verification.Ste
 		ev.Message = "skipped: a required task check failed"
 		return ev
 	}
-	res := checkexec.Run(ctx, checkexec.Spec{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Timeout: c.EffectiveTimeout(), Env: checkEnv(dir)})
+	if timeout <= 0 && extraEnv != nil {
+		// The suite's budget is spent: nothing left for this check.
+		ev.Outcome = verification.OutcomeTimeout
+		ev.Message = "not run: the suite's budget was spent by earlier checks"
+		return ev
+	}
+	if timeout <= 0 {
+		timeout = c.EffectiveTimeout()
+	}
+	res := checkexec.Run(ctx, checkexec.Spec{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Timeout: timeout, Env: append(checkEnv(dir), extraEnv...)})
 	ev.StartedAt, ev.FinishedAt = res.StartedAt, res.FinishedAt
 	ev.ExitCode, ev.Stdout, ev.Stderr = res.ExitCode, res.Stdout, res.Stderr
 	switch {
@@ -301,6 +372,50 @@ func checkEnv(dir string) []string {
 		_ = os.MkdirAll(tmp, 0o700)
 	}
 	return append(env, "GOFLAGS="+flags, "AT_CHECK_DIR="+dir, "TMPDIR="+tmp)
+}
+
+// changedFilesEnv writes the candidate's changed paths next to the
+// snapshot and names the file and the target branch for the checks.
+// Always non-nil so execStep can tell a spent budget from "no budget".
+func changedFilesEnv(dir string, opts runOpts) []string {
+	env := []string{"AT_TARGET_BRANCH=" + opts.target}
+	tmp := os.TempDir()
+	if dir != "" {
+		tmp = dir + ".tmp"
+		_ = os.MkdirAll(tmp, 0o700)
+	}
+	path := filepath.Join(tmp, "at-changed-files")
+	if err := os.WriteFile(path, []byte(strings.Join(opts.changed, "\n")+"\n"), 0o600); err == nil {
+		env = append(env, "AT_CHANGED_FILES="+path)
+	}
+	return env
+}
+
+// budgetWarnings names required checks that passed but used more than
+// half of their suite's budget: CI machines are slower, so this is the
+// moment to speed the check up, split the task, or declare a larger size.
+func budgetWarnings(evidence []verification.Evidence, policy verification.Policy, taskBudget, regBudget time.Duration) []string {
+	regression := map[string]bool{}
+	for _, c := range policy.Regression {
+		regression[c.ID] = true
+	}
+	var w []string
+	for _, ev := range evidence {
+		if !ev.Required || ev.Outcome != verification.OutcomePassed {
+			continue
+		}
+		budget := taskBudget
+		if regression[ev.CheckID] {
+			budget = regBudget
+		}
+		if budget <= 0 {
+			continue
+		}
+		if took := ev.FinishedAt.Sub(ev.StartedAt); took*2 > budget {
+			w = append(w, fmt.Sprintf("check %s took %s of its %s budget; make it faster, split the task, or raise the size (CI is slower than this machine)", ev.CheckID, took.Round(time.Millisecond), budget))
+		}
+	}
+	return w
 }
 
 // finalRun carries the state of one verify-complete invocation.
@@ -418,6 +533,8 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		res.Evidence, res.Summary = evidence, summary
 		res.Status = e.statusOf(ctx, fr.rec.Task.ID)
 		switch {
+		case code == fault.CodeVerificationTimeout:
+			// message set by the caller: which budget, and whose problem
 		case class == classAttempt:
 			res.Message = "task NOT complete: a required check failed; the claim stays live for repair (counted against the attempt budget once)"
 		case code == fault.CodeIntegrationFailed && len(res.Conflicts) > 0:
@@ -476,7 +593,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	}
 	// Immutable inputs: detached snapshots of the submitted revision, one
 	// per check category.
-	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence)
+	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj)
 	if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(evidence) == 0 {
 		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
 	}
@@ -486,9 +603,15 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		return res, err
 	}
 	verdict := verification.Judge(fr.policy, evidence)
+	taskBudget, regBudget := fr.proj.Budgets.ForSize(fr.rec.Task.Size), fr.proj.Budgets.RegressionBudget()
+	if len(verdict.TimedOut) > 0 {
+		res.Message = timeoutMessage(verdict, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
+		return fail(sqlite.RunFailed, fault.CodeVerificationTimeout, verdict.Summary, evidence)
+	}
 	if !verdict.Passed {
 		return fail(sqlite.RunFailed, fault.CodeVerificationFailed, verdict.Summary, evidence)
 	}
+	res.Warnings = budgetWarnings(evidence, fr.policy, taskBudget, regBudget)
 	spec := intentSpec{proj: fr.proj, taskID: fr.rec.Task.ID, attemptID: fr.attempt.ID, runID: fr.runID, submission: fr.submission, owner: fr.token.Digest(), contractRev: fr.contractRev, regression: fr.regressionID, policy: fr.policy, source: fr.revision}
 	done := func(final string) (VerifyResult, error) {
 		res.Evidence, res.Passed, res.Completed = evidence, true, true
@@ -556,7 +679,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		final := fr.revision
 		if cand.Revision != fr.revision {
-			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence)
+			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj)
 			if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(more) == 0 {
 				cand.Cleanup()
 				return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
@@ -569,7 +692,12 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			evidence = append(evidence, more...)
 			if v := verification.Judge(fr.policy, more); !v.Passed {
 				cand.Cleanup()
-				return fail(sqlite.RunFailed, fault.CodeVerificationFailed, "integrated candidate "+short(cand.Revision)+": "+v.Summary, evidence)
+				code := fault.CodeVerificationFailed
+				if len(v.TimedOut) > 0 {
+					code = fault.CodeVerificationTimeout
+					res.Message = timeoutMessage(v, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
+				}
+				return fail(sqlite.RunFailed, code, "integrated candidate "+short(cand.Revision)+": "+v.Summary, evidence)
 			}
 			final = cand.Revision
 		}
@@ -749,4 +877,35 @@ func pinnedChanges(pins, changed []string) []string {
 		}
 	}
 	return hit
+}
+
+// timeoutMessage explains a timed-out verdict: a task-check timeout is a
+// verification-construction problem (or a hang) the agent can fix by
+// making the check faster or asking for a larger size; a regression
+// timeout is the project's gate being too slow, a planner's problem.
+// Neither counts against the attempt.
+func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudget, regBudget time.Duration, size string) string {
+	regression := map[string]bool{}
+	for _, c := range policy.Regression {
+		regression[c.ID] = true
+	}
+	var taskIDs, regIDs []string
+	for _, id := range v.TimedOut {
+		if regression[id] {
+			regIDs = append(regIDs, id)
+		} else {
+			taskIDs = append(taskIDs, id)
+		}
+	}
+	if size == "" {
+		size = task.SizeSmall
+	}
+	var parts []string
+	if len(taskIDs) > 0 {
+		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task, or the code it runs hangs; make the check prove only this outcome, split the task, or have the planner set a larger --size", strings.Join(taskIDs, ", "), size, taskBudget))
+	}
+	if len(regIDs) > 0 {
+		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (AT_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))
+	}
+	return "task NOT complete: " + strings.Join(parts, "; ") + " (a timeout is never counted against the attempt)"
 }

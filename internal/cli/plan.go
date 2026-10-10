@@ -174,6 +174,10 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	var regChecks stringList
 	c.fs.Var(&regChecks, "regression-check", "regression check \"[id:] command args...\" (repeatable; replaces the list)")
 	maxAttempts := c.fs.Int("max-attempts", -1, "failed attempts before a task needs attention (0 = unlimited)")
+	budgetSmall := c.fs.String("budget-small", "", "task-check budget for small tasks (default 30s; 'none' = unlimited)")
+	budgetMedium := c.fs.String("budget-medium", "", "task-check budget for medium tasks (default 5m; 'none' = unlimited)")
+	budgetLarge := c.fs.String("budget-large", "", "task-check budget for large tasks (default 15m; 'none' = unlimited)")
+	regressionBudget := c.fs.String("regression-budget", "", "budget for the regression suite (default 2m; 'none' = unlimited)")
 	cooldown := c.fs.Duration("retry-cooldown", -1, "delay before re-claiming a failed task")
 	if err := c.parse(args); err != nil {
 		return err
@@ -228,6 +232,19 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	if *maxAttempts >= 0 {
 		p.MaxAttempts, changed = *maxAttempts, true
 	}
+	for _, b := range []struct {
+		flag string
+		dst  *time.Duration
+	}{{*budgetSmall, &p.Budgets.Small}, {*budgetMedium, &p.Budgets.Medium}, {*budgetLarge, &p.Budgets.Large}, {*regressionBudget, &p.Budgets.Regression}} {
+		if b.flag == "" {
+			continue
+		}
+		d, err := parseBudget(b.flag)
+		if err != nil {
+			return err
+		}
+		*b.dst, changed = d, true
+	}
 	if *cooldown >= 0 {
 		p.RetryCooldown, changed = *cooldown, true
 	}
@@ -240,7 +257,7 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 		}
 	}
 	return c.emit(p, func(w io.Writer) {
-		fmt.Fprintf(w, "Project:      %s · %s\nRoot:         %s\nIntegration:  %s\nTarget:       %s\nPlan rev:     %d\nMax attempts: %d\nCooldown:     %s\nRegression:   %d check(s)\n", p.ID, p.Name, p.RootPath, p.Integration, p.TargetBranch, p.PlanRev, p.MaxAttempts, p.RetryCooldown, len(p.Regression))
+		fmt.Fprintf(w, "Project:      %s · %s\nRoot:         %s\nIntegration:  %s\nTarget:       %s\nPlan rev:     %d\nMax attempts: %d\nCooldown:     %s\nBudgets:      small %s · medium %s · large %s · regression %s\nRegression:   %d check(s)\n", p.ID, p.Name, p.RootPath, p.Integration, p.TargetBranch, p.PlanRev, p.MaxAttempts, p.RetryCooldown, budgetText(p.Budgets.ForSize("small")), budgetText(p.Budgets.ForSize("medium")), budgetText(p.Budgets.ForSize("large")), budgetText(p.Budgets.RegressionBudget()), len(p.Regression))
 		for _, ch := range p.Regression {
 			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
 		}
@@ -285,6 +302,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	var constraints, accept, checks, optionalChecks, requires, blocks, pins stringList
 	c.fs.Var(&constraints, "constraint", "constraint (repeatable)")
 	c.fs.Var(&pins, "pin", "path (file, or directory prefix) this task may not change; verify complete refuses if it did (repeatable)")
+	size := c.fs.String("size", "", "how long the task's checks may take: small (default, 30s), medium (5m) or large (15m); the project's budgets set the seconds")
 	c.fs.Var(&accept, "accept", "acceptance criterion (repeatable)")
 	c.fs.Var(&checks, "check", "required task check: \"[id:] command args...\" (repeatable)")
 	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable)")
@@ -312,12 +330,12 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
-		if len(checks)+len(optionalChecks)+len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" {
+		if len(checks)+len(optionalChecks)+len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" || *size != "" {
 			return usage("--group takes only --key and --parent; checks, prerequisites, blockers, cohort, outcome, acceptance, constraints and pins belong to tasks")
 		}
 		op = plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent)}
 	} else {
-		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort, Pins: pins}
+		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort, Pins: pins, Size: *size}
 		if *policyJSON != "" {
 			var pol verification.Policy
 			if err := json.Unmarshal([]byte(*policyJSON), &pol); err != nil {
@@ -485,6 +503,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	var constraints, accept, checks, optionalChecks, requires, remove, setRequires, pins stringList
 	c.fs.Var(&constraints, "constraint", "replace constraints (repeatable)")
 	c.fs.Var(&pins, "pin", "replace pinned paths (repeatable; use once with empty value to clear)")
+	size := c.fs.String("size", "", "set the size: small, medium or large")
 	c.fs.Var(&accept, "accept", "replace acceptance criteria (repeatable)")
 	c.fs.Var(&checks, "check", "replace task checks (repeatable)")
 	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable, with --check)")
@@ -511,7 +530,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
 		}
-		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *reset || *withdraw {
+		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *size != "" || *reset || *withdraw {
 			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
@@ -541,6 +560,9 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 				}
 			}
 			u.Pins = plan.Replace(set)
+		}
+		if *size != "" {
+			u.Size = size
 		}
 		if len(accept) > 0 {
 			u.Acceptance = plan.Replace([]string(accept))
@@ -688,6 +710,25 @@ func runStatus(ctx context.Context, c *ctxt, args []string) error {
 }
 
 var _ = time.Second
+
+// parseBudget reads a budget flag: a duration, or "none" for no cap.
+func parseBudget(s string) (time.Duration, error) {
+	if strings.EqualFold(strings.TrimSpace(s), "none") {
+		return project.Unlimited, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 0, usage("budget %q: expected a duration such as 30s or 2m, or 'none'", s)
+	}
+	return d, nil
+}
+
+func budgetText(d time.Duration) string {
+	if d <= 0 {
+		return "unlimited"
+	}
+	return d.String()
+}
 
 func runPrune(ctx context.Context, c *ctxt, args []string) error {
 	if err := c.parse(args); err != nil {

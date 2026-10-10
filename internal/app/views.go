@@ -98,6 +98,7 @@ type TaskView struct {
 	Acceptance  []task.AcceptanceCriterion `json:"acceptance,omitempty"`
 	Checks      []verification.CheckSpec   `json:"task_checks,omitempty"`
 	Pins        []string                   `json:"pins,omitempty"`
+	Size        string                     `json:"size,omitempty"`
 	Cohort      string                     `json:"cohort,omitempty"`
 	ContractRev int                        `json:"contract_rev"`
 	Status      task.Status                `json:"status"`
@@ -230,6 +231,8 @@ type VerifyResult struct {
 	// Conflicts lists the files that stopped the submitted revision from
 	// merging into the target branch (INTEGRATION_FAILED only).
 	Conflicts []string `json:"conflicts,omitempty"`
+	// Warnings: checks that passed but used more than half their budget.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 func rel(r sqlite.Record, st task.Status) Rel {
@@ -297,7 +300,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	t := r.Task
 	v := TaskView{
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
-		Checks: t.Verification.TaskChecks, Pins: t.Pins, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
+		Checks: t.Verification.TaskChecks, Pins: t.Pins, Size: t.Size, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
 	}

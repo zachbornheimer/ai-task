@@ -150,7 +150,7 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
-       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.pins_json
+       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.pins_json, t.size
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
 LEFT JOIN submissions s ON s.id = t.latest_submission_id
@@ -178,7 +178,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch, &aLease,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
-		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &pins)
+		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &pins, &r.Task.Size)
 	if err != nil {
 		return r, err
 	}
@@ -267,9 +267,13 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if err != nil {
 		return wrapInternal(err, "encode pins")
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at, pins_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins))
+	size := tk.Size
+	if size == "" {
+		size = task.SizeSmall
+	}
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at, pins_json, size)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins), size)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return err // caller distinguishes id vs key collisions
@@ -310,8 +314,12 @@ func (t *Tx) UpdateTaskContract(tk task.Task, now time.Time) error {
 	if err != nil {
 		return wrapInternal(err, "encode pins")
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, cohort = ?, pins_json = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
-		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, string(pins), ms(now), tk.ID)
+	size := tk.Size
+	if size == "" {
+		size = task.SizeSmall
+	}
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, cohort = ?, pins_json = ?, size = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
+		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, string(pins), size, ms(now), tk.ID)
 	if err != nil {
 		return wrapInternal(err, "update task")
 	}

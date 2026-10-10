@@ -7,6 +7,7 @@ package project
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -75,8 +76,61 @@ type Project struct {
 	MaxAttempts int `json:"max_attempts"`
 	// RetryCooldown delays re-claiming a task after a failed attempt.
 	RetryCooldown time.Duration `json:"retry_cooldown_ms"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	// Budgets cap verification time: a task's checks by its size, the
+	// regression suite by the project. Zero means the built-in default,
+	// Unlimited disables the cap.
+	Budgets   Budgets   `json:"budgets"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Budgets are verification time caps. Stored values: 0 = built-in default,
+// Unlimited = no cap.
+type Budgets struct {
+	Small      time.Duration `json:"small_ms"`
+	Medium     time.Duration `json:"medium_ms"`
+	Large      time.Duration `json:"large_ms"`
+	Regression time.Duration `json:"regression_ms"`
+}
+
+// Unlimited marks a budget with no cap.
+const Unlimited time.Duration = -1
+
+// Built-in budgets, after Google's test sizes and Bazel's timeouts, tuned
+// for an agent's feedback loop: a small task proves itself in half a
+// minute, the regression gate in two, and anything slower is a medium or
+// large task by declaration.
+const (
+	DefaultSmallBudget      = 30 * time.Second
+	DefaultMediumBudget     = 5 * time.Minute
+	DefaultLargeBudget      = 15 * time.Minute
+	DefaultRegressionBudget = 2 * time.Minute
+)
+
+// ForSize is the effective task-check budget for a size (0 = no cap).
+func (b Budgets) ForSize(size string) time.Duration {
+	switch size {
+	case "medium":
+		return effective(b.Medium, DefaultMediumBudget)
+	case "large":
+		return effective(b.Large, DefaultLargeBudget)
+	}
+	return effective(b.Small, DefaultSmallBudget)
+}
+
+// RegressionBudget is the effective regression-suite budget (0 = no cap).
+func (b Budgets) RegressionBudget() time.Duration {
+	return effective(b.Regression, DefaultRegressionBudget)
+}
+
+func effective(v, def time.Duration) time.Duration {
+	switch {
+	case v == Unlimited:
+		return 0
+	case v <= 0:
+		return def
+	}
+	return v
 }
 
 // DefaultMaxAttempts applies to new projects.
@@ -238,3 +292,44 @@ func validBase32(s string, n int) bool {
 // (task IDs, session tokens) so that one alphabet is defined once.
 func RandomBase32(n int) string        { return randomBase32(rand.Reader, n) }
 func ValidBase32(s string, n int) bool { return validBase32(s, n) }
+
+// MarshalJSON writes budgets in milliseconds, matching the field names;
+// Unlimited is -1.
+func (b Budgets) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Small      int64 `json:"small_ms"`
+		Medium     int64 `json:"medium_ms"`
+		Large      int64 `json:"large_ms"`
+		Regression int64 `json:"regression_ms"`
+	}
+	return json.Marshal(wire{budgetMS(b.Small), budgetMS(b.Medium), budgetMS(b.Large), budgetMS(b.Regression)})
+}
+
+// UnmarshalJSON reads the millisecond form.
+func (b *Budgets) UnmarshalJSON(data []byte) error {
+	var w struct {
+		Small      int64 `json:"small_ms"`
+		Medium     int64 `json:"medium_ms"`
+		Large      int64 `json:"large_ms"`
+		Regression int64 `json:"regression_ms"`
+	}
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	*b = Budgets{Small: budgetFromMS(w.Small), Medium: budgetFromMS(w.Medium), Large: budgetFromMS(w.Large), Regression: budgetFromMS(w.Regression)}
+	return nil
+}
+
+func budgetMS(d time.Duration) int64 {
+	if d == Unlimited {
+		return -1
+	}
+	return d.Milliseconds()
+}
+
+func budgetFromMS(v int64) time.Duration {
+	if v < 0 {
+		return Unlimited
+	}
+	return time.Duration(v) * time.Millisecond
+}

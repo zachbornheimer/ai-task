@@ -200,7 +200,7 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 		return "", fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check; task checks cannot shadow regression checks", cid)
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, Pins: spec.Pins, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, Pins: spec.Pins, Size: spec.Size, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := 0; attempt < 5; attempt++ {
 		t.ID = a.e.newID()
 		err := a.tx.InsertTask(t)
@@ -228,7 +228,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins, Size: c.Size}
 	for _, acc := range c.Acceptance {
 		spec.Acceptance = append(spec.Acceptance, task.AcceptanceCriterion{Description: acc})
 	}
@@ -297,7 +297,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	}
 	a.result.Created[a.createdName(i, c.Key)] = id
 	a.result.Changed++
-	if w := spec.Warnings(); len(w) > 0 {
+	if w := append(spec.Warnings(), planBudgetWarnings(spec, a.proj)...); len(w) > 0 {
 		if a.result.Warnings == nil {
 			a.result.Warnings = map[string][]string{}
 		}
@@ -311,7 +311,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 // cohort, parent, and prerequisite set).
 func (a *applier) sameDefinition(existing sqlite.Record, spec task.Spec, requires []task.ID) (bool, error) {
 	t := existing.Task
-	if t.Archived() || t.Kind != spec.Kind || t.Description != spec.Description || t.Outcome != spec.Outcome || t.Cohort != spec.Cohort || t.ParentID != spec.ParentID {
+	if t.Archived() || t.Kind != spec.Kind || t.Description != spec.Description || t.Outcome != spec.Outcome || t.Cohort != spec.Cohort || t.ParentID != spec.ParentID || t.Size != spec.Size {
 		return false, nil
 	}
 	if err := a.tx.LoadAcceptance(&t); err != nil {
@@ -462,7 +462,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set
+	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) {
 		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
@@ -540,6 +540,9 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if c.Pins.Set {
 		t.Pins, changed = c.Pins.Value, true
 	}
+	if c.Size != nil {
+		t.Size, changed = *c.Size, true
+	}
 	if c.TaskChecks.Set {
 		if t.Kind == task.KindTask {
 			if err := verification.RequireGate(c.TaskChecks.Value, "task checks"); err != nil {
@@ -566,11 +569,11 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		t.ParentID, changed = parent, true
 	}
 	if contract {
-		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Cohort: t.Cohort, Pins: t.Pins}
+		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Cohort: t.Cohort, Pins: t.Pins, Size: t.Size}
 		if err := spec.Validate(); err != nil {
 			return err
 		}
-		t.Pins = spec.Pins
+		t.Pins, t.Size = spec.Pins, spec.Size
 		if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 			return fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check", cid)
 		}
@@ -804,4 +807,21 @@ func referenceOrder(ops []plan.Change) ([]int, error) {
 		}
 	}
 	return order, nil
+}
+
+// budgetWarnings flags a small task whose check looks like a whole-suite
+// run: it must finish within the small budget, so either narrow the
+// check to what proves this outcome or declare a larger size.
+func planBudgetWarnings(spec task.Spec, proj project.Project) []string {
+	if spec.Size != task.SizeSmall {
+		return nil
+	}
+	var w []string
+	for _, c := range spec.Verification.TaskChecks {
+		cmd := strings.Join(c.Command, " ")
+		if strings.Contains(cmd, "./...") || strings.Contains(cmd, " test ./") && !strings.Contains(cmd, "-run") {
+			w = append(w, fmt.Sprintf("check %q looks like a whole-suite run; a small task's checks must finish within %s (narrow it to this outcome, e.g. -run, or set --size medium|large)", c.ID, proj.Budgets.ForSize(task.SizeSmall)))
+		}
+	}
+	return w
 }

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -126,13 +127,25 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 			add("baseline", false, "error", fmt.Sprintf("cannot snapshot %s: %v", p.TargetBranch, fault.MessageOf(err)), "")
 		} else {
 			var failed []verification.Evidence
+			started := time.Now()
 			for _, step := range verification.Plan(regression) {
-				ev := e.execStep(ctx, dir, step, 0, rep.TargetRevision, regression.Digest(), false)
+				ev := e.execStep(ctx, dir, step, 0, rep.TargetRevision, regression.Digest(), false, 0, nil)
 				if ev.Required && ev.Outcome != verification.OutcomePassed {
 					failed = append(failed, ev)
 				}
 			}
+			took := time.Since(started).Round(time.Millisecond)
 			cleanup()
+			budget := p.Budgets.RegressionBudget()
+			switch {
+			case len(failed) > 0:
+			case budget > 0 && took > budget:
+				add("regression_budget", false, "error", fmt.Sprintf("the regression suite took %s on %s, over the %s budget; `verify complete` would time out for every task", took, p.TargetBranch, budget), "narrow the gate to affected tests (checks get AT_CHANGED_FILES), move the full suite to CI or an epic check, or raise `at project --regression-budget`")
+			case budget > 0 && took*2 > budget:
+				add("regression_budget", false, "warning", fmt.Sprintf("the regression suite took %s, more than half of the %s budget; CI machines are slower", took, budget), "speed the gate up before it starts timing out")
+			default:
+				add("regression_budget", true, "info", fmt.Sprintf("regression suite ran in %s (budget %s)", took, budgetLabel(budget)), "")
+			}
 			if len(failed) > 0 {
 				ids := make([]string, 0, len(failed))
 				for _, ev := range failed {
@@ -183,4 +196,11 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 		add("plan", true, "info", fmt.Sprintf("%d open task(s), %d claimable, %d active", sum.Open, sum.Claimable, sum.Active), "")
 	}
 	return rep, nil
+}
+
+func budgetLabel(d time.Duration) string {
+	if d <= 0 {
+		return "unlimited"
+	}
+	return d.String()
 }

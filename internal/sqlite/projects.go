@@ -9,18 +9,19 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-const projectColumns = `id, name, root_path, integration, regression_json, plan_rev, target_branch, workspace_root, max_attempts, retry_cooldown_ms, created_at, updated_at`
+const projectColumns = `id, name, root_path, integration, regression_json, plan_rev, target_branch, workspace_root, max_attempts, retry_cooldown_ms, created_at, updated_at, budget_small_ms, budget_medium_ms, budget_large_ms, regression_budget_ms`
 
 func scanProject(sc interface{ Scan(...any) error }) (project.Project, error) {
 	var p project.Project
 	var root sql.NullString
 	var regression string
-	var created, updated, cooldown int64
-	if err := sc.Scan(&p.ID, &p.Name, &root, &p.Integration, &regression, &p.PlanRev, &p.TargetBranch, &p.WorkspaceRoot, &p.MaxAttempts, &cooldown, &created, &updated); err != nil {
+	var created, updated, cooldown, bs, bm, bl, br int64
+	if err := sc.Scan(&p.ID, &p.Name, &root, &p.Integration, &regression, &p.PlanRev, &p.TargetBranch, &p.WorkspaceRoot, &p.MaxAttempts, &cooldown, &created, &updated, &bs, &bm, &bl, &br); err != nil {
 		return p, err
 	}
 	p.RootPath = root.String
 	p.RetryCooldown = time.Duration(cooldown) * time.Millisecond
+	p.Budgets = project.Budgets{Small: budgetFromMS(bs), Medium: budgetFromMS(bm), Large: budgetFromMS(bl), Regression: budgetFromMS(br)}
 	p.CreatedAt, p.UpdatedAt = fromMS(created), fromMS(updated)
 	pol, err := verification.Parse([]byte(regression))
 	if err != nil {
@@ -41,8 +42,9 @@ func (t *Tx) InsertProject(p project.Project) error {
 	if p.RootPath != "" {
 		root = p.RootPath
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, root, p.Integration, string(regression), p.PlanRev, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(p.CreatedAt), ms(p.UpdatedAt))
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, root, p.Integration, string(regression), p.PlanRev, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(p.CreatedAt), ms(p.UpdatedAt),
+		budgetMS(p.Budgets.Small), budgetMS(p.Budgets.Medium), budgetMS(p.Budgets.Large), budgetMS(p.Budgets.Regression))
 	if IsUniqueViolation(err) {
 		return fault.Wrap(err, fault.CodeInvalidInput, "project id or root path already registered")
 	}
@@ -140,8 +142,9 @@ func (t *Tx) UpdateProject(p project.Project, now time.Time) error {
 	if p.RootPath != "" {
 		root = p.RootPath
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, root_path = ?, integration = ?, regression_json = ?, target_branch = ?, workspace_root = ?, max_attempts = ?, retry_cooldown_ms = ?, updated_at = ? WHERE id = ?`,
-		p.Name, root, p.Integration, string(regression), p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(now), p.ID)
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, root_path = ?, integration = ?, regression_json = ?, target_branch = ?, workspace_root = ?, max_attempts = ?, retry_cooldown_ms = ?, updated_at = ?, budget_small_ms = ?, budget_medium_ms = ?, budget_large_ms = ?, regression_budget_ms = ? WHERE id = ?`,
+		p.Name, root, p.Integration, string(regression), p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(now),
+		budgetMS(p.Budgets.Small), budgetMS(p.Budgets.Medium), budgetMS(p.Budgets.Large), budgetMS(p.Budgets.Regression), p.ID)
 	if IsUniqueViolation(err) {
 		return fault.Wrap(err, fault.CodeInvalidInput, "root path already registered to another project")
 	}
@@ -203,4 +206,19 @@ func (t *Tx) PlanRev(pid project.ID, expected uint64) (uint64, error) {
 		return 0, fault.New(fault.CodePlanConflict, "plan revision is %d, change set expected %d; re-read the plan and re-review", current, expected)
 	}
 	return current, nil
+}
+
+// budgetMS stores a budget: Unlimited as -1, otherwise milliseconds.
+func budgetMS(d time.Duration) int64 {
+	if d == project.Unlimited {
+		return -1
+	}
+	return d.Milliseconds()
+}
+
+func budgetFromMS(v int64) time.Duration {
+	if v < 0 {
+		return project.Unlimited
+	}
+	return time.Duration(v) * time.Millisecond
 }

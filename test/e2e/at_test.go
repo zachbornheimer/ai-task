@@ -659,3 +659,47 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 		t.Fatal("--no-instructions wrote AGENTS.md")
 	}
 }
+
+// TestSizesBudgetsAndDoctorTiming: sizes travel through add, update, plan
+// files and show; project budgets are set with durations or "none"; the
+// context states them; doctor fails a project whose regression suite is
+// over budget.
+func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
+	e := gitEnv(t)
+	big := e.ok("add", "Big", "--key", "big", "--size", "large", "--check", "u: true")
+	if big["task"].(map[string]any)["size"] != "large" {
+		t.Fatalf("size: %v", big)
+	}
+	e.fails("INVALID_INPUT", "add", "Odd", "--size", "huge", "--check", "u: true")
+	e.ok("update", "big", "--size", "medium", "--planner")
+	if e.ok("show", "big")["size"] != "medium" {
+		t.Fatal("size not updated")
+	}
+	r := e.runIn(e.cwd, `{"key":"s","title":"S","size":"small","checks":["u: true"]}`, nil, "add", "-f", "-")
+	if r.code != 0 {
+		t.Fatalf("plan file size: %s", r.stdout)
+	}
+	cx := e.ok("context", "big")["prompt"].(string)
+	if !strings.Contains(cx, "task checks 5m0s (size medium), regression 2m0s") {
+		t.Fatalf("context budgets: %s", cx)
+	}
+	proj := e.ok("project", "--budget-small", "45s", "--regression-budget", "none")
+	b := proj["budgets"].(map[string]any)
+	if b["small_ms"].(float64) != 45000 || b["regression_ms"].(float64) != -1 {
+		t.Fatalf("budgets: %v", b)
+	}
+	e.fails("INVALID_INPUT", "project", "--budget-large", "soon")
+	// A regression gate over its budget is a doctor error, before any task pays for it.
+	e.ok("project", "--regression-budget", "300ms", "--regression-check", "slow: sleep 1")
+	rr := e.fails("UNHEALTHY", "doctor")
+	found := false
+	for _, ch := range rr.env["error"].(map[string]any)["details"].(map[string]any)["checks"].([]any) {
+		m := ch.(map[string]any)
+		if m["id"] == "regression_budget" && m["ok"] == false && m["severity"] == "error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("doctor did not flag the slow gate: %s", rr.stdout)
+	}
+}

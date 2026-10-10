@@ -41,6 +41,7 @@ domain failure, `2` usage error. Progress never goes to JSON stdout.
 | `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED` | authority failures |
 | `MISSING_VERIFICATION` | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim |
 | `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once |
+| `VERIFICATION_TIMEOUT` | a required check ran out of its budget (`timed_out` evidence): the verification is built too slow for the task's size, or the code hangs; never counted against the attempt; `details.message` says which budget and whose problem |
 | `VERIFICATION_RUNNING` | this attempt's `verify complete` is still running; wait for its result |
 | `INTEGRATION_FAILED` | merge conflict (`details.conflicts` lists the files; merge the target branch into the task branch, commit, verify again), moved target that kept moving, or dirty target checkout; never a strike |
 | `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes at `verify complete` / the worktree is gone |
@@ -74,7 +75,9 @@ session beside the plan result: the fast path for a small change.
 `at doctor [--skip-baseline]` checks a project before planning or
 starting workers: repository and target branch resolve, a Git identity
 exists for commits, the regression suite is defined and passes on the
-target branch (so no worker is charged for a broken baseline), the
+target branch within the regression budget (over budget is an error,
+over half is a warning: CI is slower), so no worker is charged for a
+broken or slow baseline, the
 workspace root is writable, quarantined worktrees, tasks needing
 attention, a stalled plan, and Worktrunk's commit-message setup when
 `wt` is installed. An error-severity finding makes it `UNHEALTHY` with
@@ -87,6 +90,17 @@ stale `--expect-rev`), a different request under the same key is
 - Every task carries at least one task check (`--check`). `add` without
   one is `MISSING_VERIFICATION`; `update --check` replaces the set but
   cannot empty it. A trivial check (`true`) is the planner's own risk.
+- `--size small|medium|large` (default small) declares how long the
+  task's checks may take; the project's budgets turn it into seconds
+  (defaults 30s, 5m, 15m; the regression suite 2m; `at project
+  --budget-small 45s --regression-budget 3m`, `none` for no cap). The
+  whole suite shares the budget: a check that would start after it is
+  spent is recorded as `timed_out` without running. A small task whose
+  check runs the whole module gets a planning warning. `verify` results
+  carry `warnings` for checks that passed using more than half their
+  budget. Checks run with `AT_CHANGED_FILES` (a file listing the paths the
+  candidate changed against the target) and `AT_TARGET_BRANCH`, so a
+  regression check can run only affected tests.
 - `--pin PATH` names files, or directories by prefix, the task may not
   change: test files and check scripts it does not own, generated files,
   lockfiles. `verify complete` refuses a submission that touched one

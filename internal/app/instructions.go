@@ -48,6 +48,12 @@ Everything that changes this repository goes through ` + "`at`" + `.
 - One task = one independently verifiable outcome. Plan the checks before
   the code; the regression suite carries the weight, task checks prove
   the outcome, and ` + "`--pin`" + ` protects files the task must not touch.
+- Checks must be fast. A task is ` + "`--size small`" + ` (30s of checks) unless
+  declared medium (5m) or large (15m); the regression gate has 2m. A check
+  that runs out of time is a verification-construction problem, not a
+  code failure: prove only this outcome (` + "`-run`" + `, one package), split the
+  task, or declare the size. Regression checks get ` + "`AT_CHANGED_FILES`" + ` to
+  target affected tests; the full suite belongs in CI.
 
 ## Verbs
 
