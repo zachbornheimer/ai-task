@@ -236,6 +236,9 @@ func (c *ctxt) fail(err error) int {
 				fmt.Fprintf(c.env.Stderr, "  %s\n", vr.Message)
 			}
 		}
+		if rep, ok := details.(app.DoctorReport); ok {
+			renderDoctor(c.env.Stderr, rep)
+		}
 		if sum, ok := details.(app.Summary); ok {
 			for _, r := range sum.Reasons {
 				fmt.Fprintf(c.env.Stderr, "  %s\n", r)
