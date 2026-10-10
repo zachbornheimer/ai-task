@@ -50,16 +50,29 @@ func (e *Engine) groupReady(tx *sqlite.Tx, rec sqlite.Record, proj project.Proje
 	if err != nil || prog.Total == 0 || prog.Complete != prog.Total {
 		return false, err
 	}
-	children, err := tx.Children(rec.Task.ID)
+	unverified, err := hasUnverifiedEpic(tx, rec.Task.ID)
+	return !unverified, err
+}
+
+// hasUnverifiedEpic reports whether any group with checks beneath id, at
+// any depth and through plain groups, is not yet complete.
+func hasUnverifiedEpic(tx *sqlite.Tx, id task.ID) (bool, error) {
+	children, err := tx.Children(id)
 	if err != nil {
 		return false, err
 	}
 	for _, c := range children {
-		if c.Task.Kind == task.KindGroup && verification.HasRequired(c.Task.Verification.TaskChecks) && c.CompletedAt == nil {
-			return false, nil
+		if c.Task.Kind != task.KindGroup {
+			continue
+		}
+		if verification.HasRequired(c.Task.Verification.TaskChecks) && c.CompletedAt == nil {
+			return true, nil
+		}
+		if nested, err := hasUnverifiedEpic(tx, c.Task.ID); err != nil || nested {
+			return nested, err
 		}
 	}
-	return true, nil
+	return false, nil
 }
 
 // latestGroupRun is the newest group-mode run of a group, if any.
