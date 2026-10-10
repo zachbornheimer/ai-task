@@ -232,6 +232,9 @@ func (c *ctxt) fail(err error) int {
 		fmt.Fprintf(c.env.Stderr, "error [%s]: %s\n", code, msg)
 		if vr, ok := details.(app.VerifyResult); ok {
 			renderEvidence(c.env.Stderr, vr.Evidence, false)
+			if vr.Message != "" {
+				fmt.Fprintf(c.env.Stderr, "  %s\n", vr.Message)
+			}
 		}
 		if sum, ok := details.(app.Summary); ok {
 			for _, r := range sum.Reasons {

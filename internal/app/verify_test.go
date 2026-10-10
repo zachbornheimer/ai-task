@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -324,6 +325,7 @@ func TestIntegrationConflictDoesNotComplete(t *testing.T) {
 	f.commit(s.Workspace, "f.txt", "from a")
 	// main moves with a conflicting change before a verifies.
 	f.commit(f.repo, "f.txt", "from main")
+	t.Setenv("PATH", gitOnlyPath(t)) // no Worktrunk: the remedy is git's
 	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeIntegrationFailed)
 	if f.status(string(a)) == task.StatusComplete || f.git(f.repo, "rev-parse", "HEAD") != f.git(f.repo, "rev-parse", "main") {
@@ -516,4 +518,15 @@ func TestOrphanedDiagnosticRunsAreReconciled(t *testing.T) {
 	if v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunError || v.Failures != 0 {
 		t.Fatalf("orphaned diagnostic run: %+v failures=%d", v.Verification.Task, v.Failures)
 	}
+}
+
+// gitOnlyPath is a PATH holding git's directory and nothing else, so a
+// test can be sure `wt` is absent whatever the developer has installed.
+func gitOnlyPath(t *testing.T) string {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not installed")
+	}
+	return filepath.Dir(git)
 }

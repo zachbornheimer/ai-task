@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -420,9 +421,9 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		case class == classAttempt:
 			res.Message = "task NOT complete: a required check failed; the claim stays live for repair (counted against the attempt budget once)"
 		case code == fault.CodeIntegrationFailed && len(res.Conflicts) > 0:
-			res.Message = fmt.Sprintf("task NOT complete: the submitted revision conflicts with %s (%s); in the worktree run `git merge %s`, resolve the conflicts, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, strings.Join(res.Conflicts, ", "), fr.proj.TargetBranch)
+			res.Message = fmt.Sprintf("task NOT complete: the submitted revision conflicts with %s (%s); in the worktree run %s, resolve the conflicts, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, strings.Join(res.Conflicts, ", "), integrateStep(fr.proj.TargetBranch))
 		case code == fault.CodeIntegrationFailed:
-			res.Message = fmt.Sprintf("task NOT complete: the submitted revision could not be promoted to %s; merge %s into the task branch, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, fr.proj.TargetBranch)
+			res.Message = fmt.Sprintf("task NOT complete: the submitted revision could not be promoted to %s; in the worktree run %s, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, integrateStep(fr.proj.TargetBranch))
 		case class == classEnvironment:
 			res.Message = "task NOT complete: the environment stopped the run, not the checks; fix the cause and verify again (not counted as a failure)"
 		default:
@@ -714,3 +715,12 @@ func short(rev string) string {
 }
 
 var _ = time.Second
+
+// integrateStep names the command that brings the target back into the
+// task branch: Worktrunk's rebase step when `wt` is installed, else git.
+func integrateStep(target string) string {
+	if _, err := exec.LookPath("wt"); err == nil {
+		return "`wt step rebase " + target + "`"
+	}
+	return "`git merge " + target + "`"
+}

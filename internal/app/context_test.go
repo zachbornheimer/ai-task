@@ -72,7 +72,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	if strings.Contains(cx.Prompt, "Rules of the road") || cx.LeaseUntil == nil || len(cx.ChangedFiles) != 1 || len(cx.Siblings) != 1 || cx.Siblings[0].ID != b || !cx.Worktrunk {
 		t.Fatalf("%+v", cx)
 	}
-	t.Setenv("PATH", "/nonexistent")
+	t.Setenv("PATH", gitOnlyPath(t))
 	if plain, err := f.e.Context(f.ctx, f.proj.ID, "", s2.Token, false); err != nil || plain.Worktrunk || !strings.Contains(plain.Prompt, "Commit with git") || !strings.Contains(plain.Prompt, "`git merge main`") {
 		t.Fatalf("without wt: %v %s", err, plain.Prompt)
 	}
