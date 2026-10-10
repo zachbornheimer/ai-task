@@ -578,8 +578,9 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			return err
 		}
 	}
-	if contract && t.Kind == task.KindGroup && rec.CompletedAt != nil {
-		// A verified epic whose checks change must be verified again.
+	if (c.TaskChecks.Set || c.Size != nil) && t.Kind == task.KindGroup && rec.CompletedAt != nil {
+		// A verified epic whose checks or size change must be verified
+		// again; renaming it or moving it does not invalidate the proof.
 		if err := a.tx.ClearComplete(t.ID, a.now); err != nil {
 			return err
 		}
