@@ -450,8 +450,8 @@ func TestCLICorners(t *testing.T) {
 	if r := e.run(); r.code != 2 || r.env == nil || r.env["error"].(map[string]any)["code"] != "INVALID_INPUT" {
 		t.Fatalf("bare at envelope: code=%d %s", r.code, r.stdout)
 	}
-	if r := e.run("add", "G", "--group", "--check", "u: true"); r.code != 2 {
-		t.Fatalf("--group with --check accepted: %s", r.stdout)
+	if r := e.run("add", "G", "--group", "--requires", "x"); r.code != 2 {
+		t.Fatalf("--group with --requires accepted: %s", r.stdout)
 	}
 	if r := e.run("update", "x", "--archive", "--reason", "r", "--title", "nope"); r.code != 2 {
 		t.Fatalf("--archive with edits accepted: %s", r.stdout)

@@ -57,7 +57,7 @@ func TestSpecValidate(t *testing.T) {
 		{ProjectID: pid, Description: strings.Repeat("x", maxDescription+1)},
 		{ProjectID: pid, Kind: "epic", Description: "x"},
 		{ProjectID: pid, Key: "bad key", Description: "x"},
-		{ProjectID: pid, Kind: KindGroup, Description: "g", Verification: verification.Policy{TaskChecks: []verification.CheckSpec{{ID: "a", Command: []string{"true"}}}}},
+		{ProjectID: pid, Kind: KindGroup, Description: "g", Pins: []string{"x"}},
 		{ProjectID: pid, Kind: KindGroup, Description: "g", Cohort: "c"},
 		{ProjectID: pid, Description: "x", Verification: verification.Policy{Regression: []verification.CheckSpec{{ID: "a", Command: []string{"true"}}}}},
 	}
