@@ -73,7 +73,9 @@ file. `--claim` on a single-task add claims it at once and prints the
 session beside the plan result: the fast path for a small change.
 
 `at doctor [--skip-baseline]` checks a project before planning or
-starting workers: repository and target branch resolve, a Git identity
+starting workers: repository and target branch resolve, the target
+checkout has no uncommitted or untracked files (a warning: checks and
+worktrees run on the committed revision), a Git identity
 exists for commits, the regression suite is defined and passes on the
 target branch within the regression budget (over budget is an error,
 over half is a warning: CI is slower), so no worker is charged for a
@@ -230,7 +232,10 @@ done through `at`, the verbs, the execution contract) into `AGENTS.md`
 between `<!-- at:begin -->` and `<!-- at:end -->`, creating the file with a
 default engineering-guidelines section when absent and refreshing only
 the block on re-runs; it also makes sure `CLAUDE.md` imports it
-(`@AGENTS.md`). `--no-instructions` skips that. `at init --claude` merges
+(`@AGENTS.md`). When `init` creates the repository in a directory that
+already has files, they stay untracked (init never commits them); the
+result carries `untracked_files` and a `warning` that they must be
+committed before the baseline can pass. `--no-instructions` skips that. `at init --claude` merges
 three hooks into `.claude/settings.json`, each calling `at hook <event>`
 with the hook's JSON on stdin: `session-start` prints the plan or task
 context; `guard-edit` denies an Edit/Write to a file inside a registered

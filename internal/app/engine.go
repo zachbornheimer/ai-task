@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -188,6 +189,10 @@ func stateDir() (string, error) {
 type InitResult struct {
 	Project     project.Project `json:"project"`
 	CreatedRepo bool            `json:"created_repo"`
+	// UntrackedFiles lists what the directory already held when init
+	// created the repository. init never commits them; Warning says so.
+	UntrackedFiles []string `json:"untracked_files,omitempty"`
+	Warning        string   `json:"warning,omitempty"`
 	// Existing: the directory was already registered; nothing changed in
 	// the database.
 	Existing bool `json:"existing,omitempty"`
@@ -223,6 +228,12 @@ func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitR
 	}
 	if res.CreatedRepo, err = workspace.InitRepo(ctx, root); err != nil {
 		return res, err
+	}
+	if res.CreatedRepo {
+		if files, err := workspace.UncommittedFiles(ctx, root); err == nil && len(files) > 0 {
+			res.UntrackedFiles = files
+			res.Warning = fmt.Sprintf("%d existing file(s) are untracked and not part of the repository's commits; commit them before the baseline can pass (at never commits them itself)", len(files))
+		}
 	}
 	p.RootPath = root
 	if p.Name == "" {

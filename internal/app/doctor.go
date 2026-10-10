@@ -13,6 +13,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 // DoctorCheck is one finding of Doctor. Severity "error" means the
@@ -87,6 +88,16 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 	} else {
 		rep.TargetRevision = rev
 		add("target_branch", true, "info", fmt.Sprintf("target %s at %s", p.TargetBranch, short(rev)), "")
+	}
+
+	// Uncommitted work in the target checkout is invisible to the
+	// baseline and to every task worktree, which start from the commit.
+	if files, err := workspace.UncommittedFiles(ctx, p.RootPath); err == nil {
+		if len(files) > 0 {
+			add("uncommitted_files", false, "warning", fmt.Sprintf("the target checkout has %d uncommitted or untracked file(s): %s; checks and task worktrees run on the committed revision and do not see them", len(files), listFiles(files, 5)), fmt.Sprintf("commit them (git -C %s add -A && git -C %s commit) or remove them", p.RootPath, p.RootPath))
+		} else {
+			add("uncommitted_files", true, "info", "the target checkout is clean", "")
+		}
 	}
 
 	// Git identity: agents commit in the task worktrees and Git refuses a
@@ -196,6 +207,14 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 		add("plan", true, "info", fmt.Sprintf("%d open task(s), %d claimable, %d active", sum.Open, sum.Claimable, sum.Active), "")
 	}
 	return rep, nil
+}
+
+// listFiles joins up to max names and counts the rest.
+func listFiles(files []string, max int) string {
+	if len(files) <= max {
+		return strings.Join(files, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(files[:max], ", "), len(files)-max)
 }
 
 func budgetLabel(d time.Duration) string {

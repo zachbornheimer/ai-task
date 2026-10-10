@@ -239,8 +239,9 @@ func (t *Tx) EvidenceForRun(runID int64) ([]verification.Evidence, error) {
 }
 
 // ReconcileRuns closes final runs whose owning attempt's lease has expired
-// (the verifying process is gone) and resets cohort member runs whose job
-// lease expired to pending so the job can be retried. Returns how many
+// (the verifying process is gone), resets cohort member runs whose job
+// lease expired to pending so the job can be retried, and closes epic runs
+// whose job lease expired. Returns how many
 // rows changed.
 func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 	res, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the verifying attempt lease expired before the run finished'
@@ -264,6 +265,16 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 		return 0, wrapInternal(err, "reconcile cohort runs")
 	}
 	n2, _ := res2.RowsAffected()
+	// An epic (group-mode) run whose verifier died is closed as an error, so
+	// the epic reads as pending again and the next worker reruns it; it
+	// must run before the jobs below are marked interrupted.
+	res4, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the epic verifier died before the run finished; the epic will be verified again'
+		WHERE status = 'running' AND mode = 'group' AND job_id IN (SELECT id FROM verification_jobs WHERE status = 'running' AND lease_expires_at <= ?)`, ms(now), ms(now))
+	if err != nil {
+		return 0, wrapInternal(err, "reconcile epic runs")
+	}
+	n4, _ := res4.RowsAffected()
+	n += n4
 	// 'interrupted' (not 'error'): a dead verifier is not a failed
 	// promotion, so it does not count toward the cohort's retry backoff.
 	res3, err := t.tx.ExecContext(t.ctx, `UPDATE verification_jobs SET status = 'interrupted', finished_at = ?, summary = 'verifier lease expired; job will be retried'
