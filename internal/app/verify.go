@@ -358,7 +358,12 @@ func checkEnv(dir string) []string {
 		case strings.HasPrefix(kv, "AT_SESSION="), strings.HasPrefix(kv, "TASKS_SESSION="):
 			continue
 		case strings.HasPrefix(kv, "GOFLAGS="):
-			flags = strings.TrimPrefix(kv, "GOFLAGS=") + " -count=1"
+			// An at check can run a suite that itself runs at checks: keep
+			// the caller's flags and add -count=1 only when it is missing.
+			flags = strings.TrimSpace(strings.TrimPrefix(kv, "GOFLAGS="))
+			if !hasField(flags, "-count=1") {
+				flags = strings.TrimSpace(flags + " -count=1")
+			}
 			continue
 		case strings.HasPrefix(kv, "TMPDIR="):
 			continue
@@ -908,4 +913,14 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudg
 		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (AT_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))
 	}
 	return "task NOT complete: " + strings.Join(parts, "; ") + " (a timeout is never counted against the attempt)"
+}
+
+// hasField reports whether the whitespace-separated list s contains f.
+func hasField(s, f string) bool {
+	for _, x := range strings.Fields(s) {
+		if x == f {
+			return true
+		}
+	}
+	return false
 }
