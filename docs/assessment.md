@@ -93,7 +93,7 @@ rationale for every deviation. It is kept current as milestones land.
 
 ## 2. Final package map
 
-```
+```text
 tasks.go                 public facade (aliases + Open)
 cmd/tasks/main.go
 internal/fault           stable error codes (leaf)
@@ -123,7 +123,7 @@ verification runs; `completed_at`.
 
 Derived status precedence:
 
-```
+```text
 complete > awaiting_integration > awaiting_verification > in_progress
         > blocked > verification_failed > interrupted > available
 ```

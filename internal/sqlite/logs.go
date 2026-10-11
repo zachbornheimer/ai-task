@@ -90,8 +90,8 @@ func (t *Tx) Handoff(id task.ID) (execution.Handoff, error) {
 	if err != nil {
 		return h, wrapInternal(err, "recent logs")
 	}
+	defer rows.Close()
 	h.RecentLogs, err = scanLogs(rows)
-	rows.Close()
 	if err != nil {
 		return h, err
 	}
