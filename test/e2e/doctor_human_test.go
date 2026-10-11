@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-// TestDoctorHumanReportOnFailure: without AT_OUTPUT=json an unhealthy
-// `at doctor` prints the whole report (every check, the fix for the
+// TestDoctorHumanReportOnFailure: without ATASK_OUTPUT=json an unhealthy
+// `atask doctor` prints the whole report (every check, the fix for the
 // failing one, and the failing evidence) on stderr, not only the one-line
 // error; the JSON envelope is unchanged.
 func TestDoctorHumanReportOnFailure(t *testing.T) {
 	e := gitEnv(t)
 	e.ok("project", "--regression-check", "regress: sh -c 'echo baseline-went-wrong >&2; exit 1'")
 
-	r := e.runIn(e.cwd, "", []string{"AT_OUTPUT="}, "doctor")
+	r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "doctor")
 	if r.code == 0 {
 		t.Fatalf("doctor succeeded on a failing baseline: %s", r.stdout)
 	}

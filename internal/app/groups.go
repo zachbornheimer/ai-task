@@ -185,7 +185,7 @@ type groupJob struct {
 
 // RunPendingGroups finds groups whose checks may run and runs them, one
 // durable job each. Claim(wait) calls it beside RunPendingCohorts;
-// `at verify groups` calls it on demand.
+// `atask verify groups` calls it on demand.
 func (e *Engine) RunPendingGroups(ctx context.Context, pid project.ID, only task.ID) (bool, error) {
 	if err := e.reconcile(ctx); err != nil {
 		return false, err

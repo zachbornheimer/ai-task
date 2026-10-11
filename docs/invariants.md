@@ -106,7 +106,7 @@ claimed, verifying, and submissions whose cohort can be verified.
 - No claim without a project regression suite; no task without task
   checks; a check set cannot be emptied. (`TestEmptyChecksFailClosed`,
   `e2e.TestPlanningCommands`)
-- One worktree per task on `at/<id>`, reused across clean handoffs; the
+- One worktree per task on `atask/<id>`, reused across clean handoffs; the
   claim stores the token in the worktree's Git directory, never in the
   tree, and commands run there need no token. A takeover quarantines the
   unended attempt's worktree (moved, detached) before the new attempt
@@ -127,7 +127,7 @@ claimed, verifying, and submissions whose cohort can be verified.
   are never overwritten. (`workspace.TestPromoteIntoDirtyCheckoutIsSafe`)
 - Task checks and regression checks run on separate snapshots; a file a
   task check leaves behind is not there for the regression suite; checks
-  never see `AT_SESSION`. (`TestCategoriesDoNotShareASnapshot`)
+  never see `ATASK_SESSION`. (`TestCategoriesDoNotShareASnapshot`)
 - The target moves only after a fenced intent transaction re-checked
   everything completion depends on, and completion is recorded exactly
   when the candidate reached the target: a crash at any point is resolved
@@ -141,7 +141,7 @@ claimed, verifying, and submissions whose cohort can be verified.
 
 ## Verification and completion
 
-- `at verify` with no mode is invalid. (`TestBareVerifyIsInvalid`)
+- `atask verify` with no mode is invalid. (`TestBareVerifyIsInvalid`)
 - Missing task checks or missing regression checks fail closed.
   (`TestEmptyChecksFailClosed`)
 - Diagnostic runs execute every time and never complete, release, or

@@ -172,7 +172,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 
 // runOneAgent is the fake coding agent. A real host would render a prompt
 // from session.Task and session.Handoff, start the model in
-// session.Workspace with AT_SESSION set, and keep renewing the lease.
+// session.Workspace with ATASK_SESSION set, and keep renewing the lease.
 func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *os.File) error {
 	stop := heartbeat(ctx, eng, s.Token)
 	defer stop()
@@ -288,6 +288,12 @@ func initRepo(dir string) error {
 	if err := git(dir, "init", "-q", "-b", "main"); err != nil {
 		return err
 	}
+	if err := git(dir, "config", "user.name", "at-example"); err != nil {
+		return err
+	}
+	if err := git(dir, "config", "user.email", "at@example"); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(dir, "README.txt"), []byte("example"), 0o644); err != nil {
 		return err
 	}
@@ -298,8 +304,8 @@ func initRepo(dir string) error {
 }
 
 func git(dir string, args ...string) error {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=at-example", "GIT_AUTHOR_EMAIL=at@example", "GIT_COMMITTER_NAME=at-example", "GIT_COMMITTER_EMAIL=at@example")
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=at-example", "GIT_AUTHOR_EMAIL=at@example", "GIT_COMMITTER_NAME=at-example", "GIT_COMMITTER_EMAIL=at@example", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git %v: %v\n%s", args, err, out)
 	}

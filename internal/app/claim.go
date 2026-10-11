@@ -186,7 +186,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	e.notify()
 	// One branch and worktree per task, reused across clean handoffs so
 	// committed and uncommitted work survives. The token is stored in the
-	// worktree's private git dir so commands run there need no AT_SESSION.
+	// worktree's private git dir so commands run there need no ATASK_SESSION.
 	// When the previous attempt did not end cleanly its worktree is
 	// quarantined first, so a stale process keeps only its own expired
 	// token and can never reach this attempt's files or branch.
@@ -207,7 +207,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			return tx.SetWorkspaceError(sess.Task.ID, fault.MessageOf(werr), now)
 		})
 		e.notify()
-		return Session{}, fault.New(fault.CodeWorkspaceUnavailable, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `at claim %s` succeeds or a planner runs `at update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
+		return Session{}, fault.New(fault.CodeWorkspaceUnavailable, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
 	}
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := tx.SetWorkspace(attempt.ID, info.Path, info.Branch); err != nil {
@@ -275,7 +275,7 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 // checks cannot act as a gate: nothing claimed there could ever complete.
 func regressionGate(proj project.Project) error {
 	if err := verification.RequireGate(proj.Regression, "project regression checks"); err != nil {
-		return fault.New(fault.CodeMissingVerification, "project %s: %v; define them with `at project --regression-check` before claiming work", proj.ID, fault.MessageOf(err))
+		return fault.New(fault.CodeMissingVerification, "project %s: %v; define them with `atask project --regression-check` before claiming work", proj.ID, fault.MessageOf(err))
 	}
 	return nil
 }
@@ -299,7 +299,7 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 	case task.StatusArchived:
 		return fault.New(fault.CodeNotFound, "%s is archived", id)
 	case task.StatusBlocked:
-		return fault.New(fault.CodeTaskBlocked, "%s is blocked by %d incomplete prerequisite(s); see `at show %s`", id, r.UnmetRequires, id)
+		return fault.New(fault.CodeTaskBlocked, "%s is blocked by %d incomplete prerequisite(s); see `atask show %s`", id, r.UnmetRequires, id)
 	case task.StatusClaimed:
 		return fault.New(fault.CodeTaskAlreadyTaken, "%s is claimed by attempt %d until %s", id, r.Attempt.Seq, r.Attempt.LeaseExpiresAt.Format(time.RFC3339))
 	case task.StatusVerifying, task.StatusAwaitingVerification:
@@ -311,11 +311,11 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 	case task.StatusNeedsAttention:
 		switch {
 		case !verification.HasRequired(r.Task.Verification.TaskChecks):
-			return fault.New(fault.CodeMissingVerification, "%s has no required task check (legacy or edited policy); a planner must `at update %s --check ...` before it can be claimed", id, id)
+			return fault.New(fault.CodeMissingVerification, "%s has no required task check (legacy or edited policy); a planner must `atask update %s --check ...` before it can be claimed", id, id)
 		case facts.Exhausted:
-			return fault.New(fault.CodeNeedsAttention, "%s exhausted its attempts (%d failures); a planner must `at update %s --reset-attempts`", id, r.Failures, id)
+			return fault.New(fault.CodeNeedsAttention, "%s exhausted its attempts (%d failures); a planner must `atask update %s --reset-attempts`", id, r.Failures, id)
 		}
-		return fault.New(fault.CodeNeedsAttention, "%s: workspace unusable (%s); fix the worktree and `at claim %s`, or `at update %s --reset-attempts`", id, r.WorkspaceError, id, id)
+		return fault.New(fault.CodeNeedsAttention, "%s: workspace unusable (%s); fix the worktree and `atask claim %s`, or `atask update %s --reset-attempts`", id, r.WorkspaceError, id, id)
 	case task.StatusCooldown:
 		return fault.New(fault.CodeNoAvailableTask, "%s is in retry cooldown until %s", id, r.NextEligibleAt.Format(time.RFC3339))
 	}

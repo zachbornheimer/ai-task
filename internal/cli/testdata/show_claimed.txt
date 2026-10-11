@@ -11,7 +11,7 @@ Regression:  not run
 
 ATTEMPT
 #2 (lease active until 2026-10-09T10:12:00Z)
-Workspace: /ws/at-d83-2 (at/at-d83/2)
+Workspace: /ws/at-d83-2 (atask/at-d83)
 
 HANDOFF
 Next:     wire the migration

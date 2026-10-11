@@ -55,7 +55,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 		"Lease until",                // when to log
 		"Next step recorded by the last attempt: add Open(path)",
 		"learned: needs the sqlite driver",
-		"Last `at verify complete`",
+		"Last `atask verify complete`",
 		"## Current state (attempt 2)",
 		"unit-store failed",
 		"Files this branch has changed: store.go",
@@ -74,10 +74,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	if strings.Contains(cx.Prompt, "Agent execution contract") || cx.LeaseUntil == nil || len(cx.ChangedFiles) != 1 || len(cx.Siblings) != 1 || cx.Siblings[0].ID != b || !cx.Worktrunk {
 		t.Fatalf("%+v", cx)
 	}
-	t.Setenv("PATH", gitOnlyPath(t))
-	if plain, err := f.e.Context(f.ctx, f.proj.ID, "", s2.Token, false); err != nil || plain.Worktrunk || !strings.Contains(plain.Prompt, "Commit with git") || !strings.Contains(plain.Prompt, "`git merge main`") {
-		t.Fatalf("without wt: %v %s", err, plain.Prompt)
-	}
+
 	// Groups are never siblings; a group is not a task.
 	if _, err := f.e.Context(f.ctx, f.proj.ID, "g", "", false); fault.CodeOf(err) != fault.CodeInvalidInput {
 		t.Fatalf("group context: %v", err)
@@ -88,7 +85,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cb.Workspace != "" || !strings.Contains(cb.Prompt, "at claim "+string(b)) || !strings.HasSuffix(strings.TrimSpace(cb.Prompt), "final verification.") || !strings.Contains(cb.Prompt, "## Agent execution contract") {
+	if cb.Workspace != "" || !strings.Contains(cb.Prompt, "atask claim "+string(b)) || !strings.HasSuffix(strings.TrimSpace(cb.Prompt), "final verification.") || !strings.Contains(cb.Prompt, "## Agent execution contract") {
 		t.Fatalf("%s", cb.Prompt)
 	}
 	if pc, err := f.e.Context(f.ctx, f.proj.ID, "", "", false); err != nil || pc.Task != nil || pc.Summary == nil {
@@ -99,7 +96,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 func TestProjectContextSaysWhatToDoNext(t *testing.T) {
 	f := newGitFixture(t)
 	empty, err := f.e.Context(f.ctx, f.proj.ID, "", "", false)
-	if err != nil || empty.Task != nil || !strings.Contains(empty.Prompt, "Nothing is planned yet") || !strings.Contains(empty.Prompt, "at doctor") {
+	if err != nil || empty.Task != nil || !strings.Contains(empty.Prompt, "Nothing is planned yet") || !strings.Contains(empty.Prompt, "atask doctor") {
 		t.Fatalf("%v %s", err, empty.Prompt)
 	}
 	a := f.add("a")

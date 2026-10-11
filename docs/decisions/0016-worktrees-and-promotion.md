@@ -3,7 +3,7 @@
 **Status:** accepted (refines ADR 0010 and ADR 0012)
 
 **Decision.** Each execution attempt gets a private Git worktree on
-`at/<task>/<n>`, continuing the previous attempt's branch. Final checks run
+`atask/<task>/<n>`, continuing the previous attempt's branch. Final checks run
 in a detached snapshot of the submitted commit. Promotion is two-phase:
 build a merge candidate on the current target in a scratch worktree, verify
 it when it changed content, then compare-and-swap the target (fast-forward

@@ -28,8 +28,8 @@ func isolateGitIdentity(t *testing.T) {
 }
 
 func TestIntegrationMergeIdentity(t *testing.T) {
-	isolateGitIdentity(t)
 	f := newGitFixture(t)
+	isolateGitIdentity(t)
 	f.git(f.repo, "config", "user.useConfigOnly", "true")
 	f.git(f.repo, "config", "user.name", "Repo Owner")
 	f.git(f.repo, "config", "user.email", "owner@example.com")
@@ -75,9 +75,11 @@ func TestIntegrationMergeIdentity(t *testing.T) {
 }
 
 func TestDoctorGitIdentity(t *testing.T) {
-	isolateGitIdentity(t)
 	f := newGitFixture(t)
+	isolateGitIdentity(t)
 	f.git(f.repo, "config", "user.useConfigOnly", "true")
+	f.git(f.repo, "config", "--unset-all", "user.name")
+	f.git(f.repo, "config", "--unset-all", "user.email")
 	find := func(rep app.DoctorReport) app.DoctorCheck {
 		for _, c := range rep.Checks {
 			if c.ID == "git_identity" {

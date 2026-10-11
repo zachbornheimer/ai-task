@@ -27,20 +27,56 @@ func newRepo(t *testing.T) *repo {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("HK", "0")
 	base := t.TempDir()
 	dir := filepath.Join(base, "repo")
 	os.MkdirAll(dir, 0o755)
 	r := &repo{t: t, dir: dir, ctx: context.Background()}
 	r.git(dir, "init", "-q", "-b", "main")
 	r.commit(dir, "f.txt", "one")
-	r.mgr = Manager{Repo: dir, Root: filepath.Join(base, "ws")}
+	ws := filepath.Join(base, "ws")
+	r.mgr = Manager{Repo: dir, Root: ws, Switch: gitSwitcher{t: t, repo: dir, root: ws}}
 	return r
+}
+
+// gitSwitcher stands in for Worktrunk in unit tests: same Ensure contract,
+// paths under root using git worktree add.
+type gitSwitcher struct {
+	t    *testing.T
+	repo string
+	root string
+}
+
+func (g gitSwitcher) Ensure(ctx context.Context, repo, branch, base string, create bool) (string, error) {
+	g.t.Helper()
+	path := filepath.Join(g.root, strings.ReplaceAll(branch, "/", "-"))
+	if resolved, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+		path = filepath.Join(resolved, filepath.Base(path))
+	}
+	if create {
+		cmd := exec.CommandContext(ctx, "git", "-C", g.repo, "-c", "core.hooksPath=/dev/null", "branch", branch, base)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("branch: %w\n%s", err, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+		return path, nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", g.repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", path, branch)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("worktree add: %w\n%s", err, out)
+	}
+	return path, nil
 }
 
 func (r *repo) git(dir string, args ...string) string {
 	r.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		r.t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -63,7 +99,7 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.git(w1.Path, "rev-parse", "--abbrev-ref", "HEAD") != "at/at-aaaaaa" {
+	if r.git(w1.Path, "rev-parse", "--abbrev-ref", "HEAD") != "atask/at-aaaaaa" {
 		t.Fatal("branch")
 	}
 	// Reuse is idempotent and reports uncommitted work left behind.
@@ -82,7 +118,7 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	if err != nil || r.git(w2.Path, "rev-parse", "HEAD") != rev {
 		t.Fatalf("%+v %v", w2, err)
 	}
-	if CurrentBranch(r.ctx, w2.Path) != "at/at-aaaaaa" || CurrentBranch(r.ctx, r.dir) != "main" || CurrentBranch(r.ctx, t.TempDir()) != "" {
+	if CurrentBranch(r.ctx, w2.Path) != "atask/at-aaaaaa" || CurrentBranch(r.ctx, r.dir) != "main" || CurrentBranch(r.ctx, t.TempDir()) != "" {
 		t.Fatal("current branch")
 	}
 	// Tokens live in the worktree's private git dir, never in the tree.
@@ -102,7 +138,7 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	if err != nil || w3.Path != w2.Path || w3.Quarantined != w2.Path+".stale-1" || !w3.Dirty {
 		t.Fatalf("quarantine: %+v %v", w3, err)
 	}
-	if CurrentBranch(r.ctx, w3.Quarantined) != "" || CurrentBranch(r.ctx, w3.Path) != "at/at-aaaaaa" || LoadToken(r.ctx, w3.Quarantined) != "sess-test" || LoadToken(r.ctx, w3.Path) != "" {
+	if CurrentBranch(r.ctx, w3.Quarantined) != "" || CurrentBranch(r.ctx, w3.Path) != "atask/at-aaaaaa" || LoadToken(r.ctx, w3.Quarantined) != "sess-test" || LoadToken(r.ctx, w3.Path) != "" {
 		t.Fatal("quarantined tree must be detached and keep its token; the new tree starts clean")
 	}
 	if _, err := os.Stat(filepath.Join(w3.Path, "wip.txt")); err == nil {
@@ -135,6 +171,8 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 
 func TestPrepareMergeAndPromote(t *testing.T) {
 	r := newRepo(t)
+	r.git(r.dir, "config", "user.name", "t")
+	r.git(r.dir, "config", "user.email", "t@t")
 	w, _ := r.mgr.EnsureTask(r.ctx, "at-bbbbbb", "main", 0)
 	rev := r.commit(w.Path, "b.txt", "b")
 	// Fast-forward candidate: main is checked out in the main worktree and
@@ -278,6 +316,8 @@ func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
 // would; local files are never overwritten, stashed or discarded.
 func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 	r := newRepo(t)
+	r.git(r.dir, "config", "user.name", "t")
+	r.git(r.dir, "config", "user.email", "t@t")
 	promote := func(id, file string) (Candidate, error) {
 		w, _ := r.mgr.EnsureTask(r.ctx, id, "main", 0)
 		rev := r.commit(w.Path, file, "from "+id)

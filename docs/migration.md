@@ -6,32 +6,32 @@ handoff. Databases created by the earlier `tasks` binary migrate in place
 
 ## Environment and files
 
-| Before | After |
-|---|---|
-| binary `tasks` (`cmd/tasks`) | binary `at` (`cmd/at`) |
-| `TASKS_DB`, `TASKS_PROJECT`, `TASKS_OUTPUT`, `TASKS_SESSION` | `AT_DB`, `AT_PROJECT`, `AT_OUTPUT`, `AT_SESSION` |
-| `~/.local/state/tasks/tasks.db` | `~/.local/state/at/at.db` (worktrees under `…/at/workspaces/`) |
-| task IDs `task-` + 16 chars | `at-` + 6 chars (legacy IDs accepted) |
+| Before                                                       | After                                                          |
+| ------------------------------------------------------------ | -------------------------------------------------------------- |
+| binary `tasks` (`cmd/tasks`)                                 | binary `atask` (`cmd/atask`)                                   |
+| `TASKS_DB`, `TASKS_PROJECT`, `TASKS_OUTPUT`, `TASKS_SESSION` | `ATASK_DB`, `ATASK_PROJECT`, `ATASK_OUTPUT`, `ATASK_SESSION`   |
+| `~/.local/state/tasks/tasks.db`                              | `~/.local/state/at/at.db` (worktrees under `…/at/workspaces/`) |
+| task IDs `task-` + 16 chars                                  | `at-` + 6 chars (legacy IDs accepted)                          |
 
 ## CLI
 
-| Before | After | Notes |
-|---|---|---|
-| `tasks add "t" --requires A --blocks B` | `at add "t" --key K --requires A --blocks B` | keys are stable references; `--parent`, `--group`, `--cohort` added; `--manual` removed |
-| `tasks deps add B --requires A` | `at update B --requires A` | `--remove-requires`, `--set-requires` |
-| `tasks deps remove B --requires A` | `at update B --remove-requires A` | |
-| `tasks deps list B` / `tasks graph` | `at show B` (REQUIRES / BLOCKS sections), `at list` | no graph command |
-| `tasks take [ID] [--wait D]` | `at claim [REF] [--wait]` | wait returns `DONE` / `STALLED` instead of timing out |
-| `tasks renew-task-lease <token>` | `at claim renew [token\|-]` | token from the argument, `-`, `--session` or AT_SESSION |
-| `tasks release <token>` | `at claim release [token\|-] [--failed]` | |
-| `tasks log <token> …` | `at log …` (positional, `-`, `--session`, or AT_SESSION) | |
-| `tasks finish <token>` | `at verify complete` | records submission, runs BOTH suites fresh, integrates, completes |
-| `tasks verify <task> [--retry] [--again] [--no-reuse]` | `at verify task` / `at verify regression` (diagnostic) | no evidence reuse exists any more; a stuck run is closed by reconciliation and the task re-claimed |
-| `tasks policy <task> --check …` | `at update <task> --check …` | planner authority; rejected on claimed/completed tasks without `--planner` |
-| `tasks evidence <task>` | `at show <task> --full` | |
-| `tasks status` | `at status` | `done`/`stalled` plus reasons and pending cohorts |
-| `tasks list --available/--takeable/--blocked` | `at list ready` / `at list blocked` / `at list all` | glyph hierarchy |
-| `tasks project --regression-json` | `at project --regression-json` or `--regression-check` | also `--target-branch`, `--max-attempts`, `--retry-cooldown` |
+| Before                                                 | After                                                          | Notes                                                                                              |
+| ------------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `tasks add "t" --requires A --blocks B`                | `atask add "t" --key K --requires A --blocks B`                | keys are stable references; `--parent`, `--group`, `--cohort` added; `--manual` removed            |
+| `tasks deps add B --requires A`                        | `atask update B --requires A`                                  | `--remove-requires`, `--set-requires`                                                              |
+| `tasks deps remove B --requires A`                     | `atask update B --remove-requires A`                           |                                                                                                    |
+| `tasks deps list B` / `tasks graph`                    | `atask show B` (REQUIRES / BLOCKS sections), `atask list`      | no graph command                                                                                   |
+| `tasks take [ID] [--wait D]`                           | `atask claim [REF] [--wait]`                                   | wait returns `DONE` / `STALLED` instead of timing out                                              |
+| `tasks renew-task-lease <token>`                       | `atask claim renew [token\|-]`                                 | token from the argument, `-`, `--session` or ATASK_SESSION                                         |
+| `tasks release <token>`                                | `atask claim release [token\|-] [--failed]`                    |                                                                                                    |
+| `tasks log <token> …`                                  | `atask log …` (positional, `-`, `--session`, or ATASK_SESSION) |                                                                                                    |
+| `tasks finish <token>`                                 | `atask verify complete`                                        | records submission, runs BOTH suites fresh, integrates, completes                                  |
+| `tasks verify <task> [--retry] [--again] [--no-reuse]` | `atask verify task` / `atask verify regression` (diagnostic)   | no evidence reuse exists any more; a stuck run is closed by reconciliation and the task re-claimed |
+| `tasks policy <task> --check …`                        | `atask update <task> --check …`                                | planner authority; rejected on claimed/completed tasks without `--planner`                         |
+| `tasks evidence <task>`                                | `atask show <task> --full`                                     |                                                                                                    |
+| `tasks status`                                         | `atask status`                                                 | `done`/`stalled` plus reasons and pending cohorts                                                  |
+| `tasks list --available/--takeable/--blocked`          | `atask list ready` / `atask list blocked` / `atask list all`   | glyph hierarchy                                                                                    |
+| `tasks project --regression-json`                      | `atask project --regression-json` or `--regression-check`      | also `--target-branch`, `--max-attempts`, `--retry-cooldown`                                       |
 
 Error codes renamed: `TASK_ALREADY_TAKEN`→`ALREADY_CLAIMED`,
 `NO_AVAILABLE_TASK`→`NO_ELIGIBLE_WORK`, `TASK_AWAITING_VERIFICATION`→
@@ -41,18 +41,18 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
 
 ## Go API
 
-| Before | After |
-|---|---|
-| `tasks.Open` → `*Engine` (concrete) | `at.Open` → `*at.Store`, which implements the `at.Engine` interface |
+| Before                                                                             | After                                                                              |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `tasks.Open` → `*Engine` (concrete)                                                | `at.Open` → `*at.Store`, which implements the `at.Engine` interface                |
 | `Add`, `AddWithDependencies`, `AddDependency`, `RemoveDependency`, `SetTaskPolicy` | `Apply(ctx, ChangeSet)` with `AddGroup` / `AddTask` / `UpdateTask` / `ArchiveTask` |
-| `Take(ctx, TakeRequest)` | `Claim(ctx, ClaimRequest{Wait})`; `ErrDone`, `ErrStalled` |
-| `Finish(ctx, token, opts)` | `Verify(ctx, token, VerifyComplete)` |
-| `Verify(ctx, taskID, opts)` | `Verify(ctx, token, VerifyTask \| VerifyRegression)` |
-| `Release(ctx, token, note)` | `Release(ctx, token, ReleaseOptions{Note, Failed})` |
-| `Renew(ctx, token, lease)` | `Renew(ctx, token)` (default lease) |
-| `List(ctx, pid, ListFilter)`, `Available`, `Takeable`, `Graph` | `List(ctx, ListQuery{Filter})` → `PlanSnapshot` |
-| `Show(ctx, id)`, `History`, `Evidence` | `Show(ctx, pid, ref, full)` |
-| `Summary` | `Summary` (adds `PendingCohorts`, `Reasons`) |
+| `Take(ctx, TakeRequest)`                                                           | `Claim(ctx, ClaimRequest{Wait})`; `ErrDone`, `ErrStalled`                          |
+| `Finish(ctx, token, opts)`                                                         | `Verify(ctx, token, VerifyComplete)`                                               |
+| `Verify(ctx, taskID, opts)`                                                        | `Verify(ctx, token, VerifyTask \| VerifyRegression)`                               |
+| `Release(ctx, token, note)`                                                        | `Release(ctx, token, ReleaseOptions{Note, Failed})`                                |
+| `Renew(ctx, token, lease)`                                                         | `Renew(ctx, token)` (default lease)                                                |
+| `List(ctx, pid, ListFilter)`, `Available`, `Takeable`, `Graph`                     | `List(ctx, ListQuery{Filter})` → `PlanSnapshot`                                    |
+| `Show(ctx, id)`, `History`, `Evidence`                                             | `Show(ctx, pid, ref, full)`                                                        |
+| `Summary`                                                                          | `Summary` (adds `PendingCohorts`, `Reasons`)                                       |
 
 ## Semantics that changed
 
@@ -60,8 +60,8 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
   no longer complete: `verify complete` fails closed with
   `MISSING_VERIFICATION`. Previously an empty policy completed vacuously.
 - Every verification executes its checks. The evidence-reuse cache is gone.
-- Every project is a Git repository (`at init` creates one; `--no-dir` is
-  gone). Each task gets one worktree on branch `at/<task-id>`, reused by
+- Every project is a Git repository (`atask init` creates one; `--no-dir` is
+  gone). Each task gets one worktree on branch `atask/<task-id>`, reused by
   every attempt; `verify complete` snapshots the committed revision and
   runs there; promotion to the target branch is a guarded
   compare-and-swap (policy `promote` by default).
@@ -70,16 +70,16 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
   `--clear-checks` is gone.
 - Leases default to 30 minutes (5m..4h); every authenticated command
   renews them. The token is never stored on disk; hosts inject it as
-  `AT_SESSION`.
+  `ATASK_SESSION`.
 - `--archive` needs `--reason`; `--withdraw-submission` (with `--planner`)
   withdraws a cohort member's pending submission so its contract can
   change.
 - JSON output is compact by default (`--pretty` indents); `help` and a
   bare `at` print envelopes in JSON mode.
 - `--reset-attempts` needs `--planner`; `--group` and `--archive` refuse
-  unrelated flags; a check label is only `<id>: ` (a colon in a command
+  unrelated flags; a check label is only `<id>:` (a colon in a command
   is left alone).
-- `at prune` removes worktrees of complete/archived tasks and quarantined
+- `atask prune` removes worktrees of complete/archived tasks and quarantined
   directories; completion removes a task's own quarantines.
 - Completion re-checks prerequisites, contract revision, regression policy,
   and the run's own evidence in the finalising transaction.

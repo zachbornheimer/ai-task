@@ -7,7 +7,7 @@ The CLI is a thin adapter over the Go engine; both apply the same rules.
 
 ## Output and exit codes
 
-`AT_OUTPUT=json` (or `--json`) makes every command print exactly one JSON
+`ATASK_OUTPUT=json` (or `--json`) makes every command print exactly one JSON
 envelope on stdout and nothing else there, compact on one line (`--pretty`
 indents it):
 
@@ -19,36 +19,36 @@ indents it):
 Human mode prints an acknowledgement on stdout after commit and
 `error [CODE]: message` on stderr. Exit status: `0` success, `1` coded
 domain failure, `2` usage error. Progress never goes to JSON stdout.
-`at <command> --help` (or `-h`) prints the command's usage and flags on
+`atask <command> --help` (or `-h`) prints the command's usage and flags on
 stdout (an envelope in JSON mode) and exits `0`.
 
 ## Error codes
 
-| Code | Meaning |
-|---|---|
-| `INVALID_INPUT` | malformed argument, reference, or spec; `at verify` without a mode |
-| `NOT_FOUND` | unknown task, key, or project |
-| `NO_PROJECT` | no project for this directory; `--project` or `at init` |
-| `PLAN_CONFLICT` | stale `--expect-rev`; edit to a completed or claimed contract; illegal archive |
-| `DUPLICATE_KEY` | key exists with a different definition (blockers included) |
-| `IDEMPOTENCY_CONFLICT` | the idempotency key was already used for a different change set |
-| `DEPENDENCY_CYCLE`, `SELF_DEPENDENCY`, `DUPLICATE_DEPENDENCY`, `CROSS_PROJECT_DEPENDENCY` | hard-edge rules |
-| `TASK_BLOCKED` | prerequisites incomplete (claim or complete) |
-| `ALREADY_CLAIMED` | a live lease exists; on `verify`, an open attempt owns the task |
-| `AWAITING_VERIFICATION`, `INTEGRATION_PENDING`, `TASK_COMPLETE` | not claimable in that state |
-| `NO_ELIGIBLE_WORK` | nothing claimable now (non-waiting claim, cooldown) |
-| `DONE` | every executable task is complete (waiting claim) |
-| `STALLED` | open tasks remain, nothing claimable, nothing in flight, nothing cooling down; `details` carries the summary with reasons |
-| `NEEDS_ATTENTION` | this task needs a planner: attempts exhausted, or its worktree could not be prepared (`attention_reason` says which) |
-| `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED` | authority failures |
-| `MISSING_VERIFICATION` | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim |
-| `VERIFICATION_FAILED` | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once |
-| `VERIFICATION_TIMEOUT` | a required check ran out of its budget (`timed_out` evidence): the verification is built too slow for the task's size, or the code hangs; never counted against the attempt; `details.message` says which budget and whose problem |
-| `VERIFICATION_RUNNING` | this attempt's `verify complete` is still running; wait for its result |
-| `INTEGRATION_FAILED` | merge conflict (`details.conflicts` lists the files; merge the target branch into the task branch, commit, verify again), moved target that kept moving, or dirty target checkout; never a strike |
-| `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE` | uncommitted changes at `verify complete` / the worktree is gone |
-| `CANCELLED` | the caller's context ended mid-operation (a host's deadline or interrupt); nothing was written |
-| `INTERNAL` | bug or I/O failure |
+| Code                                                                                      | Meaning                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INVALID_INPUT`                                                                           | malformed argument, reference, or spec; `atask verify` without a mode                                                                                                                                                              |
+| `NOT_FOUND`                                                                               | unknown task, key, or project                                                                                                                                                                                                      |
+| `NO_PROJECT`                                                                              | no project for this directory; `--project` or `atask init`                                                                                                                                                                         |
+| `PLAN_CONFLICT`                                                                           | stale `--expect-rev`; edit to a completed or claimed contract; illegal archive                                                                                                                                                     |
+| `DUPLICATE_KEY`                                                                           | key exists with a different definition (blockers included)                                                                                                                                                                         |
+| `IDEMPOTENCY_CONFLICT`                                                                    | the idempotency key was already used for a different change set                                                                                                                                                                    |
+| `DEPENDENCY_CYCLE`, `SELF_DEPENDENCY`, `DUPLICATE_DEPENDENCY`, `CROSS_PROJECT_DEPENDENCY` | hard-edge rules                                                                                                                                                                                                                    |
+| `TASK_BLOCKED`                                                                            | prerequisites incomplete (claim or complete)                                                                                                                                                                                       |
+| `ALREADY_CLAIMED`                                                                         | a live lease exists; on `verify`, an open attempt owns the task                                                                                                                                                                    |
+| `AWAITING_VERIFICATION`, `INTEGRATION_PENDING`, `TASK_COMPLETE`                           | not claimable in that state                                                                                                                                                                                                        |
+| `NO_ELIGIBLE_WORK`                                                                        | nothing claimable now (non-waiting claim, cooldown)                                                                                                                                                                                |
+| `DONE`                                                                                    | every executable task is complete (waiting claim)                                                                                                                                                                                  |
+| `STALLED`                                                                                 | open tasks remain, nothing claimable, nothing in flight, nothing cooling down; `details` carries the summary with reasons                                                                                                          |
+| `NEEDS_ATTENTION`                                                                         | this task needs a planner: attempts exhausted, or its worktree could not be prepared (`attention_reason` says which)                                                                                                               |
+| `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED`              | authority failures                                                                                                                                                                                                                 |
+| `MISSING_VERIFICATION`                                                                    | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim                                                                                                                    |
+| `VERIFICATION_FAILED`                                                                     | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once                                                                                                                |
+| `VERIFICATION_TIMEOUT`                                                                    | a required check ran out of its budget (`timed_out` evidence): the verification is built too slow for the task's size, or the code hangs; never counted against the attempt; `details.message` says which budget and whose problem |
+| `VERIFICATION_RUNNING`                                                                    | this attempt's `verify complete` is still running; wait for its result                                                                                                                                                             |
+| `INTEGRATION_FAILED`                                                                      | merge conflict (`details.conflicts` lists the files; merge the target branch into the task branch, commit, verify again), moved target that kept moving, or dirty target checkout; never a strike                                  |
+| `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE`                                                | uncommitted changes at `verify complete` / the worktree is gone                                                                                                                                                                    |
+| `CANCELLED`                                                                               | the caller's context ended mid-operation (a host's deadline or interrupt); nothing was written                                                                                                                                     |
+| `INTERNAL`                                                                                | bug or I/O failure                                                                                                                                                                                                                 |
 
 ## Planning (planner authority)
 
@@ -65,8 +65,8 @@ at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 
 `REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
 plan revision; the Go `Apply` takes a whole batch; a batch that changes
-nothing is not a revision. `at add -f plan.yaml` (or `.json`, or `-` for
-stdin) and `at add --plan '…'` apply a whole plan in one revision: one
+nothing is not a revision. `atask add -f plan.yaml` (or `.json`, or `-` for
+stdin) and `atask add --plan '…'` apply a whole plan in one revision: one
 item, a list, or `{tasks: [...]}`, each item with the field names `at
 show` prints (`kind` task|group, `key`, `title`, `outcome`, `parent`,
 `cohort`, `constraints`, `acceptance`, `requires`, `blocks`, `checks`,
@@ -75,7 +75,7 @@ or argv), dir, timeout_ms, required}`). A bad item rejects the whole
 file. `--claim` on a single-task add claims it at once and prints the
 session beside the plan result: the fast path for a small change.
 
-`at doctor [--skip-baseline]` checks a project before planning or
+`atask doctor [--skip-baseline]` checks a project before planning or
 starting workers: repository and target branch resolve, the target
 checkout has no uncommitted or untracked files (a warning: checks and
 worktrees run on the committed revision), a Git identity
@@ -97,21 +97,21 @@ stale `--expect-rev`), a different request under the same key is
   cannot empty it. A trivial check (`true`) is the planner's own risk.
 - `--size small|medium|large` (default small) declares how long the
   task's checks may take; the project's budgets turn it into seconds
-  (defaults 30s, 5m, 15m; the regression suite 2m; `at project
+  (defaults 30s, 5m, 15m; the regression suite 2m; `atask project
   --budget-small 45s --regression-budget 3m`, `none` for no cap). The
   whole suite shares the budget: a check that would start after it is
   spent is recorded as `timed_out` without running. A small task whose
   check runs the whole module gets a planning warning. `verify` results
   carry `warnings` for checks that passed using more than half their
-  budget. Checks run with `AT_CHANGED_FILES` (a file listing the paths the
-  candidate changed against the target) and `AT_TARGET_BRANCH`, so a
+  budget. Checks run with `ATASK_CHANGED_FILES` (a file listing the paths the
+  candidate changed against the target) and `ATASK_TARGET_BRANCH`, so a
   regression check can run only affected tests.
 - `--pin PATH` names files, or directories by prefix, the task may not
   change: test files and check scripts it does not own, generated files,
   lockfiles. `verify complete` refuses a submission that touched one
   (`VERIFICATION_FAILED`, counted as the attempt's failure, before any
   check runs), so an agent cannot pass by weakening the checks. Pins are
-  part of the contract (`pins` in `at show` and in the context); `update
+  part of the contract (`pins` in `atask show` and in the context); `update
   --pin ""` clears them. Cohort members are not pinned yet.
 - `B --requires A` means B cannot be claimed until A is complete. Hard
   edges form a DAG; cycles, self-edges, and cross-project edges are
@@ -121,8 +121,8 @@ stale `--expect-rev`), a different request under the same key is
   A group may carry its own checks (`--group --check ...`, `--size`, large
   by default): an epic whose checks run once, on the target branch, in a
   durable leased job once every executable member is complete and every
-  sub-epic verified. Whichever worker is waiting in `at claim --wait`
-  runs it, or `at verify groups [REF]` runs it on demand. The group is
+  sub-epic verified. Whichever worker is waiting in `atask claim --wait`
+  runs it, or `atask verify groups [REF]` runs it on demand. The group is
   complete (●) only when its checks passed; `status` counts a waiting
   epic as active (`pending_epics`) and a failed one as a stall with the
   reason, and nothing is charged to any member. Adding or moving a
@@ -130,7 +130,7 @@ stale `--expect-rev`), a different request under the same key is
   timeout is the epic's construction problem, reported on the group.
 - `--cohort C` marks coupled verification: members implement independently
   and are judged together on one assembled candidate. It is not a blocker.
-- `--blocks C` on a claimed task needs C's session token (`AT_SESSION`) or
+- `--blocks C` on a claimed task needs C's session token (`ATASK_SESSION`) or
   `--planner`; on a completed task it is rejected.
 - Completed tasks cannot be edited or archived. Claimed tasks accept
   prerequisite changes with authority; contract changes need `--planner`
@@ -167,8 +167,8 @@ treats a cooldown as something to wait for (it wakes at the earliest
 expiry; `status` reports `cooling` and `next_eligible_at`) and returns
 `STALLED` only when nothing can proceed without a planner. A worktree that cannot be prepared marks that task
 `needs_attention` with the reason and ends the attempt; the queue moves
-on to the next task. `at claim <ref>` on such a task retries the
-preparation (the repair path after fixing the worktree); `at update <ref>
+on to the next task. `atask claim <ref>` on such a task retries the
+preparation (the repair path after fixing the worktree); `atask update <ref>
 --reset-attempts` clears the mark. It refuses with
 `MISSING_VERIFICATION` while the project has no regression checks: work
 that can never complete is never handed out. `--wait` blocks until work is
@@ -182,7 +182,7 @@ the worktree was created from on a first attempt), `regression_checks`
 (the project checks `verify complete` runs after the task checks), and
 the `handoff`.
 
-Every claim gets the task's own worktree on branch `at/<task-id>`, created
+Every claim gets the task's own worktree on branch `atask/<task-id>`, created
 from the project's target branch on the first attempt and reused by every
 later attempt, so the next attempt starts from the previous one's commits
 (and sees its uncommitted edits: the claim reports `workspace_dirty`).
@@ -193,7 +193,7 @@ once the task is complete.
 Every authenticated command (`log`, `verify`, `claim renew`, a session
 `add --blocks`) renews it, so an agent that logs at least every half hour
 never loses its claim; the host that launched the agent renews it on the
-agent's behalf (`Renew`, or `at claim renew` with the token) while the
+agent's behalf (`Renew`, or `atask claim renew` with the token) while the
 agent is busy. When a lease does expire the task becomes claimable again;
 the old token answers `LEASE_EXPIRED` (or `SESSION_SUPERSEDED` once a new
 attempt exists) and the holder must stop editing. The next claim
@@ -216,7 +216,7 @@ released. Only a run charged against its attempt derives to
 is refused with `VERIFICATION_RUNNING`; after completion it returns the
 stored acknowledgement.
 
-**Context.** `at context` prints the working context of a task as one
+**Context.** `atask context` prints the working context of a task as one
 block of text an agent can take as its prompt, and in JSON mode the same
 text as `prompt` beside the task view: title, outcome, constraints,
 acceptance criteria, what "done" means, the task checks and regression
@@ -229,26 +229,26 @@ JSON), plain git otherwise. With no task in hand at all (no reference, no
 token anywhere) it describes the plan instead: counts, what is claimable,
 and whether to claim or to plan (`summary` and `claimable` in JSON, no
 `task`). Without a reference it describes the current session's task
-(worktree token, `AT_SESSION`, or a token argument); with one it
+(worktree token, `ATASK_SESSION`, or a token argument); with one it
 describes that task for anyone, read-only. `--with-rules` appends the
 rules of the road for an agent that does not read AGENTS.md.
 
-**Installing the instructions.** `at init` registers the repository and
+**Installing the instructions.** `atask init` registers the repository and
 installs the project instruction block (`app.Instructions`: how work gets
-done through `at`, the verbs, the execution contract) into `AGENTS.md`
-between `<!-- at:begin -->` and `<!-- at:end -->`, creating the file with a
+done through `atask`, the verbs, the execution contract) into `AGENTS.md`
+between `<!-- atask:begin -->` and `<!-- atask:end -->`, creating the file with a
 default engineering-guidelines section when absent and refreshing only
 the block on re-runs; it also makes sure `CLAUDE.md` imports it
 (`@AGENTS.md`). When `init` creates the repository in a directory that
 already has files, they stay untracked (init never commits them); the
 result carries `untracked_files` and a `warning` that they must be
-committed before the baseline can pass. `--no-instructions` skips that. `at init --claude` merges
-three hooks into `.claude/settings.json`, each calling `at hook <event>`
+committed before the baseline can pass. `--no-instructions` skips that. `atask init --claude` merges
+three hooks into `.claude/settings.json`, each calling `atask hook <event>`
 with the hook's JSON on stdin: `session-start` prints the plan or task
 context; `guard-edit` denies an Edit/Write to a file inside a registered
-project that is not in a task worktree (`AT_ALLOW_DIRECT=1` bypasses);
+project that is not in a task worktree (`ATASK_ALLOW_DIRECT=1` bypasses);
 `stop` refuses to end a turn while the session's worktree (or
-`AT_SESSION`) holds a live claim that is neither verified nor released.
+`ATASK_SESSION`) holds a live claim that is neither verified nor released.
 An `at` failure inside a hook never blocks the harness.
 
 **Prompt layers.** An agent runs under three layers and `at` supplies
@@ -256,18 +256,18 @@ the third: (1) a bootstrap system prompt, set by the host where the
 harness allows it (Claude Code `-p --append-system-prompt`, a bare model's
 system message; Codex has none and relies on AGENTS.md); (2) the project
 instruction file, AGENTS.md (or a CLAUDE.md that imports it), holding the
-agent execution contract; (3) the task turn, `at context`, which carries
+agent execution contract; (3) the task turn, `atask context`, which carries
 only task facts and never repeats the contract. `--with-rules` appends
 the contract for an agent that gets no project file. The bootstrap is:
 
 ```
 You are a coding agent responsible for one task in an isolated Git worktree.
 Use the shell and the `at` CLI to execute and manage the task; `at` is
-authoritative for task state, verification and completion. AT_OUTPUT=json is
-set: every `at` command returns one JSON envelope; inspect error.details when
-one fails. Start with `at context` and follow the project instructions.
-Commit before `at verify complete`; only a passing verification completes
-the task. If any `at` command returns LEASE_EXPIRED or SESSION_SUPERSEDED,
+authoritative for task state, verification and completion. ATASK_OUTPUT=json is
+set: every `atask` command returns one JSON envelope; inspect error.details when
+one fails. Start with `atask context` and follow the project instructions.
+Commit before `atask verify complete`; only a passing verification completes
+the task. If any `atask` command returns LEASE_EXPIRED or SESSION_SUPERSEDED,
 stop editing immediately.
 ```
 
@@ -304,7 +304,7 @@ and completes all members atomically. The consumed token is not a cohort
 credential, but `verify complete` with it again is an idempotent
 acknowledgement: the stored submission and the member's current status,
 no new run, no new authority. A submission waiting for its peers pins the
-member's contract: changing it needs `at update <ref> --planner
+member's contract: changing it needs `atask update <ref> --planner
 --withdraw-submission` (the member becomes claimable, nothing is counted,
 and it must resubmit under the new contract); while a cohort job runs,
 members' contracts are pinned outright. Blame is precise: a
@@ -335,7 +335,7 @@ at status                   counts, claimable, active, cooling, pending cohorts,
 at prune                    remove worktrees of complete/archived tasks and quarantined directories of idle tasks
 ```
 
-`AT_OUTPUT=json at help` prints an envelope listing the commands; a bare
+`ATASK_OUTPUT=json at help` prints an envelope listing the commands; a bare
 `at` in JSON mode prints an `INVALID_INPUT` envelope (exit 2).
 
 Glyphs are progress, not liveness: `○` never started (ready or blocked
@@ -353,19 +353,19 @@ in any read view.
 
 `claim` is the only command that prints a token, and it also stores the
 token inside the task worktree's private Git directory
-(`.git/worktrees/<name>/at-session`, never in the tree, never in the
-database, which keeps only a digest). Any `at` command run with the
+(`.git/worktrees/<name>/atask-session`, never in the tree, never in the
+database, which keeps only a digest). Any `atask` command run with the
 worktree as its working directory finds it, planning commands included,
 so an agent started inside the worktree needs no token at all. Explicit
 sources win when present, in this order: a positional token, `-` (one
 line of stdin, so secrets stay out of process listings), `--session`,
-`AT_SESSION`, then the worktree file. A `claim` subprocess cannot set
-`AT_SESSION` in its parent shell: hosts that run the agent elsewhere
+`ATASK_SESSION`, then the worktree file. A `claim` subprocess cannot set
+`ATASK_SESSION` in its parent shell: hosts that run the agent elsewhere
 capture the JSON and inject the token.
 
-Inside a task worktree (branch `at/<task-id>`) the token must belong to
+Inside a task worktree (branch `atask/<task-id>`) the token must belong to
 that task; a token for another task is refused with `INVALID_SESSION`
-before any write, so a mis-exported `AT_SESSION` cannot act on the wrong
+before any write, so a mis-exported `ATASK_SESSION` cannot act on the wrong
 task.
 
 **Takeover.** A worktree whose attempt never ended (the lease ran out
@@ -379,7 +379,7 @@ commits lands on a detached HEAD. The claim reports the quarantine as
 `quarantined_workspace` (with `workspace_dirty` when uncommitted edits
 are in there) so the new attempt or a human can salvage them. A clean
 handoff (`release`, completion) reuses the worktree without quarantine.
-Quarantined directories are removed when the task completes; `at prune`
+Quarantined directories are removed when the task completes; `atask prune`
 removes them for idle tasks and removes the worktrees of complete and
 archived tasks (branches are kept; a live claim's worktree is never
 touched).
@@ -390,16 +390,16 @@ A lost token is a stuck task until the lease expires; that is by design.
 ```
 Implement the claimed task's outcome and acceptance criteria.
 Use the supplied workspace and session. You do not set task status.
-Use `at log` for progress/discoveries.
-Use `at verify task` and `at verify regression` while iterating.
-When ready, commit the final code revision and call `at verify complete`.
+Use `atask log` for progress/discoveries.
+Use `atask verify task` and `atask verify regression` while iterating.
+When ready, commit the final code revision and call `atask verify complete`.
 It runs BOTH suites again and establishes completion only if all gates pass.
 INTEGRATION_FAILED means the target branch moved against you: merge it into
 your branch, resolve `details.conflicts`, commit, and verify again.
 If new prerequisite work is needed, add it as a blocker of the current
-claimed task (`at add "..." --blocks <task> --check "id: cmd"`; your
-AT_SESSION authorises it), log the handoff, and release the claim
-(`at claim release`).
-Every `at` command renews your lease; `at log` at least every half hour.
+claimed task (`atask add "..." --blocks <task> --check "id: cmd"`; your
+ATASK_SESSION authorises it), log the handoff, and release the claim
+(`atask claim release`).
+Every `atask` command renews your lease; `atask log` at least every half hour.
 Stop editing immediately if claim renewal/authorization fails.
 ```

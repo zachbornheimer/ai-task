@@ -65,7 +65,7 @@ func TestHelpNamesDefaults(t *testing.T) {
 	if !strings.Contains(out, "--regression-check") {
 		t.Fatalf("at help does not name --regression-check:\n%s", out)
 	}
-	// With AT_DB unset, --db's help names where the database lives.
+	// With ATASK_DB unset, --db's help names where the database lives.
 	var o, e bytes.Buffer
 	Main(Env{Args: []string{"status", "--help"}, Stdout: &o, Stderr: &e, Cwd: t.TempDir(), Getenv: func(string) string { return "" }})
 	def, err := app.DefaultPath()

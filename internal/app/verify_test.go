@@ -325,7 +325,6 @@ func TestIntegrationConflictDoesNotComplete(t *testing.T) {
 	f.commit(s.Workspace, "f.txt", "from a")
 	// main moves with a conflicting change before a verifies.
 	f.commit(f.repo, "f.txt", "from main")
-	t.Setenv("PATH", gitOnlyPath(t)) // no Worktrunk: the remedy is git's
 	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeIntegrationFailed)
 	if f.status(string(a)) == task.StatusComplete || f.git(f.repo, "rev-parse", "HEAD") != f.git(f.repo, "rev-parse", "main") {
@@ -333,7 +332,7 @@ func TestIntegrationConflictDoesNotComplete(t *testing.T) {
 	}
 	// The refusal names the conflicting files and the remedy, and no check
 	// ran: the merge is checked before any check time is spent.
-	if len(res.Conflicts) != 1 || res.Conflicts[0] != "f.txt" || !strings.Contains(res.Message, "git merge main") || len(res.Evidence) != 0 {
+	if len(res.Conflicts) != 1 || res.Conflicts[0] != "f.txt" || !strings.Contains(res.Message, "wt step rebase main") || len(res.Evidence) != 0 {
 		t.Fatalf("conflict result: %+v", res)
 	}
 	if v := f.show(string(a)); v.Failures != 0 || !strings.Contains(v.LastError, "f.txt") {
@@ -366,10 +365,10 @@ func TestIntegrationConflictDoesNotComplete(t *testing.T) {
 
 func TestGoTestCacheDisabledInCheckEnvironment(t *testing.T) {
 	f := newGitFixture(t)
-	a := f.addWith("a", "test \"$GOFLAGS\" = \"-count=1\" && test -z \"$AT_SESSION\"")
+	a := f.addWith("a", "test \"$GOFLAGS\" = \"-count=1\" && test -z \"$ATASK_SESSION\"")
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
-	t.Setenv("AT_SESSION", string(s.Token))
+	t.Setenv("ATASK_SESSION", string(s.Token))
 	f.complete(s)
 }
 
@@ -467,7 +466,7 @@ func TestCategoriesDoNotShareASnapshot(t *testing.T) {
 	f := newGitFixture(t)
 	f.setRegression(check("regress", "test -f artifact.txt", true))
 	a := f.apply(plan.AddTask{Key: "a", Title: "a", TaskChecks: []verification.CheckSpec{
-		check("leave", "echo made > artifact.txt && test -z \"$AT_SESSION\" && test -n \"$TMPDIR\" && test \"$TMPDIR\" != \"$AT_CHECK_DIR\"", true),
+		check("leave", "echo made > artifact.txt && test -z \"$ATASK_SESSION\" && test -n \"$TMPDIR\" && test \"$TMPDIR\" != \"$ATASK_CHECK_DIR\"", true),
 	}}).Created["a"]
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")

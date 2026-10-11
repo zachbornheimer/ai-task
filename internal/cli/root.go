@@ -76,14 +76,14 @@ func Main(env Env) int {
 	}
 	ctx := context.Background()
 	c := &ctxt{env: env}
-	c.g = globals{db: env.Getenv("AT_DB"), project: env.Getenv("AT_PROJECT"), output: env.Getenv("AT_OUTPUT")}
+	c.g = globals{db: env.Getenv("ATASK_DB"), project: env.Getenv("ATASK_PROJECT"), output: env.Getenv("ATASK_OUTPUT")}
 
-	top := flag.NewFlagSet("at", flag.ContinueOnError)
+	top := flag.NewFlagSet("atask", flag.ContinueOnError)
 	top.SetOutput(io.Discard)
 	c.bindGlobals(top)
 	if err := top.Parse(env.Args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			// `at --help` asks for the command list: same as `at help`.
+			// `atask --help` asks for the command list: same as `atask help`.
 			if err := commands["help"].run(ctx, c, nil); err != nil {
 				return c.fail(err)
 			}
@@ -94,7 +94,7 @@ func Main(env Env) int {
 	rest := top.Args()
 	if len(rest) == 0 {
 		if c.jsonOut() {
-			return c.usageError(fmt.Errorf("a command is required; `at help` lists them"))
+			return c.usageError(errors.New("a command is required; `atask help` lists them"))
 		}
 		c.printHelp(c.env.Stderr)
 		return ExitUsage
@@ -126,13 +126,13 @@ func Main(env Env) int {
 }
 
 func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
-	dbHelp := "database path (env AT_DB)"
+	dbHelp := "database path (env ATASK_DB)"
 	if def, err := app.DefaultPath(); err == nil && c.g.db == "" {
-		dbHelp = "database path (env AT_DB; default " + def + ")"
+		dbHelp = "database path (env ATASK_DB; default " + def + ")"
 	}
 	fs.StringVar(&c.g.db, "db", c.g.db, dbHelp)
-	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env AT_PROJECT)")
-	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env AT_OUTPUT=json)")
+	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env ATASK_PROJECT)")
+	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env ATASK_OUTPUT=json)")
 	fs.StringVar(&c.g.output, "output", c.g.output, "output format: text|json")
 	fs.BoolVar(&c.g.pretty, "pretty", c.g.pretty, "indent JSON output (default: compact, one line)")
 }
@@ -310,14 +310,14 @@ func (c *ctxt) usageError(err error) int {
 	if c.jsonOut() {
 		_ = c.encoder().Encode(envelope{OK: false, Error: &errorOut{Code: fault.CodeInvalidInput, Message: "usage: " + err.Error()}})
 	} else {
-		fmt.Fprintf(c.env.Stderr, "usage error: %s\nRun `at help` for commands.\n", err)
+		fmt.Fprintf(c.env.Stderr, "usage error: %s\nRun `atask help` for commands.\n", err)
 	}
 	return ExitUsage
 }
 
 func (c *ctxt) printHelp(w io.Writer) {
-	fmt.Fprintln(w, "at - agent task engine: atomic plans, leased claims, verified completion")
-	fmt.Fprintln(w, "\nUsage: at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]")
+	fmt.Fprintln(w, "atask - agent task engine: atomic plans, leased claims, verified completion")
+	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]")
 	fmt.Fprintln(w, "\nCommands:")
 	names := make([]string, 0, len(commands))
 	for n := range commands {
@@ -327,7 +327,7 @@ func (c *ctxt) printHelp(w io.Writer) {
 	for _, n := range names {
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
-	fmt.Fprintln(w, "\nEnvironment: AT_DB, AT_PROJECT, AT_OUTPUT=json, AT_SESSION (optional inside a task worktree: the token is stored there)")
+	fmt.Fprintln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
 	fmt.Fprintln(w, "Agent verbs: claim, log, verify task|regression|complete, claim release|renew. Planning: add, update, show, list.")
 }
 
@@ -358,7 +358,7 @@ func init() {
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		h := help{Usage: "at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]", Environment: []string{"AT_DB", "AT_PROJECT", "AT_OUTPUT=json", "AT_SESSION"}}
+		h := help{Usage: "at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
 		for _, n := range names {
 			h.Commands = append(h.Commands, cmd{n, commands[n].summary})
 		}
@@ -373,7 +373,7 @@ func init() {
 	})
 }
 
-// buildVersion is the version `at version` reports: the one set at link
+// buildVersion is the version `atask version` reports: the one set at link
 // time, else the module version `go install` recorded (a tag or a
 // pseudo-version naming the commit), else "dev" with the VCS revision of
 // a source build.

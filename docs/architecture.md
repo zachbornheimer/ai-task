@@ -4,26 +4,26 @@
 atomic task graph with stable keys and organizational groups, leased and
 fenced execution claims, append-only handoffs, and completion that only
 fresh verification can establish. It is a Go library (`at` package) with a
-thin CLI (`cmd/at`) over one SQLite file. It does not call models, own
+thin CLI (`cmd/atask`) over one SQLite file. It does not call models, own
 prompts, or run a worker pool; the host does (see
 `examples/embedded_runner`).
 
 ## Domain ownership
 
-| Package | Owns | Sole reason to change |
-|---|---|---|
-| `task` | the contract (ID, key, kind, title, outcome, constraints, acceptance, checks, cohort) and **status derivation** | meaning or validation of a task changes; status precedence changes |
-| `plan` | the closed set of plan changes, reference and patch semantics | the planning contract changes |
-| `dependency` | the single hard-edge direction, DAG rules, prerequisite satisfaction | dependency semantics change |
-| `execution` | attempts, leases, fencing generation, tokens, log entries, handoff bounds | authority or handoff semantics change |
-| `verification` | check specs, policy digest, modes, planner order, verdict (`Judge`), evidence shape | the verification contract changes |
-| `project` | project identity, trusted configuration, directory → project resolution | project configuration changes |
-| `checkexec` | running one argv command: cwd, timeout, bounded streams | execution mechanics change |
-| `workspace` | Git: per-task worktrees (`at/<id>`), detached snapshots, two-phase guarded promotion | Git interaction changes |
-| `app` | use cases and transaction boundaries (`Apply`, `Claim`, `Verify`, cohorts, `List`/`Show`/`Summary`) | a use case coordinates domains differently |
-| `sqlite` | schema, migrations, typed queries | persistence changes |
-| `cli` | parsing, envelopes, glyph rendering | CLI surface changes |
-| `fault` | stable error codes | a new code is needed |
+| Package        | Owns                                                                                                            | Sole reason to change                                              |
+| -------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `task`         | the contract (ID, key, kind, title, outcome, constraints, acceptance, checks, cohort) and **status derivation** | meaning or validation of a task changes; status precedence changes |
+| `plan`         | the closed set of plan changes, reference and patch semantics                                                   | the planning contract changes                                      |
+| `dependency`   | the single hard-edge direction, DAG rules, prerequisite satisfaction                                            | dependency semantics change                                        |
+| `execution`    | attempts, leases, fencing generation, tokens, log entries, handoff bounds                                       | authority or handoff semantics change                              |
+| `verification` | check specs, policy digest, modes, planner order, verdict (`Judge`), evidence shape                             | the verification contract changes                                  |
+| `project`      | project identity, trusted configuration, directory → project resolution                                         | project configuration changes                                      |
+| `checkexec`    | running one argv command: cwd, timeout, bounded streams                                                         | execution mechanics change                                         |
+| `workspace`    | Git: per-task worktrees (`atask/<id>`), detached snapshots, two-phase guarded promotion                         | Git interaction changes                                            |
+| `app`          | use cases and transaction boundaries (`Apply`, `Claim`, `Verify`, cohorts, `List`/`Show`/`Summary`)             | a use case coordinates domains differently                         |
+| `sqlite`       | schema, migrations, typed queries                                                                               | persistence changes                                                |
+| `cli`          | parsing, envelopes, glyph rendering                                                                             | CLI surface changes                                                |
+| `fault`        | stable error codes                                                                                              | a new code is needed                                               |
 
 Dependency direction: `cli → app → sqlite → domain`; domain packages import
 only other domain packages and `fault`. The store returns facts and decides
@@ -32,9 +32,9 @@ is re-checked in Go before the claim.
 
 ## Authority model
 
-- **Planning authority** (`Apply`, `at add/update`) edits the graph. It is
+- **Planning authority** (`Apply`, `atask add/update`) edits the graph. It is
   distinct from execution authority: reviewing a plan never requires a
-  claim. Edits to a *claimed* task's eligibility need that task's session
+  claim. Edits to a _claimed_ task's eligibility need that task's session
   token or `--planner`; contract edits to claimed tasks need `--planner`;
   completed tasks are immutable (archive and re-plan).
 - **Execution authority** is a session token: returned once by `Claim`,
@@ -80,19 +80,19 @@ a fact written only by the finalising transaction.
 
 ## Workspaces and integration
 
-Every project is a Git repository (`at init` runs `git init` and makes an
+Every project is a Git repository (`atask init` runs `git init` and makes an
 initial commit when the directory is not one). Every task has one
-worktree on branch `at/<task-id>`, created from the target branch at the
+worktree on branch `atask/<task-id>`, created from the target branch at the
 first claim and reused by every later attempt, so retries continue from
 the previous attempt's commits. The claim stores the session token in
-the worktree's private Git directory, so `at` commands run there need no
-`AT_SESSION`. When the previous attempt never ended cleanly, the claim
+the worktree's private Git directory, so `atask` commands run there need no
+`ATASK_SESSION`. When the previous attempt never ended cleanly, the claim
 first moves its worktree to `<path>.stale-<seq>` with HEAD detached and
 creates a fresh one on the branch: a stale process keeps only its own
-expired token and cannot reach the branch or the new files. `at init`
+expired token and cannot reach the branch or the new files. `atask init`
 writes no Git hooks; it installs the agent instruction files (AGENTS.md
 block, CLAUDE.md import) and, on request, Claude Code hooks that call
-`at hook`.
+`atask hook`.
 Final checks run in a detached snapshot of the submitted commit, never in
 the editable worktree. Integration policy `promote` (the default) merges
 the verified revision onto the target branch in a scratch worktree,
@@ -109,7 +109,7 @@ your worktree tooling.
 ## State location
 
 `$XDG_STATE_HOME/at/at.db` (Linux), `~/Library/Application Support/at/`
-(macOS), `%LOCALAPPDATA%\at\` (Windows), or `AT_DB`. Worktrees live beside
+(macOS), `%LOCALAPPDATA%\at\` (Windows), or `ATASK_DB`. Worktrees live beside
 the database unless the project sets `workspace_root`; verification run
 logs live beside it in `logs/`. One file holds every
 project. Network filesystems are unsupported.

@@ -5,9 +5,9 @@ completes a task; only `verify complete` can, and only with fresh evidence.
 
 ## Two required categories
 
-- **Task checks** (`at add --check`, `at update --check`) prove the task's
+- **Task checks** (`atask add --check`, `atask update --check`) prove the task's
   own outcome. Required unless a task is a group.
-- **Project regression checks** (`at project --regression-check` /
+- **Project regression checks** (`atask project --regression-check` /
   `--regression-json`) guard the rest of the project. Trusted
   configuration; never reachable through a session token.
 
@@ -31,12 +31,12 @@ regexp, and awk's `$1` are not expansions.
 
 ## Modes
 
-| Invocation | Inputs | Effect |
-|---|---|---|
-| `at verify task` | attempt worktree (editable) | runs task checks fresh; records a diagnostic run; never completes/releases/integrates |
-| `at verify regression` | attempt worktree | same for regression checks |
-| `at verify complete` | clean worktree → immutable HEAD → detached snapshot | runs BOTH categories fresh, integrates, finalises completion |
-| `at verify` | | usage error |
+| Invocation                | Inputs                                              | Effect                                                                                |
+| ------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `atask verify task`       | attempt worktree (editable)                         | runs task checks fresh; records a diagnostic run; never completes/releases/integrates |
+| `atask verify regression` | attempt worktree                                    | same for regression checks                                                            |
+| `atask verify complete`   | clean worktree → immutable HEAD → detached snapshot | runs BOTH categories fresh, integrates, finalises completion                          |
+| `atask verify`            |                                                     | usage error                                                                           |
 
 Order within a run: required task checks, optional task checks, then
 regression checks; regression is skipped (recorded as `skipped`) when a
@@ -62,9 +62,9 @@ missing log never fails a run.
 ## No reuse
 
 Every invocation executes its checks. Stored evidence is history for
-diagnosis (`at show --full`), never proof for a new run. Checks run with
+diagnosis (`atask show --full`), never proof for a new run. Checks run with
 `GOFLAGS=-count=1` so Go's own test cache cannot replay a success, and
-without `AT_SESSION` so a check cannot act on the task. The one exception
+without `ATASK_SESSION` so a check cannot act on the task. The one exception
 is an idempotent acknowledgement: `verify complete` with the same token
 after a committed completion returns the stored result and runs nothing.
 
@@ -78,7 +78,7 @@ after a committed completion returns the stored result and runs nothing.
    regression checks on a second, fresh snapshot (skipped, and recorded as
    such, when a required task check failed): nothing a task check leaves
    behind can be why a regression check passes. Each snapshot has a private
-   `TMPDIR`; `AT_SESSION` is never in a check's environment. Each evidence
+   `TMPDIR`; `ATASK_SESSION` is never in a check's environment. Each evidence
    row commits as it finishes, fenced on the session and on the run still
    being the newest.
 4. Judge. On failure: run failed, failure count and cooldown recorded,
@@ -164,8 +164,8 @@ size); a regression timeout is the planner's (narrow the gate, raise
 `--regression-budget`). Checks that pass using more than half their
 budget are reported as warnings, because CI machines are slower. `at
 doctor` times the regression suite on the target branch against the
-budget. Checks receive `AT_CHANGED_FILES`, a file listing the paths the
-candidate changed against the target, and `AT_TARGET_BRANCH`, so a
+budget. Checks receive `ATASK_CHANGED_FILES`, a file listing the paths the
+candidate changed against the target, and `ATASK_TARGET_BRANCH`, so a
 regression gate can run only affected tests and leave the full suite to
 CI. The defaults follow Google's test sizes and Bazel's size-implied
 timeouts, tightened for an agent's feedback loop.
@@ -174,7 +174,7 @@ timeouts, tightened for an agent's feedback loop.
 
 A group with checks is verified once on the target branch when all its
 members are complete, under its own size budget (large, 15m, by default),
-as a durable job run by whichever worker has capacity or by `at verify
+as a durable job run by whichever worker has capacity or by `atask verify
 groups`. Task checks prove one outcome in seconds, the regression gate
 guards the rest in two minutes, and the epic's checks are where the slow,
 whole-system verification lives, paid once per epic rather than once per

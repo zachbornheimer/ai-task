@@ -10,8 +10,8 @@ import (
 )
 
 // The session token of a claim is stored in the task worktree's private
-// Git directory (`<repo>/.git/worktrees/<name>/at-session`), which is never
-// part of the tree. Any `at` command run inside that worktree finds it
+// Git directory (`<repo>/.git/worktrees/<name>/atask-session`), which is never
+// part of the tree. Any `atask` command run inside that worktree finds it
 // without the agent carrying the secret.
 //
 // A worktree whose attempt did not end cleanly is quarantined (renamed,
@@ -19,7 +19,7 @@ import (
 // path, so a stale process keeps only its own, expired, token: the new
 // token lives in a Git directory the stale process never sees.
 
-const tokenFile = "at-session"
+const tokenFile = "atask-session"
 
 // gitDir resolves the private git directory of the worktree containing
 // dir, honouring GIT_DIR (set by Git when running hooks).
