@@ -52,4 +52,24 @@ func TestListAllProjectsThenOne(t *testing.T) {
 	if strings.Contains(out, "from-alpha") {
 		t.Fatalf("list beta should not show alpha's tasks:\n%s", out)
 	}
+	if !strings.Contains(out, "no tasks registered in beta") {
+		t.Fatalf("empty project should say so:\n%s", out)
+	}
+}
+
+func TestListEmptyDatabase(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "at.db")
+	var o, e bytes.Buffer
+	code := Main(Env{Args: []string{"list"}, Stdin: strings.NewReader(""), Stdout: &o, Stderr: &e, Cwd: t.TempDir(), Getenv: func(k string) string {
+		if k == "ATASK_DB" {
+			return db
+		}
+		return ""
+	}})
+	if code != ExitOK {
+		t.Fatalf("list: %d %s", code, e.String())
+	}
+	if !strings.Contains(o.String(), "no projects registered") {
+		t.Fatalf("empty db:\n%s", o.String())
+	}
 }

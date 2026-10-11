@@ -700,6 +700,10 @@ func runShow(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func renderProjects(w io.Writer, ps []project.Project) error {
+	if len(ps) == 0 {
+		_, err := fmt.Fprintln(w, "no projects registered. run `atask init` here.")
+		return err
+	}
 	for i := range ps {
 		if _, err := fmt.Fprintf(w, "%s  %-20s  %s\n", ps[i].ID, ps[i].Name, ps[i].RootPath); err != nil {
 			return err
@@ -766,7 +770,17 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.emit(snap, func(w io.Writer) { renderList(w, snap, filter) })
+	proj, err := e.Project(ctx, pid)
+	if err != nil {
+		return err
+	}
+	return c.emit(snap, func(w io.Writer) {
+		if len(snap.Tasks) == 0 && len(snap.Groups) == 0 {
+			_, _ = fmt.Fprintf(w, "no tasks registered in %s.\n", proj.Name)
+			return
+		}
+		renderList(w, snap, filter)
+	})
 }
 
 func runStatus(ctx context.Context, c *ctxt, args []string) error {
