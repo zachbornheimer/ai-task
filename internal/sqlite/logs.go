@@ -90,10 +90,13 @@ func (t *Tx) Handoff(id task.ID) (execution.Handoff, error) {
 	if err != nil {
 		return h, wrapInternal(err, "recent logs")
 	}
-	defer rows.Close()
 	h.RecentLogs, err = scanLogs(rows)
+	closeErr := rows.Close()
 	if err != nil {
 		return h, err
+	}
+	if closeErr != nil {
+		return h, wrapInternal(closeErr, "close recent logs")
 	}
 	err = t.tx.QueryRowContext(t.ctx, `SELECT next FROM task_log_entries WHERE task_id = ? AND next <> '' ORDER BY id DESC LIMIT 1`, id).Scan(&h.LatestNext)
 	if err != nil && !isNoRows(err) {
