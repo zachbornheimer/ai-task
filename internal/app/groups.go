@@ -60,6 +60,29 @@ func (e *Engine) resolveTargetHead(ctx context.Context, pid project.ID) targetHe
 	return e.targetHeadOf(ctx, proj)
 }
 
+// projectHeads resolves the target branch of every enrolled git project.
+// Unscoped and gitless projects are omitted; callers treat a missing
+// entry as "no target" (epics there never need a head).
+func (e *Engine) projectHeads(ctx context.Context) (map[project.ID]targetHead, error) {
+	var ps []project.Project
+	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		var err error
+		ps, err = tx.ListProjects()
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[project.ID]targetHead, len(ps))
+	for _, p := range ps {
+		if p.Unscoped() || p.RootPath == "" {
+			continue
+		}
+		out[p.ID] = e.targetHeadOf(ctx, p)
+	}
+	return out, nil
+}
+
 func (e *Engine) targetHeadOf(ctx context.Context, proj project.Project) targetHead {
 	rev, err := e.manager(proj).Revision(ctx, "refs/heads/"+proj.TargetBranch)
 	return targetHead{rev: rev, err: err, known: true}

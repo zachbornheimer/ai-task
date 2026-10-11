@@ -45,9 +45,15 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		return PlanSnapshot{}, err
 	}
 	now := e.now()
-	var head targetHead
+	heads := map[project.ID]targetHead{}
 	if q.ProjectID != "" {
-		head = e.resolveTargetHead(ctx, q.ProjectID)
+		heads[q.ProjectID] = e.resolveTargetHead(ctx, q.ProjectID)
+	} else {
+		var err error
+		heads, err = e.projectHeads(ctx)
+		if err != nil {
+			return PlanSnapshot{}, err
+		}
 	}
 	var snap PlanSnapshot
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
@@ -100,7 +106,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				}
 				g := GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt, LastError: r.LastError}
 				if verification.HasRequired(r.Task.Verification.TaskChecks) {
-					gv, err := e.groupVerification(tx, r, rp, now, head)
+					gv, err := e.groupVerification(tx, r, rp, now, heads[rp.ID])
 					if err != nil {
 						return err
 					}
@@ -131,7 +137,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					continue
 				}
 			}
-			v, err := e.buildViewDepth(tx, r, rp, now, viewList, head)
+			v, err := e.buildViewDepth(tx, r, rp, now, viewList, heads[rp.ID])
 			if err != nil {
 				return err
 			}
@@ -140,7 +146,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		if q.ProjectID == "" {
 			return nil
 		}
-		snap.Summary, err = e.summaryIn(tx, proj, now, head)
+		snap.Summary, err = e.summaryIn(tx, proj, now, heads, nil)
 		return err
 	})
 	return snap, err
@@ -201,29 +207,44 @@ func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 		return Summary{}, err
 	}
 	now := e.now()
-	var head targetHead
+	heads := map[project.ID]targetHead{}
 	if pid != "" {
-		head = e.resolveTargetHead(ctx, pid)
+		heads[pid] = e.resolveTargetHead(ctx, pid)
+	} else {
+		var err error
+		heads, err = e.projectHeads(ctx)
+		if err != nil {
+			return Summary{}, err
+		}
 	}
 	var s Summary
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		var proj project.Project
+		var byID map[project.ID]project.Project
 		var err error
 		if pid == "" {
 			proj = project.Project{ID: project.UnscopedID, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+			ps, err := tx.ListProjects()
+			if err != nil {
+				return err
+			}
+			byID = map[project.ID]project.Project{}
+			for i := range ps {
+				byID[ps[i].ID] = ps[i]
+			}
 		} else {
 			proj, err = tx.GetProject(pid)
 			if err != nil {
 				return err
 			}
 		}
-		s, err = e.summaryIn(tx, proj, now, head)
+		s, err = e.summaryIn(tx, proj, now, heads, byID)
 		return err
 	})
 	return s, err
 }
 
-func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ IsZero() bool }, head targetHead) (Summary, error) {
+func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ IsZero() bool }, heads map[project.ID]targetHead, byID map[project.ID]project.Project) (Summary, error) {
 	n := e.now()
 	s := Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}
 	records, err := tx.ListRecords(proj.ID, sqlite.ScopeLive, n, proj.MaxAttempts)
@@ -268,7 +289,11 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	var epicErrors []string
 	for _, r := range records {
 		if r.Task.Kind == task.KindGroup && verification.HasRequired(r.Task.Verification.TaskChecks) && r.CompletedAt == nil {
-			gv, err := e.groupVerification(tx, r, proj, n, head)
+			rp := proj
+			if p, ok := byID[r.Task.ProjectID]; ok {
+				rp = p
+			}
+			gv, err := e.groupVerification(tx, r, rp, n, heads[rp.ID])
 			if err != nil {
 				return s, err
 			}

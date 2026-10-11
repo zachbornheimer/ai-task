@@ -448,8 +448,10 @@ func TestCLICorners(t *testing.T) {
 	if r := e.run("help"); r.code != 0 || r.env["result"].(map[string]any)["commands"] == nil {
 		t.Fatalf("help envelope: %s", r.stdout)
 	}
-	if r := e.run(); r.code != 2 || r.env == nil || r.env["error"].(map[string]any)["code"] != "INVALID_INPUT" {
+	if r := e.run(); r.code != 0 || r.env == nil {
 		t.Fatalf("bare at envelope: code=%d %s", r.code, r.stdout)
+	} else if _, ok := r.env["result"].(map[string]any)["tasks"]; !ok {
+		t.Fatalf("bare atask should list the board: %s", r.stdout)
 	}
 	if r := e.run("add", "G", "--group", "--requires", "x"); r.code != 2 {
 		t.Fatalf("--group with --requires accepted: %s", r.stdout)
