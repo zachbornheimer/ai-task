@@ -37,6 +37,9 @@ func line(v app.TaskView) string {
 	if a := v.Status.Annotation(); a != "" {
 		s += " " + a
 	}
+	if v.Project != "" {
+		s += "  " + v.Project
+	}
 	return s
 }
 
@@ -543,7 +546,11 @@ func renderVerify(w io.Writer, res app.VerifyResult) {
 }
 
 func renderSummary(w io.Writer, s app.Summary) {
-	fmt.Fprintf(w, "Project %s · plan rev %d · %d tasks, %d open, %d claimable, %d active\n", s.ProjectID, s.PlanRev, s.Total, s.Open, s.Claimable, s.Active)
+	if s.ProjectID == "" {
+		fmt.Fprintf(w, "Board · %d tasks, %d open, %d claimable, %d active\n", s.Total, s.Open, s.Claimable, s.Active)
+	} else {
+		fmt.Fprintf(w, "Project %s · plan rev %d · %d tasks, %d open, %d claimable, %d active\n", s.ProjectID, s.PlanRev, s.Total, s.Open, s.Claimable, s.Active)
+	}
 	var keys []string
 	for st := range s.Counts {
 		keys = append(keys, string(st))

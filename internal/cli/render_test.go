@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,18 @@ func snapshot() app.PlanSnapshot {
 }
 
 func withGroup(v app.TaskView, g *app.Rel) app.TaskView { v.Group = g; return v }
+
+func TestListLineTagsProject(t *testing.T) {
+	v := tv("at-a91", "Rotate leaked credentials", task.StatusReady)
+	if strings.Contains(line(v), "ai-task") {
+		t.Fatalf("unscoped row must stay compact: %q", line(v))
+	}
+	v.Project = "ai-task"
+	got := line(v)
+	if !strings.Contains(got, "ai-task") {
+		t.Fatalf("mixed list must tag the project: %q", got)
+	}
+}
 
 func TestListGolden(t *testing.T) {
 	var b bytes.Buffer

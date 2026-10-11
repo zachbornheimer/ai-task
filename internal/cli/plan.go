@@ -28,7 +28,8 @@ func init() {
 	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: atask show REF [--full]", runShow)
 	register("list", "list open tasks: atask list [<project>] [ready|blocked|all|archived]", runList)
-	register("status", "project summary: counts, claimable, active, done, stalled", runStatus)
+	register("ready", "list claimable tasks (alias for list ready)", runReady)
+	register("status", "board-wide counts, or one project with --project", runStatus)
 	register("prune", "remove worktrees of complete/archived tasks and quarantined directories of idle tasks", runPrune)
 }
 
@@ -775,13 +776,21 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	})
 }
 
+func runReady(ctx context.Context, c *ctxt, args []string) error {
+	return runList(ctx, c, append(args, "ready"))
+}
+
 func runStatus(ctx context.Context, c *ctxt, args []string) error {
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	pid, err := c.resolveProject(ctx)
-	if err != nil {
-		return err
+	var pid project.ID
+	if strings.TrimSpace(c.g.project) != "" {
+		id, err := c.resolveProject(ctx)
+		if err != nil {
+			return err
+		}
+		pid = id
 	}
 	e, err := c.engine(ctx)
 	if err != nil {

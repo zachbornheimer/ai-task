@@ -93,11 +93,7 @@ func Main(env Env) int {
 	}
 	rest := top.Args()
 	if len(rest) == 0 {
-		if c.jsonOut() {
-			return c.usageError(errors.New("a command is required; `atask help` lists them"))
-		}
-		c.printHelp(c.env.Stderr)
-		return ExitUsage
+		rest = []string{"list"}
 	}
 	name, args := rest[0], rest[1:]
 	cmd, ok := commands[name]
@@ -321,7 +317,8 @@ func (c *ctxt) usageError(err error) int {
 
 func (c *ctxt) printHelp(w io.Writer) {
 	fmt.Fprintln(w, "atask - agent task engine: atomic plans, leased claims, verified completion")
-	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]")
+	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [--pretty] [command [args]]")
+	fmt.Fprintln(w, "       no command lists the open board (same as atask list)")
 	fmt.Fprintln(w, "\nCommands:")
 	names := make([]string, 0, len(commands))
 	for n := range commands {
@@ -332,7 +329,7 @@ func (c *ctxt) printHelp(w io.Writer) {
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
 	fmt.Fprintln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
-	fmt.Fprintln(w, "Agent verbs: claim, log, verify task|regression|complete, claim release|renew. Planning: add, update, show, list.")
+	fmt.Fprintln(w, "Agent verbs: claim, log, comment, verify task|regression|complete, claim release|renew. Planning: add, update, show, list, ready, status.")
 }
 
 var commands = map[string]command{}
@@ -362,7 +359,7 @@ func init() {
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		h := help{Usage: "at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
+		h := help{Usage: "atask [--db PATH] [--project ID|NAME] [--json] [--pretty] [command [args]]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
 		for _, n := range names {
 			h.Commands = append(h.Commands, cmd{n, commands[n].summary})
 		}

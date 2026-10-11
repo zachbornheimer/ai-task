@@ -130,5 +130,12 @@ func TestGlobalListIncludesUnscopedAndNamed(t *testing.T) {
 	if !got["from git"] || !got["from anywhere"] {
 		t.Fatalf("global list: %+v", got)
 	}
+	sum, err := f.e.Summary(f.ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Open < 2 {
+		t.Fatalf("board-wide summary should count both projects: %+v", sum)
+	}
 	_ = project.UnscopedID
 }

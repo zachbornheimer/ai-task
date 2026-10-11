@@ -20,6 +20,7 @@ import (
 func init() {
 	register("claim", "claim work: atask claim [REF] [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
 	register("log", "record progress under the current session: atask log --done .. --next .. --learned .. --note ..", runLog)
+	register("comment", "alias for log: atask comment TEXT writes --note (also accepts --done/--next/--learned)", runComment)
 	register("verify", "run checks under the current session: atask verify task|regression|complete | atask verify groups [REF]", runVerify)
 	register("whoami", "show the task of the current session token", runWhoami)
 }
@@ -241,6 +242,14 @@ func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 }
 
 func runLog(ctx context.Context, c *ctxt, args []string) error {
+	return writeLog(ctx, c, args, false)
+}
+
+func runComment(ctx context.Context, c *ctxt, args []string) error {
+	return writeLog(ctx, c, args, true)
+}
+
+func writeLog(ctx context.Context, c *ctxt, args []string, comment bool) error {
 	entry := execution.LogEntry{}
 	c.fs.StringVar(&entry.Done, "done", "", "progress made")
 	c.fs.StringVar(&entry.Next, "next", "", "remaining work / next action")
@@ -249,6 +258,13 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if comment && entry.Note == "" && len(c.args) > 0 {
+		entry.Note = strings.Join(c.args, " ")
+		c.args = nil
+	}
+	if comment && entry.Done == "" && entry.Next == "" && entry.Learned == "" && entry.Note == "" {
+		return usage("comment needs text: atask comment \"note\" or atask log --note ...")
 	}
 	tok, err := c.token(ctx, c.args, *session)
 	if err != nil {

@@ -195,18 +195,27 @@ func (e *Engine) lookup(tx *sqlite.Tx, pid project.ID, ref string) (sqlite.Recor
 	return r, nil
 }
 
-// Summary computes the project status.
+// Summary computes status. An empty pid is the whole board.
 func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 	if err := e.reconcile(ctx); err != nil {
 		return Summary{}, err
 	}
 	now := e.now()
-	head := e.resolveTargetHead(ctx, pid)
+	var head targetHead
+	if pid != "" {
+		head = e.resolveTargetHead(ctx, pid)
+	}
 	var s Summary
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
-		proj, err := tx.GetProject(pid)
-		if err != nil {
-			return err
+		var proj project.Project
+		var err error
+		if pid == "" {
+			proj = project.Project{ID: project.UnscopedID, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+		} else {
+			proj, err = tx.GetProject(pid)
+			if err != nil {
+				return err
+			}
 		}
 		s, err = e.summaryIn(tx, proj, now, head)
 		return err
