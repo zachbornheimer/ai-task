@@ -101,7 +101,8 @@ stale `--expect-rev`), a different request under the same key is
   --budget-small 45s --regression-budget 3m`, `none` for no cap). The
   whole suite shares the budget: a check that would start after it is
   spent is recorded as `timed_out` without running. A small task whose
-  check runs the whole module gets a planning warning. `verify` results
+  check is `go test` without `-run` is rejected (`INVALID_INPUT`);
+  narrow with `-run` or set `--size medium|large`. `verify` results
   carry `warnings` for checks that passed using more than half their
   budget. Checks run with `ATASK_CHANGED_FILES` (a file listing the paths the
   candidate changed against the target) and `ATASK_TARGET_BRANCH`, so a

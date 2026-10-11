@@ -287,6 +287,9 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
 		return fault.New(fault.CodeMissingVerification, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
 	}
+	if err := planBudgetError(spec, a.proj); err != nil {
+		return err
+	}
 	id, err := a.insert(spec)
 	if err != nil {
 		return err
@@ -322,7 +325,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 		}
 		a.result.Warnings[a.createdName(i, c.Key)] = append(a.result.Warnings[a.createdName(i, c.Key)], recommendProject)
 	}
-	if w := append(spec.Warnings(), planBudgetWarnings(spec, a.proj)...); len(w) > 0 {
+	if w := spec.Warnings(); len(w) > 0 {
 		if a.result.Warnings == nil {
 			a.result.Warnings = map[string][]string{}
 		}
@@ -610,15 +613,8 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 		t.Pins, t.Size = spec.Pins, spec.Size
 		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Size != nil) {
-			if w := planBudgetWarnings(spec, a.proj); len(w) > 0 {
-				if a.result.Warnings == nil {
-					a.result.Warnings = map[string][]string{}
-				}
-				name := t.Key
-				if name == "" {
-					name = string(t.ID)
-				}
-				a.result.Warnings[name] = w
+			if err := planBudgetError(spec, a.proj); err != nil {
+				return err
 			}
 		}
 		if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
@@ -859,22 +855,24 @@ func referenceOrder(ops []plan.Change) ([]int, error) {
 // runFilter matches a go test -run (or -test.run) flag in a check command.
 var runFilter = regexp.MustCompile(`(^|\s)-{1,2}(test\.)?run([=\s]|$)`)
 
-// planBudgetWarnings flags a small task whose check looks like a whole-suite
-// run: it must finish within the small budget, so either narrow the
-// check to what proves this outcome or declare a larger size.
-func planBudgetWarnings(spec task.Spec, proj project.Project) []string {
-	if spec.Size != task.SizeSmall {
+// goTestCmd matches a go test invocation, including inside sh -c.
+var goTestCmd = regexp.MustCompile(`(^|\s)go\s+test(\s|$)`)
+
+// planBudgetError rejects a small task whose check is go test without
+// -run: the small budget is 30s and a package test is routinely longer.
+func planBudgetError(spec task.Spec, proj project.Project) error {
+	if spec.Kind != task.KindTask || spec.Size != task.SizeSmall {
 		return nil
 	}
-	var w []string
 	for _, c := range spec.Verification.TaskChecks {
 		cmd := strings.Join(c.Command, " ")
 		if runFilter.MatchString(cmd) {
-			continue // already narrowed to the tests that prove the outcome
+			continue
 		}
-		if strings.Contains(cmd, "./...") || strings.Contains(cmd, " test ./") {
-			w = append(w, fmt.Sprintf("check %q looks like a whole-suite run; a small task's checks must finish within %s (narrow it to this outcome, e.g. -run, or set --size medium|large)", c.ID, proj.Budgets.ForSize(task.SizeSmall)))
+		if !goTestCmd.MatchString(cmd) {
+			continue
 		}
+		return fault.New(fault.CodeInvalidInput, "check %q is go test without -run; a small task's checks must finish within %s. Narrow with -run so it proves only this outcome, or set --size medium|large", c.ID, proj.Budgets.ForSize(task.SizeSmall))
 	}
-	return w
+	return nil
 }

@@ -668,7 +668,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	taskBudget, regBudget := fr.proj.Budgets.ForSize(fr.rec.Task.Size), fr.proj.Budgets.RegressionBudget()
 	if len(verdict.TimedOut) > 0 {
 		res.Message = timeoutMessage(verdict, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
-		return fail(sqlite.RunFailed, fault.CodeVerificationTimeout, verdict.Summary, evidence)
+		return fail(sqlite.RunFailed, fault.CodeVerificationTimeout, verdict.Summary+"; "+res.Message, evidence)
 	}
 	if !verdict.Passed {
 		return fail(sqlite.RunFailed, fault.CodeVerificationFailed, verdict.Summary, evidence)
@@ -755,11 +755,13 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			if v := verification.Judge(fr.policy, more); !v.Passed {
 				cand.Cleanup()
 				code := fault.CodeVerificationFailed
+				summary := "integrated candidate " + short(cand.Revision) + ": " + v.Summary
 				if len(v.TimedOut) > 0 {
 					code = fault.CodeVerificationTimeout
 					res.Message = timeoutMessage(v, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
+					summary += "; " + res.Message
 				}
-				return fail(sqlite.RunFailed, code, "integrated candidate "+short(cand.Revision)+": "+v.Summary, evidence)
+				return fail(sqlite.RunFailed, code, summary, evidence)
 			}
 			final = cand.Revision
 		}
@@ -964,7 +966,7 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudg
 	}
 	var parts []string
 	if len(taskIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task, or the code it runs hangs; make the check prove only this outcome, or make it fast first as its own task (`atask add \"fast check for ...\" --blocks <task> --check ...`, then `atask claim release`) so the slow proof never lands, or have the planner set a larger --size", strings.Join(taskIDs, ", "), size, taskBudget))
+		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task; narrow with -run so it proves only this outcome, or set --size medium|large", strings.Join(taskIDs, ", "), size, taskBudget))
 	}
 	if len(regIDs) > 0 {
 		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (ATASK_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))
