@@ -133,9 +133,12 @@ func TestCoupledVerificationRecoversAfterVerifierCrash(t *testing.T) {
 	}
 	// Any worker with capacity picks the job up: here via a waiting claim
 	// (which runs pending cohorts before deciding done/stalled).
-	_, err := f.open().Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID, Wait: true})
+	got, err := f.open().Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID, Wait: true})
 	if !fault.Is(err, fault.CodeDone) {
-		t.Fatalf("want DONE, got %v", err)
+		// Rare under load (docs/status.md): say which member came back and why.
+		va, vu := f.show(string(api)), f.show(string(ui))
+		t.Fatalf("want DONE, got %v (claimed %q); api: %s failures=%d last_error=%q; ui: %s failures=%d last_error=%q",
+			err, got.Task.ID, va.Status, va.Failures, va.LastError, vu.Status, vu.Failures, vu.LastError)
 	}
 	if f.status(string(api)) != task.StatusComplete || f.status(string(ui)) != task.StatusComplete {
 		t.Fatalf("api=%s ui=%s", f.status(string(api)), f.status(string(ui)))

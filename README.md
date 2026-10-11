@@ -12,16 +12,33 @@ CLI (`cmd/at`) over one SQLite file. No daemon, no API keys.
 
 ## Install
 
+Needs Go 1.24 or later and Git. Linux is the tested platform; macOS and
+Windows build but are untested.
+
 ```sh
-go install github.com/zachbornheimer/ai-task/cmd/at@latest
+go install github.com/zachbornheimer/ai-task/cmd/at@main
+export PATH="$(go env GOPATH)/bin:$PATH"   # if `at` is not found
+at version                                 # the commit you installed, e.g. v0.0.0-20261011…-e83b0eafd593
 ```
+
+There are no release tags yet, so `@main` (or `@latest`, which resolves to
+the same commit) installs the newest commit on `main`. State lives in one
+SQLite file, `~/.local/state/at/at.db` on Linux (`AT_DB` overrides; `at
+--help` shows the default), with task worktrees and run logs beside it.
+
+Every repository you use it in needs a Git identity (`git config
+user.name` / `user.email`): agents commit with it, and `at` records the
+merges it makes when the target branch has moved as the same identity,
+with an `At-Task:` trailer.
 
 ## Tour
 
 ```sh
 export AT_OUTPUT=json
 cd my-repo && at init --claude                         # register the repo, install AGENTS.md + CLAUDE.md, and (--claude) the Claude Code hooks
-at project --regression-check "test: go test ./..."    # trusted project gate (required before any claim)
+git add AGENTS.md CLAUDE.md .claude && git commit -m "Install at"   # worktrees and checks see only committed files
+at project --regression-check 'test: go test ./...' \
+           --regression-check 'fmt: sh -c "test -z \"$(gofmt -l .)\""'   # trusted gate, required before any claim; checks run without a shell, so shell syntax goes in sh -c
 at doctor                                              # repository, target, identity, regression suite green on the target, worktrees
 at add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
 at add "Fix the typo" --check "unit: go test ./..." --claim   # one small change: add and claim in one step
@@ -37,6 +54,22 @@ at verify task                                         # diagnostic
 at verify complete                                     # both suites fresh on a snapshot, promote, complete
 at claim --wait                                        # next eligible task, or DONE / STALLED
 ```
+
+Things that surprise people the first time:
+
+- **A check must fail before the work exists.** `go test -run TestNew`
+  passes when no test matches, so a check like that proves nothing until
+  the test is written; name a test the task adds, or check for the
+  artefact itself.
+- **`DONE` and `STALLED` exit with status 1** and a coded envelope, like
+  every other coded result; a worker loop treats both as its normal end
+  (`examples/hosts/common.sh` shows the loop).
+- **`at` never rewrites history.** A failed attempt's commits stay on the
+  task branch and reach the target with the fix; squash before `verify
+  complete` (`wt step squash`, or git) if you want one commit per task.
+- **Every verify writes its full output to files**: `log_dir` in the
+  result (one `<check>.log` each, plus `result.json`), named in the human
+  output, so a failure in the middle of a long run is never lost.
 
 Go:
 

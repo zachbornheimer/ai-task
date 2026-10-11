@@ -48,6 +48,48 @@ not show: a long interactive session, and an agent that edits with
 shell scripts instead of the Edit tool bypasses the guard (the engine's
 own gates still hold; only the convenience of early refusal is lost).
 
+### Round 4: `at` builds `at`
+
+The prime-time review's findings were fixed through `at` on this
+repository: a plan (`docs/plans/prime-time.yaml`) of 20 tasks under one
+epic, worked by parallel coding agents and by hand, each task with a
+proof check that failed before the change and passed after, gated by the
+repository's own regression suite (gofmt, go vet, go test). Every task
+completed through `at verify complete`; the epic's integration check ran
+once on the target when the last member landed. Later fixes (merge
+identity, run logs, first-contact CLI, onboarding friction, these docs)
+went the same way. What it found in `at` itself:
+
+- A doubled `GOFLAGS=-count=1` turned the project's own suite red under
+  `at` (found by `at doctor`, fixed first).
+- Workers were charged failures for a cancelled database write; a
+  cancelled write is now `CANCELLED`, never a strike.
+- Integration merges were committed as a fixed `at <at@localhost>`; they
+  now use the repository's identity and carry `At-Task:` trailers.
+- Failure tails lost `go test`'s FAIL lines in the middle of long output;
+  every run now writes complete logs and `result.json` (`log_dir`).
+- A `verify complete` whose target moved re-runs the regression suite on
+  the merge; with a 2-minute gate this is the dominant cost of a busy
+  plan. Not changed: the merge is what gets promoted, so it is what must
+  pass.
+
+### Fresh install
+
+A new agent with no context installed `at` with `go install
+…/cmd/at@main` (through the default module proxy, first try), built a
+small Go project, and drove two tasks to completion from the README
+alone, including a deliberate failure, a release and re-claim with the
+handoff, and an integration merge after the target moved. It found no
+blocker. Its first-contact friction was fixed: `at --help` exited 2,
+`at version` said `dev`, shell syntax such as `$(gofmt -l .)` in a plain
+check was silently tested as literal text (now refused with the `sh -c`
+remedy), the tour did not say to commit the files `at init` writes,
+`at prune` left `.tmp` directories, and a merge-verified run listed each
+check twice unlabelled. Documented rather than changed: `DONE`/`STALLED`
+exit 1, failed attempts' commits stay in history, and a check that
+passes before the work exists (`go test -run` with no matching test)
+proves nothing.
+
 ## Acceptance matrix
 
 | Test | Proof |
@@ -123,3 +165,11 @@ own gates still hold; only the convenience of early refusal is lost).
   nobody; a late conflict sends back only the member it concerns. Which
   member broke a shared suite is not inferred.
 - **Single host.** SQLite on a local filesystem.
+- **Platforms.** Linux is tested (CI and the pilots); macOS and Windows
+  cross-compile but are not exercised.
+- **Known flaky test.** `TestCoupledVerificationRecoversAfterVerifierCrash`
+  has failed twice under full-suite load (a member was claimable after
+  the recovered cohort job, where `DONE` was expected; the failing run
+  took about 6s against 0.8s normally) and did not reproduce in over 130
+  loaded runs. The test now prints each member's status, failure count
+  and last error when it fails, so the next occurrence names the path.
