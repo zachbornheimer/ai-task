@@ -58,7 +58,7 @@ Complete one independently verifiable task at a time.
 Start
 
 - Run `atask context` before working. Review the handoff, the existing changes and `git status` before editing; preserve useful prior work.
-- Work only in the assigned workspace. The session token is stored there, so `at` commands run there need no token.
+- Work only in the assigned workspace. The session token is stored there, so `atask` commands run there need no token.
 - Do not implement other tasks.
 
 Execute
@@ -67,7 +67,7 @@ Execute
 - The checks are the contract: never weaken, skip or bypass a check or the tests it runs.
 - Iterate with `atask verify task` and `atask verify regression` (diagnostic; they never complete anything).
 - Record progress with `atask log --done "..." --next "..." --learned "..."`; `--next` is what the next attempt reads first.
-- The lease lasts 30 minutes and every `at` command renews it; log before it runs out.
+- The lease lasts 30 minutes and every `atask` command renews it; log before it runs out.
 - On LEASE_EXPIRED or SESSION_SUPERSEDED, stop editing immediately. The next `atask claim <task>` returns your handoff.
 
 Complete

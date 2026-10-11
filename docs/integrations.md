@@ -1,4 +1,4 @@
-# Using `at` from AI systems
+# Using `atask` from AI systems
 
 The goal: every request an agent receives in a repository is routed
 through `atask`, so work is planned with checks, done in isolated worktrees,
@@ -10,7 +10,7 @@ calls a model; the harness does.
 
 | Layer                | Holds                                                               | Where it lives                                                                                                                                        |
 | -------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bootstrap            | identity, the `at` CLI, JSON envelopes, stop on lost authority      | the harness's system prompt where it can be set (`claude -p --append-system-prompt`, a bare model's system message); text in `docs/agent-contract.md` |
+| Bootstrap            | identity, the `atask` CLI, JSON envelopes, stop on lost authority   | the harness's system prompt where it can be set (`claude -p --append-system-prompt`, a bare model's system message); text in `docs/agent-contract.md` |
 | Project instructions | how work gets done here, the verbs, the execution contract          | `AGENTS.md` block installed by `atask init`; `CLAUDE.md` imports it                                                                                   |
 | Task turn            | outcome, constraints, acceptance, checks, workspace, state, handoff | `atask context`, generated per task                                                                                                                   |
 
@@ -22,10 +22,10 @@ edited directly. Hooks make it hold when a long session forgets.
 
 ```sh
 cd repo
-at init --claude                                  # instructions + Claude Code hooks (omit --claude elsewhere)
-at project --regression-check "test: go test ./..." --regression-check "vet: go vet ./..."
-at doctor                                         # repository, target, identity, suite green on the target
-git add AGENTS.md CLAUDE.md .claude && git commit -m "Route agent work through at"
+atask init --claude                                  # instructions + Claude Code hooks (omit --claude elsewhere)
+atask project --regression-check "test: go test ./..." --regression-check "vet: go vet ./..."
+atask doctor                                         # repository, target, identity, suite green on the target
+git add AGENTS.md CLAUDE.md .claude && git commit -m "Route agent work through atask"
 ```
 
 ## Claude Code
@@ -33,7 +33,7 @@ git add AGENTS.md CLAUDE.md .claude && git commit -m "Route agent work through a
 Interactive: open the repository; the session-start hook prints the plan
 or the task in hand, the instructions route requests through `atask`, the
 edit guard refuses changes outside a task worktree, and the stop hook
-refuses to end a turn with an unfinished claim. The agent runs `at
+refuses to end a turn with an unfinished claim. The agent runs `atask
 context`, plans or claims, `cd`s into the workspace, works, commits,
 `atask verify complete`.
 
@@ -44,7 +44,7 @@ examples/hosts/claude-code.sh        # loops: claim --wait, context | claude -p,
 ```
 
 The script passes `--append-system-prompt` with the bootstrap and allows
-`Bash(at *)`, `Bash(git *)` and the project's own build commands; widen
+`Bash(atask *)`, `Bash(git *)` and the project's own build commands; widen
 the allow list for the repository's tools or run in a sandbox with
 `--dangerously-skip-permissions`. Several copies run in parallel; the
 engine serialises claims and promotion.
@@ -63,7 +63,7 @@ OpenCode reads `AGENTS.md`; `examples/hosts/opencode.sh` drives `opencode
 run`. For any other harness, `examples/hosts/custom.sh` takes
 `AGENT_CMD`: the command receives the task context on stdin with
 `ATASK_SESSION` exported and must work in the printed workspace. For a bare
-model behind an API, send the bootstrap as the system message and `at
+model behind an API, send the bootstrap as the system message and `atask
 context --with-rules` as the first user message.
 
 ## Planners

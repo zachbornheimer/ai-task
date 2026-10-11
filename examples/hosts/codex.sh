@@ -6,7 +6,7 @@ export ATASK_OUTPUT=json
 json() { python3 -c 'import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))' "$1"; }
 
 while :; do
-	if ! session=$(at claim --wait); then
+	if ! session=$(atask claim --wait); then
 		code=$(printf '%s' "$session" | json 'd["error"]["code"]')
 		case "$code" in
 		DONE)
@@ -29,14 +29,14 @@ while :; do
 	echo "== $task in $workspace"
 	(
 		cd "$workspace"
-		at context --output text | run_agent
+		atask context --output text | run_agent
 	) || true
-	status=$(at show "$task" | json 'd["result"]["status"]')
+	status=$(atask show "$task" | json 'd["result"]["status"]')
 	if [ "$status" = "complete" ]; then
 		failures=0
 		continue
 	fi
-	(cd "$workspace" && at claim release --note "agent exited without completing (status $status)") || true
+	(cd "$workspace" && atask claim release --note "agent exited without completing (status $status)") || true
 	# An agent that keeps exiting without completing must not be re-run in
 	# a hot loop: back off, and stop after a run of failures so a person
 	# can look (the handoff carries the note).

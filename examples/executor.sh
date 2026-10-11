@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Shell driver for machine-only execution of a task graph with the `at`
+# Shell driver for machine-only execution of a task graph with the `atask`
 # CLI. Prefer examples/embedded_runner (Go) for a real host; this is the
 # same loop in shell. Run several copies for parallel agents.
 #
@@ -11,7 +11,7 @@ export ATASK_OUTPUT=json
 AGENT_CMD=${AGENT_CMD:?set AGENT_CMD to the agent CLI that reads a prompt on stdin}
 
 while :; do
-	if ! session=$(at claim --wait); then
+	if ! session=$(atask claim --wait); then
 		code=$(printf '%s' "$session" | jq -r .error.code)
 		case "$code" in
 		DONE)
@@ -36,7 +36,7 @@ while :; do
 	echo "working on $task_id in $workspace"
 	(cd "$workspace" && printf '%s\n%s\n' \
 		"Implement the claimed task's outcome and acceptance criteria. Use \`atask log\` for progress, \`atask verify task\`/\`atask verify regression\` while iterating, commit, then \`atask verify complete\`. If prerequisite work is needed: \`atask add \"...\" --blocks $task_id\`, log, \`atask claim release -\`. Stop editing if authorization fails." \
-		"$session" | $AGENT_CMD) || at claim release - --failed --note "agent exited with an error" <<EOF2 || true
+		"$session" | $AGENT_CMD) || atask claim release - --failed --note "agent exited with an error" <<EOF2 || true
 $ATASK_SESSION
 EOF2
 done
