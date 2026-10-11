@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -81,6 +82,13 @@ func Main(env Env) int {
 	top.SetOutput(io.Discard)
 	c.bindGlobals(top)
 	if err := top.Parse(env.Args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			// `at --help` asks for the command list: same as `at help`.
+			if err := commands["help"].run(ctx, c, nil); err != nil {
+				return c.fail(err)
+			}
+			return ExitOK
+		}
 		return c.usageError(err)
 	}
 	rest := top.Args()
@@ -88,7 +96,7 @@ func Main(env Env) int {
 		if c.jsonOut() {
 			return c.usageError(fmt.Errorf("a command is required; `at help` lists them"))
 		}
-		c.printHelp()
+		c.printHelp(c.env.Stderr)
 		return ExitUsage
 	}
 	name, args := rest[0], rest[1:]
@@ -303,8 +311,7 @@ func (c *ctxt) usageError(err error) int {
 	return ExitUsage
 }
 
-func (c *ctxt) printHelp() {
-	w := c.env.Stderr
+func (c *ctxt) printHelp(w io.Writer) {
 	fmt.Fprintln(w, "at - agent task engine: atomic plans, leased claims, verified completion")
 	fmt.Fprintln(w, "\nUsage: at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]")
 	fmt.Fprintln(w, "\nCommands:")
@@ -327,7 +334,12 @@ func register(name, summary string, run func(ctx context.Context, c *ctxt, args 
 }
 
 func init() {
-	register("help", "show this help", func(_ context.Context, c *ctxt, _ []string) error {
+	register("help", "show this help", func(_ context.Context, c *ctxt, args []string) error {
+		if c.fs != nil {
+			if err := c.parse(args); err != nil {
+				return err
+			}
+		}
 		type cmd struct {
 			Name    string `json:"name"`
 			Summary string `json:"summary"`
@@ -346,9 +358,49 @@ func init() {
 		for _, n := range names {
 			h.Commands = append(h.Commands, cmd{n, commands[n].summary})
 		}
-		return c.emit(h, func(io.Writer) { c.printHelp() })
+		return c.emit(h, func(w io.Writer) { c.printHelp(w) })
 	})
-	register("version", "print the version", func(_ context.Context, c *ctxt, _ []string) error {
-		return c.emit(map[string]string{"version": Version}, func(w io.Writer) { fmt.Fprintln(w, Version) })
+	register("version", "print the version", func(_ context.Context, c *ctxt, args []string) error {
+		if err := c.parse(args); err != nil {
+			return err
+		}
+		v := buildVersion(Version, debug.ReadBuildInfo)
+		return c.emit(map[string]string{"version": v}, func(w io.Writer) { fmt.Fprintln(w, v) })
 	})
+}
+
+// buildVersion is the version `at version` reports: the one set at link
+// time, else the module version `go install` recorded (a tag or a
+// pseudo-version naming the commit), else "dev" with the VCS revision of
+// a source build.
+func buildVersion(linked string, read func() (*debug.BuildInfo, bool)) string {
+	if linked != "dev" && linked != "" {
+		return linked
+	}
+	bi, ok := read()
+	if !ok {
+		return "dev"
+	}
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	rev, dirty := "", false
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if dirty {
+		rev += "-dirty"
+	}
+	return "dev+" + rev
 }
