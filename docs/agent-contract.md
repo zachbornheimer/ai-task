@@ -1,4 +1,4 @@
-# Agent contract: `at` CLI and JSON
+# Agent contract: `atask` CLI and JSON
 
 Seven everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
 `list`. Project bootstrap (`init`, `project`, `projects`), `status`,
@@ -53,11 +53,11 @@ stdout (an envelope in JSON mode) and exits `0`.
 ## Planning (planner authority)
 ````
 
-at add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
+atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
 [--outcome ..] [--constraint ..]*[--accept ..]* [--check "[id:] cmd"]*[--optional-check ..]*
 [--pin PATH]*[--claim]
 [--expect-rev N] [--idempotency-key K] [--planner]
-at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
+atask update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 [--requires REF]* [--remove-requires REF]*[--set-requires REF]*
 [--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
 [--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
@@ -67,7 +67,7 @@ at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 plan revision; the Go `Apply` takes a whole batch; a batch that changes
 nothing is not a revision. `atask add -f plan.yaml` (or `.json`, or `-` for
 stdin) and `atask add --plan '…'` apply a whole plan in one revision: one
-item, a list, or `{tasks: [...]}`, each item with the field names `at
+item, a list, or `{tasks: [...]}`, each item with the field names `atask
 show` prints (`kind` task|group, `key`, `title`, `outcome`, `parent`,
 `cohort`, `constraints`, `acceptance`, `requires`, `blocks`, `checks`,
 `optional_checks`; a check is `"[id:] cmd args"` or `{id, command (string
@@ -150,12 +150,12 @@ stale `--expect-rev`), a different request under the same key is
 ## Execution (session authority)
 ```
 
-at context [REF] [--with-rules] a task's working context as one prompt (no REF: this session's task)
-at claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
-at claim renew [token|-] extend the lease (inside the worktree no token is needed)
-at claim release [token|-] [--note ..] [--failed]
-at log --done .. --next .. --learned .. --note .. (token: see Token transport)
-at verify task | regression | complete (same token sources)
+atask context [REF] [--with-rules] a task's working context as one prompt (no REF: this session's task)
+atask claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
+atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
+atask claim release [token|-] [--note ..] [--failed]
+atask log --done .. --next .. --learned .. --note .. (token: see Token transport)
+atask verify task | regression | complete (same token sources)
 
 ```text
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;
@@ -327,16 +327,16 @@ token after a committed completion returns the stored result.
 ## Reading
 ```
 
-at show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
+atask show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
 TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
-at list hierarchy of open work (groups indented; blocked tasks show requires:)
-at list ready | blocked | all | archived
-at status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
-at prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks
+atask list hierarchy of open work (groups indented; blocked tasks show requires:)
+atask list ready | blocked | all | archived
+atask status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
+atask prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks
 
 ```text
-`ATASK_OUTPUT=json at help` prints an envelope listing the commands; a bare
-`at` in JSON mode prints an `INVALID_INPUT` envelope (exit 2).
+`ATASK_OUTPUT=json atask help` prints an envelope listing the commands; a bare
+`atask` in JSON mode prints an `INVALID_INPUT` envelope (exit 2).
 
 Glyphs are progress, not liveness: `○` never started (ready or blocked
 work with no attempt yet), `◐` started but not complete (claimed,

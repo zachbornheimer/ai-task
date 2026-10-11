@@ -201,7 +201,7 @@ func (c *ctxt) printCommandHelp(cmd command) error {
 		h.Flags = append(h.Flags, flagHelp{f.Name, f.Usage, f.DefValue})
 	})
 	return c.emit(h, func(w io.Writer) {
-		fmt.Fprintf(w, "Usage: at %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
+		fmt.Fprintf(w, "Usage: atask %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
 		c.fs.SetOutput(w)
 		c.fs.PrintDefaults()
 	})

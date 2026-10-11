@@ -60,7 +60,9 @@ as above without hooks. Headless: `examples/hosts/codex.sh` (`codex exec
 ## OpenCode, Grok, anything with a shell
 
 OpenCode reads `AGENTS.md`; `examples/hosts/opencode.sh` drives `opencode
-run`. For any other harness, `examples/hosts/custom.sh` takes
+run`. Grok reads `AGENTS.md`; `examples/hosts/grok.sh` drives
+`grok --always-approve --output-format text` with the context as the
+prompt. For any other harness, `examples/hosts/custom.sh` takes
 `AGENT_CMD`: the command receives the task context on stdin with
 `ATASK_SESSION` exported and must work in the printed workspace. For a bare
 model behind an API, send the bootstrap as the system message and `atask

@@ -18,9 +18,9 @@ import (
 )
 
 func init() {
-	register("claim", "claim work: at claim [REF] [--wait] | at claim renew [token|-] | at claim release [token|-] [--note ..] [--failed]", runClaim)
-	register("log", "record progress under the current session: at log --done .. --next .. --learned .. --note ..", runLog)
-	register("verify", "run checks under the current session: at verify task|regression|complete | at verify groups [REF]", runVerify)
+	register("claim", "claim work: atask claim [REF] [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
+	register("log", "record progress under the current session: atask log --done .. --next .. --learned .. --note ..", runLog)
+	register("verify", "run checks under the current session: atask verify task|regression|complete | atask verify groups [REF]", runVerify)
 	register("whoami", "show the task of the current session token", runWhoami)
 }
 
@@ -420,5 +420,5 @@ func runWhoami(ctx context.Context, c *ctxt, args []string) error {
 var _ = project.ID("")
 
 func init() {
-	register("context", "working context for a coding agent: at context [REF] [--with-rules] (no REF: this session's task, or the plan when none is in hand)", runContext)
+	register("context", "working context for a coding agent: atask context [REF] [--with-rules] (no REF: this session's task, or the plan when none is in hand)", runContext)
 }
