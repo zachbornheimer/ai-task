@@ -25,7 +25,8 @@ func scanLogs(rows interface {
 	Next() bool
 	Scan(...any) error
 	Err() error
-}) ([]execution.RecordedLog, error) {
+},
+) ([]execution.RecordedLog, error) {
 	var out []execution.RecordedLog
 	for rows.Next() {
 		var l execution.RecordedLog
