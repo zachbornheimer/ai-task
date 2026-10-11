@@ -165,11 +165,7 @@ func runProjects(ctx context.Context, c *ctxt, args []string) error {
 	if ps == nil {
 		ps = []project.Project{}
 	}
-	return c.emit(ps, func(w io.Writer) {
-		for _, p := range ps {
-			fmt.Fprintf(w, "%s  %-20s  %s\n", p.ID, p.Name, p.RootPath)
-		}
-	})
+	return c.emit(ps, func(w io.Writer) { _ = renderProjects(w, ps) })
 }
 
 func runProject(ctx context.Context, c *ctxt, args []string) error {
@@ -703,6 +699,15 @@ func runShow(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(v, func(w io.Writer) { renderShow(w, v, *full) })
 }
 
+func renderProjects(w io.Writer, ps []project.Project) error {
+	for i := range ps {
+		if _, err := fmt.Fprintf(w, "%s  %-20s  %s\n", ps[i].ID, ps[i].Name, ps[i].RootPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func listFilter(s string) (app.Filter, bool) {
 	switch s {
 	case "ready", "blocked", "all", "archived", "open":
@@ -727,13 +732,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		if ps == nil {
 			ps = []project.Project{}
 		}
-		return c.emit(ps, func(w io.Writer) {
-			for _, p := range ps {
-				if _, err := fmt.Fprintf(w, "%s  %-20s  %s\n", p.ID, p.Name, p.RootPath); err != nil {
-					return
-				}
-			}
-		})
+		return c.emit(ps, func(w io.Writer) { _ = renderProjects(w, ps) })
 	}
 	filter := app.FilterOpen
 	var pid project.ID

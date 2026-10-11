@@ -2,39 +2,15 @@ package cli
 
 import (
 	"bytes"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func gitInitDir(t *testing.T, dir string) {
-	t.Helper()
-	cmd := func(args ...string) {
-		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0",
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	cmd("init", "-q", "-b", "main")
-	cmd("config", "user.name", "t")
-	cmd("config", "user.email", "t@t")
-	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cmd("add", "f.txt")
-	cmd("commit", "-q", "-m", "init")
-}
-
 func TestListAllProjectsThenOne(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "at.db")
 	alpha := t.TempDir()
 	beta := t.TempDir()
-	gitInitDir(t, alpha)
-	gitInitDir(t, beta)
 	getenv := func(k string) string {
 		if k == "ATASK_DB" {
 			return db

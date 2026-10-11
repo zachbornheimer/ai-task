@@ -138,7 +138,7 @@ func InstallInstructions(root string) (InstallResult, error) {
 		res.Updated = content != string(existing)
 	}
 	if res.Updated {
-		if err := os.WriteFile(res.AgentsMD, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(res.AgentsMD, []byte(content), 0o600); err != nil {
 			return res, fault.Wrap(err, fault.CodeInternal, "write AGENTS.md")
 		}
 	}
@@ -146,14 +146,14 @@ func InstallInstructions(root string) (InstallResult, error) {
 	cb, err := os.ReadFile(claude)
 	switch {
 	case os.IsNotExist(err):
-		if err := os.WriteFile(claude, []byte("@AGENTS.md\n"), 0o644); err != nil {
+		if err := os.WriteFile(claude, []byte("@AGENTS.md\n"), 0o600); err != nil {
 			return res, fault.Wrap(err, fault.CodeInternal, "write CLAUDE.md")
 		}
 		res.ClaudeMD = claude
 	case err != nil:
 		return res, fault.Wrap(err, fault.CodeInternal, "read CLAUDE.md")
 	case !strings.Contains(string(cb), "@AGENTS.md"):
-		if err := os.WriteFile(claude, []byte(strings.TrimRight(string(cb), "\n")+"\n\n@AGENTS.md\n"), 0o644); err != nil {
+		if err := os.WriteFile(claude, []byte(strings.TrimRight(string(cb), "\n")+"\n\n@AGENTS.md\n"), 0o600); err != nil {
 			return res, fault.Wrap(err, fault.CodeInternal, "amend CLAUDE.md")
 		}
 		res.ClaudeMD = claude
@@ -208,11 +208,11 @@ func InstallClaudeHooks(root string) (string, bool, error) {
 	if !changed {
 		return path, false, nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return path, false, fault.Wrap(err, fault.CodeInternal, "create %s", dir)
 	}
 	b, _ := json.MarshalIndent(settings, "", "  ")
-	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
 		return path, false, fault.Wrap(err, fault.CodeInternal, "write %s", path)
 	}
 	return path, true, nil
