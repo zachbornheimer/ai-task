@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
@@ -59,8 +60,8 @@ func runHook(ctx context.Context, c *ctxt, args []string) error {
 	return usage("unknown hook event %q", c.args[0])
 }
 
-// hookSessionStart prints the plan or task context so the session starts
-// knowing the state of the work. Nothing to say when `atask` is not in use.
+// hookSessionStart prints the open board (the bd-prime analog) so a
+// session starts knowing the work. A live claim also prints whoami.
 func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
 	e, err := c.engine(ctx)
 	if err != nil {
@@ -70,20 +71,22 @@ func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
 	if tok == "" {
 		tok = c.env.Getenv("ATASK_SESSION")
 	}
-	var token execution.Token
 	if tok != "" {
-		token, _ = execution.ParseToken(tok)
+		if token, err := execution.ParseToken(tok); err == nil {
+			if v, err := e.Whoami(ctx, token); err == nil {
+				fmt.Fprintf(c.env.Stdout, "# Task %s: %s\n\n", v.ID, v.Title)
+			}
+		}
 	}
-	p, perr := e.ResolveProject(ctx, c.g.project, cwd)
-	if token == "" && perr != nil {
-		return nil
-	}
-	pid := p.ID
-	cx, err := e.Context(ctx, pid, "", token, false)
+	snap, err := e.List(ctx, app.ListQuery{Filter: app.FilterOpen})
 	if err != nil {
 		return nil
 	}
-	fmt.Fprintln(c.env.Stdout, cx.Prompt)
+	if len(snap.Tasks) == 0 && len(snap.Groups) == 0 {
+		fmt.Fprintln(c.env.Stdout, "no tasks registered.")
+		return nil
+	}
+	renderList(c.env.Stdout, snap, app.FilterOpen)
 	return nil
 }
 

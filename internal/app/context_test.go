@@ -104,7 +104,8 @@ func TestProjectContextSaysWhatToDoNext(t *testing.T) {
 	if err != nil || len(ready.Claimable) != 1 || ready.Claimable[0].ID != a || !strings.Contains(ready.Prompt, "Claimable now") || !strings.Contains(ready.Prompt, "## Agent execution contract") {
 		t.Fatalf("%v %s", err, ready.Prompt)
 	}
-	if _, err := f.e.Context(f.ctx, "", "", "", false); fault.CodeOf(err) != fault.CodeNoProject {
-		t.Fatalf("no project: %v", err)
+	board, err := f.e.Context(f.ctx, "", "", "", false)
+	if err != nil || board.Summary == nil || !strings.Contains(board.Prompt, "# Board") {
+		t.Fatalf("empty pid is the board: %v %s", err, board.Prompt)
 	}
 }

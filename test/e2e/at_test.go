@@ -618,7 +618,7 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 	}
 	// Hooks. Session start with no task: the plan.
 	a := taskID(e.ok("add", "Guarded", "--check", "u: test -f g.txt"))
-	if r := e.runIn(e.cwd, `{"hook_event_name":"SessionStart","cwd":"`+e.cwd+`"}`, nil, "hook", "session-start"); r.code != 0 || !strings.Contains(r.stdout, "Claimable now") {
+	if r := e.runIn(e.cwd, `{"hook_event_name":"SessionStart","cwd":"`+e.cwd+`"}`, nil, "hook", "session-start"); r.code != 0 || !strings.Contains(r.stdout, "Guarded") {
 		t.Fatalf("session-start: %d %s %s", r.code, r.stdout, r.stderr)
 	}
 	// Edit in the project root: denied; outside any project: allowed.

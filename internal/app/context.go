@@ -146,12 +146,15 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 // projectContext is what a session with no task in hand gets: the state
 // of the plan and what to do next (claim, or plan).
 func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules bool) (Context, error) {
-	if pid == "" {
-		return Context{}, fault.New(fault.CodeNoProject, "no project here: run `atask init` in the repository, or pass --project")
-	}
-	proj, err := e.Project(ctx, pid)
-	if err != nil {
-		return Context{}, err
+	var proj project.Project
+	if pid != "" {
+		p, err := e.Project(ctx, pid)
+		if err != nil {
+			return Context{}, err
+		}
+		proj = p
+	} else {
+		proj = project.Project{ID: project.UnscopedID, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
 	}
 	sum, err := e.Summary(ctx, pid)
 	if err != nil {
@@ -168,7 +171,11 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	_, wtErr := exec.LookPath("wt")
 	c.Worktrunk = wtErr == nil
 	var w strings.Builder
-	fmt.Fprintf(&w, "# Project %s: no task in hand\n\n", proj.Name)
+	if proj.Unscoped() {
+		w.WriteString("# Board: no task in hand\n\n")
+	} else {
+		fmt.Fprintf(&w, "# Project %s: no task in hand\n\n", proj.Name)
+	}
 	fmt.Fprintf(&w, "Plan: %d task(s), %d open, %d claimable, %d active", sum.Total, sum.Open, sum.Claimable, sum.Active)
 	if sum.Cooling > 0 {
 		fmt.Fprintf(&w, ", %d cooling down", sum.Cooling)
@@ -176,7 +183,11 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	w.WriteString(".\n")
 	switch {
 	case sum.Total == 0:
-		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`atask add \"title\" --check \"id: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step. Run `atask doctor` first in a repository you have not worked in.\n")
+		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`atask add \"title\" --check \"id: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step.")
+		if !proj.Unscoped() {
+			w.WriteString(" Run `atask doctor` first in a repository you have not worked in.")
+		}
+		w.WriteByte('\n')
 	case sum.Done:
 		w.WriteString("Every task is complete. New work needs new tasks (`atask add`).\n")
 	case len(c.Claimable) > 0:
@@ -192,7 +203,11 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	default:
 		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `atask claim --wait` blocks until something is.\n")
 	}
-	fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask context` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+	if proj.TargetBranch != "" {
+		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask context` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+	} else {
+		w.WriteString("\nClaim with `atask claim <id>`. Unscoped work completes without git.\n")
+	}
 	c.Prompt = w.String()
 	if withRules {
 		c.Prompt += "\n" + Rules
