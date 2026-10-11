@@ -81,7 +81,7 @@ func (s WorktrunkSwitcher) Ensure(ctx context.Context, repo, branch, base string
 }
 
 func runWt(ctx context.Context, wt, dir string, args []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "wt", args...)
+	cmd := exec.CommandContext(ctx, wt, args...)
 	cmd.Dir = dir
 	return cmd.CombinedOutput()
 }

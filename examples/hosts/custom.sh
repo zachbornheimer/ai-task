@@ -3,5 +3,4 @@
 # on stdin, runs in the workspace, and must drive at itself.
 : "${AGENT_CMD:?set AGENT_CMD to the agent command that reads its prompt on stdin}"
 run_agent() { at context --with-rules --output text | sh -c "$AGENT_CMD"; }
-# shellcheck source=examples/hosts/common.sh
 . "$(dirname "$0")/common.sh"
