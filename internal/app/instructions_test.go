@@ -30,7 +30,7 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 		t.Fatalf("first run: %+v %v", first, err)
 	}
 	before := read(first.AgentsMD)
-	if !strings.Contains(before, app.InstructionsEnd+"\n\n# Engineering guidelines") {
+	if !strings.Contains(before, app.InstructionsEnd+"\n\n## Engineering guidelines") {
 		t.Fatalf("expected one blank line after the end marker:\n%s", before)
 	}
 	// A read-only file makes a stray write fail for ordinary users; the

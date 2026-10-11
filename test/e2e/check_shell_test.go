@@ -26,7 +26,7 @@ func TestCheckWithShellOperatorsIsRejected(t *testing.T) {
 		}
 	}
 	// A rejected plan creates nothing.
-	if n := len(e.ok("list")["tasks"].([]any)); n != 0 {
+	if n := len(e.ok("list", "open")["tasks"].([]any)); n != 0 {
 		t.Fatalf("rejected checks must not create tasks, got %d", n)
 	}
 	// Wrapped in sh -c, or with the operator quoted inside an argument,

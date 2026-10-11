@@ -39,7 +39,7 @@ Everything that changes this repository goes through `atask`.
 
 ## Verbs
 
-```
+```text
 atask context                                           your task: outcome, checks, workspace, state, handoff (or the plan, with no task in hand)
 atask claim [REF] [--wait]                              one leased task, its worktree on atask/<id>; the token is stored there
 atask log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first
@@ -85,7 +85,7 @@ Exit
 
 <!-- atask:end -->
 
-# Engineering guidelines
+## Engineering guidelines
 
 Edit this section for the repository; the block above is owned by `atask init`.
 
@@ -101,7 +101,7 @@ Edit this section for the repository; the block above is owned by `atask init`.
 - Report results and blockers concisely; distinguish verified results from
   assumptions.
 
-# This repository
+## This repository
 
 `atask` is developed here; the block above is what `atask init` installs into
 any repository. Planning verbs (`atask add`, `atask update`, `atask show`,

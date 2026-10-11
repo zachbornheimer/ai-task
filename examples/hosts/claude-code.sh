@@ -7,4 +7,5 @@ run_agent() {
 		--append-system-prompt "$BOOTSTRAP" \
 		--allowedTools "Bash(at *)" "Bash(git *)" "Bash(wt *)" "Bash(go *)" "Bash(npm *)" "Bash(make *)" "${CLAUDE_ARGS:-}"
 }
+# shellcheck source=common.sh
 . "$(dirname "$0")/common.sh"

@@ -27,7 +27,7 @@ func init() {
 	register("add", "plan a task or group: at add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | at add -f plan.yaml|plan.json|- | at add --plan '{...}'", runAdd)
 	register("update", "change a plan item: at update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: at show REF [--full]", runShow)
-	register("list", "list the plan: at list [ready|blocked|all|archived]", runList)
+	register("list", "list projects, or one project's plan: atask list [<project>] [ready|blocked|all|archived]", runList)
 	register("status", "project summary: counts, claimable, active, done, stalled", runStatus)
 	register("prune", "remove worktrees of complete/archived tasks and quarantined directories of idle tasks", runPrune)
 }
@@ -703,29 +703,65 @@ func runShow(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(v, func(w io.Writer) { renderShow(w, v, *full) })
 }
 
+func listFilter(s string) (app.Filter, bool) {
+	switch s {
+	case "ready", "blocked", "all", "archived", "open":
+		return app.Filter(s), true
+	}
+	return "", false
+}
+
 func runList(ctx context.Context, c *ctxt, args []string) error {
 	if err := c.parse(args); err != nil {
-		return err
-	}
-	filter := app.FilterOpen
-	if len(c.args) > 1 {
-		return usage("list takes at most one filter: ready, blocked, all, archived")
-	}
-	if len(c.args) == 1 {
-		switch c.args[0] {
-		case "ready", "blocked", "all", "archived", "open":
-			filter = app.Filter(c.args[0])
-		default:
-			return usage("unknown list filter %q (ready, blocked, all, archived)", c.args[0])
-		}
-	}
-	pid, err := c.resolveProject(ctx)
-	if err != nil {
 		return err
 	}
 	e, err := c.engine(ctx)
 	if err != nil {
 		return err
+	}
+	if len(c.args) == 0 {
+		ps, err := e.Projects(ctx)
+		if err != nil {
+			return err
+		}
+		if ps == nil {
+			ps = []project.Project{}
+		}
+		return c.emit(ps, func(w io.Writer) {
+			for _, p := range ps {
+				if _, err := fmt.Fprintf(w, "%s  %-20s  %s\n", p.ID, p.Name, p.RootPath); err != nil {
+					return
+				}
+			}
+		})
+	}
+	filter := app.FilterOpen
+	var pid project.ID
+	if f, ok := listFilter(c.args[0]); ok {
+		if len(c.args) > 1 {
+			return usage("list takes a project and an optional filter: ready, blocked, all, archived")
+		}
+		filter = f
+		pid, err = c.resolveProject(ctx)
+		if err != nil {
+			return err
+		}
+	} else {
+		if len(c.args) > 2 {
+			return usage("list takes a project and an optional filter: ready, blocked, all, archived")
+		}
+		p, err := e.ResolveProject(ctx, c.args[0], "")
+		if err != nil {
+			return err
+		}
+		pid = p.ID
+		if len(c.args) == 2 {
+			f, ok := listFilter(c.args[1])
+			if !ok {
+				return usage("unknown list filter %q (ready, blocked, all, archived)", c.args[1])
+			}
+			filter = f
+		}
 	}
 	snap, err := e.List(ctx, app.ListQuery{ProjectID: pid, Filter: filter})
 	if err != nil {

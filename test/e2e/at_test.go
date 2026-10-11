@@ -302,7 +302,7 @@ func TestPlanningCommands(t *testing.T) {
 	if len(snap["groups"].([]any)) != 1 || len(snap["tasks"].([]any)) != 1 {
 		t.Fatalf("%v", snap)
 	}
-	h := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "--project", "p", "list")
+	h := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "list", "p")
 	if !strings.Contains(h.stdout, "○ "+g+"  Identity Core (0/1 complete)\n└── ○ "+b+"  Token store") {
 		t.Fatalf("hierarchy:\n%s", h.stdout)
 	}

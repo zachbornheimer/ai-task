@@ -61,7 +61,7 @@ Everything that changes this repository goes through ` + "`atask`" + `.
 
 ## Verbs
 
-` + "```" + `
+` + "```text" + `
 atask context                                           your task: outcome, checks, workspace, state, handoff (or the plan, with no task in hand)
 atask claim [REF] [--wait]                              one leased task, its worktree on atask/<id>; the token is stored there
 atask log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first
@@ -79,7 +79,7 @@ atask claim renew                                       extend the lease (every 
 // DefaultGuidelines is the repository section `atask init` writes into a
 // new AGENTS.md outside the markers: engineering rules the repository's
 // owners are expected to edit.
-const DefaultGuidelines = `# Engineering guidelines
+const DefaultGuidelines = `## Engineering guidelines
 
 Edit this section for the repository; the block above is owned by ` + "`atask init`" + `.
 
