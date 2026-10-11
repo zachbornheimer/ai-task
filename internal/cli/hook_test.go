@@ -29,8 +29,9 @@ func TestHookSessionStartPrintsBoard(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("session-start: %d %s", code, errOut)
 	}
-	if !strings.Contains(out, "prime me") {
-		t.Fatalf("session-start should print the board:\n%s", out)
+	got := sessionStartContext(t, out)
+	if !strings.Contains(got, "prime me") {
+		t.Fatalf("session-start additionalContext should list the board:\n%s", got)
 	}
 }
 
@@ -91,11 +92,31 @@ func TestHookSessionStartPrintsWhoamiWhenClaimed(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("session-start claimed: %d %s", code, hErr.String())
 	}
-	got := hOut.String()
+	got := sessionStartContext(t, hOut.String())
 	if !strings.Contains(got, "# Task "+env.Result.Task.ID) {
-		t.Fatalf("claimed session-start should whoami:\n%s", got)
+		t.Fatalf("claimed session-start additionalContext should whoami:\n%s", got)
 	}
 	if !strings.Contains(got, "held work") {
-		t.Fatalf("claimed session-start should still list the board:\n%s", got)
+		t.Fatalf("claimed session-start additionalContext should still list the board:\n%s", got)
 	}
+}
+
+func sessionStartContext(t *testing.T, out string) string {
+	t.Helper()
+	var env struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("session-start stdout must be hookSpecificOutput JSON: %v\n%s", err, out)
+	}
+	if env.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Fatalf("hookEventName=%q", env.HookSpecificOutput.HookEventName)
+	}
+	if env.HookSpecificOutput.AdditionalContext == "" {
+		t.Fatal("additionalContext empty")
+	}
+	return env.HookSpecificOutput.AdditionalContext
 }

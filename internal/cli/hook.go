@@ -60,13 +60,16 @@ func runHook(ctx context.Context, c *ctxt, args []string) error {
 	return usage("unknown hook event %q", c.args[0])
 }
 
-// hookSessionStart prints the open board (the bd-prime analog) so a
-// session starts knowing the work. A live claim also prints whoami.
+// hookSessionStart injects the open board (the bd-prime analog) so a
+// session starts knowing the work. A live claim also injects whoami.
+// The body is hookSpecificOutput.additionalContext: Grok ignores
+// SessionStart stdout, and Claude's bd prime --hook-json uses this envelope.
 func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
 	e, err := c.engine(ctx)
 	if err != nil {
 		return nil
 	}
+	var body strings.Builder
 	tok := workspace.LoadToken(ctx, cwd)
 	if tok == "" {
 		tok = c.env.Getenv("ATASK_SESSION")
@@ -74,20 +77,33 @@ func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
 	if tok != "" {
 		if token, err := execution.ParseToken(tok); err == nil {
 			if v, err := e.Whoami(ctx, token); err == nil {
-				fmt.Fprintf(c.env.Stdout, "# Task %s: %s\n\n", v.ID, v.Title)
+				fmt.Fprintf(&body, "# Task %s: %s\n\n", v.ID, v.Title)
 			}
 		}
 	}
 	snap, err := e.List(ctx, app.ListQuery{Filter: app.FilterOpen})
 	if err != nil {
-		return nil
+		return c.emitSessionStart(body.String())
 	}
 	if len(snap.Tasks) == 0 && len(snap.Groups) == 0 {
-		fmt.Fprintln(c.env.Stdout, "no tasks registered.")
+		body.WriteString("no tasks registered.")
+	} else {
+		renderList(&body, snap, app.FilterOpen)
+	}
+	return c.emitSessionStart(body.String())
+}
+
+func (c *ctxt) emitSessionStart(context string) error {
+	context = strings.TrimSpace(context)
+	if context == "" {
 		return nil
 	}
-	renderList(c.env.Stdout, snap, app.FilterOpen)
-	return nil
+	return c.encoder().Encode(map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":     "SessionStart",
+			"additionalContext": context,
+		},
+	})
 }
 
 // hookGuardEdit denies an edit to a file inside a registered project that

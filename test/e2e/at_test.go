@@ -618,7 +618,7 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 	}
 	// Hooks. Session start with no task: the plan.
 	a := taskID(e.ok("add", "Guarded", "--check", "u: test -f g.txt"))
-	if r := e.runIn(e.cwd, `{"hook_event_name":"SessionStart","cwd":"`+e.cwd+`"}`, nil, "hook", "session-start"); r.code != 0 || !strings.Contains(r.stdout, "Guarded") {
+	if r := e.runIn(e.cwd, `{"hook_event_name":"SessionStart","cwd":"`+e.cwd+`"}`, nil, "hook", "session-start"); r.code != 0 || !strings.Contains(r.stdout, `"hookEventName":"SessionStart"`) || !strings.Contains(r.stdout, "Guarded") {
 		t.Fatalf("session-start: %d %s %s", r.code, r.stdout, r.stderr)
 	}
 	// Edit in the project root: denied; outside any project: allowed.
@@ -638,7 +638,7 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 	if r := e.runIn(ws, `{"tool_name":"Edit","tool_input":{"file_path":"`+filepath.Join(ws, "g.txt")+`"},"cwd":"`+ws+`"}`, nil, "hook", "guard-edit"); r.code != 0 || strings.TrimSpace(r.stdout) != "" {
 		t.Fatalf("guard-edit in worktree: %d %s", r.code, r.stdout)
 	}
-	if r := e.runIn(ws, `{"hook_event_name":"SessionStart","cwd":"`+ws+`"}`, nil, "hook", "session-start"); !strings.Contains(r.stdout, "# Task "+a) {
+	if r := e.runIn(ws, `{"hook_event_name":"SessionStart","cwd":"`+ws+`"}`, nil, "hook", "session-start"); !strings.Contains(r.stdout, `"hookEventName":"SessionStart"`) || !strings.Contains(r.stdout, "# Task "+a) {
 		t.Fatalf("session-start in worktree: %s", r.stdout)
 	}
 	stop := e.runIn(ws, `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"`+ws+`"}`, nil, "hook", "stop")
