@@ -230,7 +230,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 		if len(v.Checks) > 0 {
 			fmt.Fprintf(w, "\nEPIC CHECKS (size %s; run on the target once every member is complete)\n", v.Size)
 			for _, ch := range v.Checks {
-				fmt.Fprintf(w, "• %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
+				fmt.Fprintf(w, "• %s: %s\n", ch.ID, app.ShellJoin(ch.Command))
 			}
 			if gv := v.GroupVerification; gv != nil {
 				status := gv.Status
@@ -296,7 +296,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 			if !ch.Required {
 				kind = "optional"
 			}
-			fmt.Fprintf(w, "• %s (%s): %s\n", ch.ID, kind, strings.Join(ch.Command, " "))
+			fmt.Fprintf(w, "• %s (%s): %s\n", ch.ID, kind, app.ShellJoin(ch.Command))
 		}
 	}
 	fmt.Fprintln(w, "\nVERIFICATION")
@@ -464,12 +464,22 @@ func renderLog(w io.Writer, l execution.RecordedLog) {
 }
 
 func renderEvidence(w io.Writer, evidence []verification.Evidence, full bool) {
+	// A run that verified the submitted revision and then the merge with
+	// the target lists each check twice: label the rows with their revision.
+	revs := map[string]bool{}
+	for _, ev := range evidence {
+		revs[ev.Revision] = true
+	}
 	for _, ev := range evidence {
 		kind := "required"
 		if !ev.Required {
 			kind = "optional"
 		}
-		fmt.Fprintf(w, "  %-20s %-8s %s exit=%d %s\n", ev.CheckID, ev.Outcome, kind, ev.ExitCode, ev.FinishedAt.Sub(ev.StartedAt).Round(time.Millisecond))
+		at := ""
+		if len(revs) > 1 && ev.Revision != "" {
+			at = " @" + ev.Revision[:min(12, len(ev.Revision))]
+		}
+		fmt.Fprintf(w, "  %-20s %-8s %s exit=%d %s%s\n", ev.CheckID, ev.Outcome, kind, ev.ExitCode, ev.FinishedAt.Sub(ev.StartedAt).Round(time.Millisecond), at)
 		if ev.Message != "" {
 			fmt.Fprintf(w, "      %s\n", ev.Message)
 		}

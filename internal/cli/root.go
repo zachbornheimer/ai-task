@@ -126,7 +126,11 @@ func Main(env Env) int {
 }
 
 func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
-	fs.StringVar(&c.g.db, "db", c.g.db, "database path (env AT_DB)")
+	dbHelp := "database path (env AT_DB)"
+	if def, err := app.DefaultPath(); err == nil && c.g.db == "" {
+		dbHelp = "database path (env AT_DB; default " + def + ")"
+	}
+	fs.StringVar(&c.g.db, "db", c.g.db, dbHelp)
 	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env AT_PROJECT)")
 	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env AT_OUTPUT=json)")
 	fs.StringVar(&c.g.output, "output", c.g.output, "output format: text|json")

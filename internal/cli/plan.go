@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ import (
 func init() {
 	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import [--no-instructions] [--claude: Claude Code hooks]; re-run to refresh", runInit)
 	register("projects", "list registered projects", runProjects)
-	register("project", "show or configure the current project (trusted): --regression-json, --integration, --target-branch, --max-attempts", runProject)
+	register("project", "show or configure the current project (trusted): --regression-check, --integration, --target-branch, budgets", runProject)
 	register("add", "plan a task or group: at add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | at add -f plan.yaml|plan.json|- | at add --plan '{...}'", runAdd)
 	register("update", "change a plan item: at update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: at show REF [--full]", runShow)
@@ -265,7 +266,7 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(p, func(w io.Writer) {
 		fmt.Fprintf(w, "Project:      %s · %s\nRoot:         %s\nIntegration:  %s\nTarget:       %s\nPlan rev:     %d\nMax attempts: %d\nCooldown:     %s\nBudgets:      small %s · medium %s · large %s · regression %s\nRegression:   %d check(s)\n", p.ID, p.Name, p.RootPath, p.Integration, p.TargetBranch, p.PlanRev, p.MaxAttempts, p.RetryCooldown, budgetText(p.Budgets.ForSize("small")), budgetText(p.Budgets.ForSize("medium")), budgetText(p.Budgets.ForSize("large")), budgetText(p.Budgets.RegressionBudget()), len(p.Regression))
 		for _, ch := range p.Regression {
-			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, strings.Join(ch.Command, " "))
+			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, app.ShellJoin(ch.Command))
 		}
 	})
 }
@@ -278,6 +279,13 @@ var checkIDPrefix = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 // parseCheck reads "[id:] command args..." into a CheckSpec. A label is
 // recognised only as "<id>: " (an id followed by a colon and a space), so
 // a command such as "https://host/x" is never split at its colon.
+// shellExpansion matches what only a shell expands: $(...), backticks,
+// and $NAME or ${NAME}. A bare "$" (a regexp anchor) is not one.
+var shellExpansion = regexp.MustCompile("\\$\\(|`|\\$\\{?[A-Za-z_]")
+
+// shells are the interpreters whose -c argument is a script.
+var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true}
+
 func parseCheck(raw string, n int, required bool) (verification.CheckSpec, error) {
 	id := fmt.Sprintf("check%d", n)
 	raw = strings.TrimSpace(raw)
@@ -292,6 +300,13 @@ func parseCheck(raw string, n int, required bool) (verification.CheckSpec, error
 	for i, w := range argv {
 		if !quoted[i] && shellOperators[w] {
 			return verification.CheckSpec{}, usage("check %q: '%s' is a shell operator, and checks run without a shell, so it would be passed to %s as an argument; wrap the command as sh -c '...'", raw, w, argv[0])
+		}
+		// A shell's own script (sh -c '...') may hold any syntax.
+		if i > 0 && argv[i-1] == "-c" && shells[filepath.Base(argv[0])] {
+			continue
+		}
+		if shellExpansion.MatchString(w) {
+			return verification.CheckSpec{}, usage("check %q: %s looks like shell syntax (command substitution or a variable), and checks run without a shell, so %s would receive it literally; wrap the command as sh -c '...'", raw, w, argv[0])
 		}
 	}
 	return verification.CheckSpec{ID: id, Command: argv, Required: required}, nil

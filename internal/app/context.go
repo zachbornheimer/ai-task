@@ -341,6 +341,10 @@ func renderState(w *strings.Builder, c Context) {
 	}
 }
 
+// ShellJoin renders an argv as a shell would need it typed, quoting words
+// that hold spaces or shell syntax, so a check is shown as it really runs.
+func ShellJoin(argv []string) string { return shellJoin(argv) }
+
 // shellJoin renders an argv the way a shell would need it typed, so a
 // check command in a prompt is copy-pastable.
 func shellJoin(argv []string) string {

@@ -23,7 +23,11 @@ every run.
 Because there is no shell, a check written as `[id:] command args...` that
 has a bare `&&`, `||`, `|`, `;`, `>`, `>>` or `<` among its words is
 rejected (`INVALID_INPUT`); wrap it as `sh -c '...'`. Quoted operators
-inside an argument are fine.
+inside an argument are fine. So is anything only a shell expands, quoted
+or not: `$(...)`, backticks, `$NAME` and `${NAME}` are refused the same
+way (`test -z "$(gofmt -l .)"` would test the literal text), except in the
+script of `sh -c` (or bash, zsh, dash, ksh). A bare `$`, as in a `-run`
+regexp, and awk's `$1` are not expansions.
 
 ## Modes
 

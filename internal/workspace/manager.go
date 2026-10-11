@@ -155,7 +155,12 @@ func (m Manager) Prune(ctx context.Context, taskID string, keepLive bool) ([]str
 		if err := os.RemoveAll(path); err != nil {
 			return removed, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "remove %s", path)
 		}
+		// The checks' private TMPDIR beside the worktree goes with it.
+		_ = os.RemoveAll(path + ".tmp")
 		removed = append(removed, path)
+	}
+	if !keepLive {
+		_ = os.RemoveAll(live + ".tmp")
 	}
 	_, _ = git(ctx, m.Repo, "worktree", "prune")
 	return removed, nil

@@ -367,3 +367,22 @@ func TestPrepareMergeWithoutIdentity(t *testing.T) {
 		t.Fatalf("Identity = %q, %v", id, err)
 	}
 }
+
+func TestPruneRemovesTmp(t *testing.T) {
+	r := newRepo(t)
+	w, err := r.mgr.EnsureTask(r.ctx, "at-bbbbbb", "main", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Checks get a private TMPDIR beside the worktree.
+	os.MkdirAll(w.Path+".tmp", 0o700)
+	os.WriteFile(filepath.Join(w.Path+".tmp", "at-changed-files"), []byte("x\n"), 0o600)
+	if _, err := r.mgr.Prune(r.ctx, "at-bbbbbb", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{w.Path, w.Path + ".tmp"} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s left behind after prune", p)
+		}
+	}
+}
