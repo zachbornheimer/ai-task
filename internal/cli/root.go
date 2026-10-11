@@ -218,7 +218,11 @@ func (c *ctxt) engine(ctx context.Context) (*app.Engine, error) {
 	if c.eng != nil {
 		return c.eng, nil
 	}
-	e, err := app.Open(ctx, app.Config{Path: c.g.db})
+	actor := c.env.Getenv("ATASK_ACTOR")
+	if actor == "" {
+		actor = c.env.Getenv("USER")
+	}
+	e, err := app.Open(ctx, app.Config{Path: c.g.db, Actor: actor, Cwd: c.env.Cwd})
 	if err != nil {
 		return nil, err
 	}

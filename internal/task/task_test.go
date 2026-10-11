@@ -24,7 +24,7 @@ func TestIDs(t *testing.T) {
 	if _, err := ParseID("proj-0123456789abcdef"); !fault.Is(err, fault.CodeInvalidInput) {
 		t.Fatal("wrong prefix accepted")
 	}
-	if !IsID("at-abc123") || IsID("oauth-endpoint") {
+	if !IsID("at-abc123") || !IsID("at-abc123d") || IsID("oauth-endpoint") {
 		t.Fatal("IsID")
 	}
 	for _, k := range []string{"oauth-endpoint", "a/b.c_d", "K1"} {
@@ -52,7 +52,6 @@ func TestSpecValidate(t *testing.T) {
 		t.Fatalf("empty items must be dropped: %+v", s)
 	}
 	bad := []Spec{
-		{Description: "x"},
 		{ProjectID: pid, Description: "   "},
 		{ProjectID: pid, Description: strings.Repeat("x", maxDescription+1)},
 		{ProjectID: pid, Kind: "epic", Description: "x"},

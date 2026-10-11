@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,11 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	// Switch creates task worktrees. Nil means WorktrunkSwitcher.
 	Switch workspace.Switcher
+	// Actor is recorded on newly created tasks (ATASK_ACTOR or USER).
+	Actor string
+	// Cwd is the working directory of the process that opened the engine,
+	// stamped onto newly created tasks.
+	Cwd string
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -62,6 +68,8 @@ type Engine struct {
 	// heartbeatEvery is the lease renewal interval of long operations.
 	heartbeatEvery time.Duration
 	swt            workspace.Switcher
+	actor          string
+	cwd            string
 
 	mu      sync.Mutex
 	changed chan struct{}
@@ -112,7 +120,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
 		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, changed: make(chan struct{}),
-		swt: cfg.Switch,
+		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd,
 	}, nil
 }
 
@@ -330,7 +338,8 @@ func (e *Engine) UpdateProject(ctx context.Context, p project.Project) error {
 // ResolveProject finds the project for a command. Precedence:
 //  1. selector: a project ID or unique name (from --project / ATASK_PROJECT);
 //  2. the Git repository containing dir, by registered main-worktree root;
-//  3. the longest registered root that contains dir.
+//  3. the longest registered root that contains dir;
+//  4. the unscoped board (id ""), created if needed.
 func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (project.Project, error) {
 	var out project.Project
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
@@ -351,7 +360,7 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 			return nil
 		}
 		if dir == "" {
-			return fault.New(fault.CodeNoProject, "no project selected; pass --project or set ATASK_PROJECT")
+			return errUseUnscoped
 		}
 		root, err := project.LocateRoot(dir)
 		if err != nil {
@@ -382,10 +391,17 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 			out = p
 			return err
 		}
-		return fault.New(fault.CodeNoProject, "no project registered for %s; run `atask init` here or pass --project", canon)
+		return errUseUnscoped
 	})
+	if errors.Is(err, errUseUnscoped) {
+		return e.EnsureUnscoped(ctx)
+	}
 	return out, err
 }
+
+// errUseUnscoped is an in-process signal from the read lookup to create
+// or load the default board. It is never returned to callers.
+var errUseUnscoped = fault.New(fault.CodeNoProject, "use unscoped")
 
 // manager returns the Git workspace manager for a project.
 func (e *Engine) manager(p project.Project) workspace.Manager {

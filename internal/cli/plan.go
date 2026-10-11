@@ -27,7 +27,7 @@ func init() {
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
 	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: atask show REF [--full]", runShow)
-	register("list", "list projects, or one project's plan: atask list [<project>] [ready|blocked|all|archived]", runList)
+	register("list", "list open tasks: atask list [<project>] [ready|blocked|all|archived]", runList)
 	register("status", "project summary: counts, claimable, active, done, stalled", runStatus)
 	register("prune", "remove worktrees of complete/archived tasks and quarantined directories of idle tasks", runPrune)
 }
@@ -728,27 +728,15 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(c.args) == 0 {
-		ps, err := e.Projects(ctx)
-		if err != nil {
-			return err
-		}
-		if ps == nil {
-			ps = []project.Project{}
-		}
-		return c.emit(ps, func(w io.Writer) { _ = renderProjects(w, ps) })
-	}
 	filter := app.FilterOpen
 	var pid project.ID
-	if f, ok := listFilter(c.args[0]); ok {
+	if len(c.args) == 0 {
+		// Global board: every open task. Filter with a project name or --project.
+	} else if f, ok := listFilter(c.args[0]); ok {
 		if len(c.args) > 1 {
 			return usage("list takes a project and an optional filter: ready, blocked, all, archived")
 		}
 		filter = f
-		pid, err = c.resolveProject(ctx)
-		if err != nil {
-			return err
-		}
 	} else {
 		if len(c.args) > 2 {
 			return usage("list takes a project and an optional filter: ready, blocked, all, archived")
@@ -770,13 +758,17 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	proj, err := e.Project(ctx, pid)
-	if err != nil {
-		return err
-	}
 	return c.emit(snap, func(w io.Writer) {
 		if len(snap.Tasks) == 0 && len(snap.Groups) == 0 {
-			_, _ = fmt.Fprintf(w, "no tasks registered in %s.\n", proj.Name)
+			if pid == "" {
+				_, _ = fmt.Fprintln(w, "no tasks registered.")
+				return
+			}
+			name := string(pid)
+			if proj, err := e.Project(ctx, pid); err == nil && proj.Name != "" {
+				name = proj.Name
+			}
+			_, _ = fmt.Fprintf(w, "no tasks registered in %s.\n", name)
 			return
 		}
 		renderList(w, snap, filter)

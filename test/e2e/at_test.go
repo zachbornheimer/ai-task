@@ -6,6 +6,7 @@ package e2e
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -327,7 +328,7 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	const n = 6
 	ids := map[string]bool{}
 	for i := 0; i < n; i++ {
-		ids[taskID(e.ok("add", "work", "--check", "u: true"))] = true
+		ids[taskID(e.ok("add", fmt.Sprintf("work-%d", i), "--check", "u: true"))] = true
 	}
 	results := make([]result, n+4)
 	var wg sync.WaitGroup

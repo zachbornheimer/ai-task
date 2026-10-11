@@ -181,17 +181,25 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // task check failed, in which case the regression rows are recorded as
 // skipped) the regression checks on a fresh snapshot. Nothing a task check
 // leaves behind can be the reason a regression check passes.
-func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project) ([]verification.Evidence, error) {
+func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project, workDir string) ([]verification.Evidence, error) {
 	var out []verification.Evidence
-	changed, _ := workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
+	inPlace := proj.Unscoped() || proj.RootPath == ""
+	var changed []string
+	if !inPlace {
+		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
+	}
 	taskOpts, regOpts := suiteOpts(t, proj, changed)
 	logDir := e.runLogDir(proj.ID, runID)
 	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	taskPolicy := verification.Policy{TaskChecks: policy.TaskChecks}
 	if len(taskPolicy.TaskChecks) > 0 {
-		dir, cleanup, err := mgr.Snapshot(ctx, revision)
-		if err != nil {
-			return nil, err
+		dir, cleanup := workDir, func() {}
+		if !inPlace {
+			var err error
+			dir, cleanup, err = mgr.Snapshot(ctx, revision)
+			if err != nil {
+				return nil, err
+			}
 		}
 		ev, err := e.runChecks(ctx, dir, taskPolicy, runID, revision, fence, taskOpts)
 		cleanup()
@@ -212,6 +220,10 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 	regPolicy := verification.Policy{Regression: policy.Regression}
 	if requiredTaskFailed {
 		ev, err := e.runChecksSkipping(ctx, regPolicy, runID, revision, policy.Digest(), fence)
+		return append(out, ev...), err
+	}
+	if inPlace {
+		ev, err := e.runChecks(ctx, workDir, regPolicy, runID, revision, fence, regOpts)
 		return append(out, ev...), err
 	}
 	dir, cleanup, err := mgr.Snapshot(ctx, revision)
@@ -482,17 +494,24 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 	if p.rec.Task.Kind != task.KindTask {
 		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s is a group", p.rec.Task.ID)
 	}
-	if missing := p.policy.MissingCategory(); missing != "" {
-		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
+	if p.proj.Integration == project.IntegrationPromote {
+		if missing := p.policy.MissingCategory(); missing != "" {
+			return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
+		}
+	} else if !verification.HasRequired(p.policy.TaskChecks) {
+		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no required task checks are defined (completion fails closed)", p.rec.Task.ID)
 	}
 	if p.rec.UnmetRequires > 0 {
 		return VerifyResult{}, fault.New(fault.CodeTaskBlocked, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
 	}
-	st, err := workspace.RequireClean(ctx, p.dir)
-	if err != nil {
-		return VerifyResult{}, err
+	revision := "unscoped"
+	if !p.proj.Unscoped() && p.proj.RootPath != "" {
+		st, err := workspace.RequireClean(ctx, p.dir)
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		revision = st.Revision
 	}
-	revision := st.Revision
 	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.proj.Regression}).Digest()}
 	if p.rec.Task.Cohort != "" {
 		return e.submitForCohort(ctx, fr)
@@ -607,7 +626,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	}
 	// Pinned paths are part of the contract: a submission that changed one
 	// fails as the attempt's own failure, before any check runs.
-	if len(fr.rec.Task.Pins) > 0 {
+	if len(fr.rec.Task.Pins) > 0 && !fr.proj.Unscoped() && fr.proj.RootPath != "" {
 		changed, err := workspace.ChangedBetween(ctx, fr.proj.RootPath, "refs/heads/"+fr.proj.TargetBranch, fr.revision)
 		if err != nil {
 			return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, "list changed files: "+fault.MessageOf(err), nil)
@@ -636,7 +655,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	}
 	// Immutable inputs: detached snapshots of the submitted revision, one
 	// per check category.
-	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj)
+	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, fr.attempt.WorkspacePath)
 	if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(evidence) == 0 {
 		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
 	}
@@ -722,7 +741,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		final := fr.revision
 		if cand.Revision != fr.revision {
-			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj)
+			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, "")
 			if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(more) == 0 {
 				cand.Cleanup()
 				return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)

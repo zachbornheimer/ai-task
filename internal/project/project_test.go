@@ -8,6 +8,30 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
+func TestUnscopedProjectValidates(t *testing.T) {
+	p := Project{ID: UnscopedID, Integration: IntegrationNone, MaxAttempts: DefaultMaxAttempts}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !p.Unscoped() {
+		t.Fatal("empty id must be unscoped")
+	}
+	if err := (Project{ID: UnscopedID, Integration: IntegrationPromote}).Validate(); err == nil {
+		t.Fatal("unscoped promote must be rejected")
+	}
+}
+
+func TestEncodeBase32UUIDLength(t *testing.T) {
+	src := make([]byte, 16)
+	enc := EncodeBase32(src)
+	if len(enc) != 26 {
+		t.Fatalf("uuid encoding length %d want 26", len(enc))
+	}
+	if !ValidBase32Alphabet(enc) {
+		t.Fatalf("alphabet: %q", enc)
+	}
+}
+
 func TestIDs(t *testing.T) {
 	id := NewID()
 	if _, err := ParseID(string(id)); err != nil {
@@ -81,7 +105,7 @@ func TestValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := []Project{
-		{Name: " ", Integration: IntegrationNone},
+		{ID: NewID(), Name: " ", Integration: IntegrationNone},
 		{Name: "x", Integration: "weird"},
 		{Name: "x", Integration: IntegrationNone, RootPath: "relative"},
 	}

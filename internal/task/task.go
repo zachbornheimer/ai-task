@@ -5,6 +5,8 @@
 package task
 
 import (
+	"crypto/rand"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -14,27 +16,52 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-// ID is an opaque task identifier: "at-" + 6 base32 characters (30 bits).
-// IDs are random, never derived from content, and never reused; the store's
-// UNIQUE constraint detects the rare collision and the engine redraws.
+// ID is an opaque task identifier: "at-" plus a Crockford prefix of a
+// UUID (6 characters by default, up to 26). IDs are never derived from
+// content. On the rare prefix collision the store UNIQUE constraint
+// fails and the engine draws a longer prefix of a fresh UUID.
 // Legacy "task-" + 16 character IDs from earlier releases still parse.
 type ID string
 
 const (
 	idPrefix       = "at-"
 	idChars        = 6
+	idCharsMax     = 26
 	legacyPrefix   = "task-"
 	legacyIDLength = 16
 )
 
-// NewID draws a fresh random ID.
-func NewID() ID { return ID(idPrefix + project.RandomBase32(idChars)) }
+// NewID draws a fresh UUID-sourced ID of the default width.
+func NewID() ID { return NewIDWidth(idChars) }
+
+// NewIDWidth draws a UUID-sourced ID using the first n Crockford
+// characters of a 16-byte UUID encoding (n is clamped to [6, 26]).
+func NewIDWidth(n int) ID {
+	if n < idChars {
+		n = idChars
+	}
+	if n > idCharsMax {
+		n = idCharsMax
+	}
+	var u [16]byte
+	if _, err := io.ReadFull(rand.Reader, u[:]); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+	enc := project.EncodeBase32(u[:])
+	if n > len(enc) {
+		n = len(enc)
+	}
+	return ID(idPrefix + enc[:n])
+}
 
 // ParseID validates the external form.
 func ParseID(s string) (ID, error) {
 	switch {
-	case strings.HasPrefix(s, idPrefix) && project.ValidBase32(strings.TrimPrefix(s, idPrefix), idChars):
-		return ID(s), nil
+	case strings.HasPrefix(s, idPrefix):
+		rest := strings.TrimPrefix(s, idPrefix)
+		if len(rest) >= idChars && len(rest) <= idCharsMax && project.ValidBase32Alphabet(rest) {
+			return ID(s), nil
+		}
 	case strings.HasPrefix(s, legacyPrefix) && project.ValidBase32(strings.TrimPrefix(s, legacyPrefix), legacyIDLength):
 		return ID(s), nil
 	}
@@ -121,6 +148,8 @@ type Task struct {
 	ContractRev   int                   `json:"contract_rev"`
 	ArchivedAt    *time.Time            `json:"archived_at,omitempty"`
 	ArchiveReason string                `json:"archive_reason,omitempty"`
+	Creator       string                `json:"creator,omitempty"`
+	CreatedCwd    string                `json:"created_cwd,omitempty"`
 	CreatedAt     time.Time             `json:"created_at"`
 	UpdatedAt     time.Time             `json:"updated_at"`
 }
@@ -140,9 +169,6 @@ const (
 // whitespace. Semantic atomicity cannot be checked syntactically; Warnings
 // reports heuristics that suggest a task may bundle several outcomes.
 func (s *Spec) Validate() error {
-	if s.ProjectID == "" {
-		return fault.New(fault.CodeInvalidInput, "task needs a project")
-	}
 	if s.Kind == "" {
 		s.Kind = KindTask
 	}

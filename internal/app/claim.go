@@ -44,7 +44,9 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 		return Session{}, err
 	}
 	if req.TaskID == nil && req.ProjectID == "" {
-		return Session{}, fault.New(fault.CodeNoProject, "automatic claim needs a project")
+		if _, err := e.EnsureUnscoped(ctx); err != nil {
+			return Session{}, err
+		}
 	}
 	if !req.Wait {
 		return e.claimOnce(ctx, req, lease)
@@ -135,20 +137,27 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				return err
 			}
 		} else {
-			if proj, err = tx.GetProject(req.ProjectID); err != nil {
-				return err
+			maxAttempts := project.DefaultMaxAttempts
+			if req.ProjectID != "" {
+				if proj, err = tx.GetProject(req.ProjectID); err != nil {
+					return err
+				}
+				if err := regressionGate(proj); err != nil {
+					return err
+				}
+				maxAttempts = proj.MaxAttempts
 			}
-			if err := regressionGate(proj); err != nil {
-				return err
-			}
-			cand, ok, err := tx.ClaimCandidate(req.ProjectID, now, proj.MaxAttempts)
+			cand, ok, err := tx.ClaimCandidate(req.ProjectID, now, maxAttempts)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return fault.New(fault.CodeNoAvailableTask, "no claimable task in project %s", req.ProjectID)
+				return fault.New(fault.CodeNoAvailableTask, "no claimable task")
 			}
 			r = cand
+			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
+				return err
+			}
 			// The SQL pre-filter must agree with the domain rule; a
 			// disagreement is a bug, never a silent wrong claim.
 			if err := notClaimable(r, proj, now, false); err != nil {
@@ -184,6 +193,25 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
+	if proj.Unscoped() || proj.RootPath == "" {
+		dir := sess.Task.CreatedCwd
+		if dir == "" {
+			dir = e.cwd
+		}
+		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+			if err := tx.SetWorkspace(attempt.ID, dir, ""); err != nil {
+				return err
+			}
+			return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
+		}); err != nil {
+			return Session{}, err
+		}
+		sess.Workspace = dir
+		if sess.Task.Attempt != nil {
+			sess.Task.Attempt.Workspace = dir
+		}
+		return sess, nil
+	}
 	// One branch and worktree per task, reused across clean handoffs so
 	// committed and uncommitted work survives. The token is stored in the
 	// worktree's private git dir so commands run there need no ATASK_SESSION.
@@ -274,6 +302,9 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 // regressionGate refuses to hand out work in a project whose regression
 // checks cannot act as a gate: nothing claimed there could ever complete.
 func regressionGate(proj project.Project) error {
+	if proj.Unscoped() || proj.Integration != project.IntegrationPromote {
+		return nil
+	}
 	if err := verification.RequireGate(proj.Regression, "project regression checks"); err != nil {
 		return fault.New(fault.CodeMissingVerification, "project %s: %v; define them with `atask project --regression-check` before claiming work", proj.ID, fault.MessageOf(err))
 	}

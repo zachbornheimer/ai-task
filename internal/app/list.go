@@ -45,14 +45,31 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		return PlanSnapshot{}, err
 	}
 	now := e.now()
-	head := e.resolveTargetHead(ctx, q.ProjectID)
+	var head targetHead
+	if q.ProjectID != "" {
+		head = e.resolveTargetHead(ctx, q.ProjectID)
+	}
 	var snap PlanSnapshot
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
-		proj, err := tx.GetProject(q.ProjectID)
-		if err != nil {
-			return err
+		var proj project.Project
+		byID := map[project.ID]project.Project{}
+		if q.ProjectID != "" {
+			p, err := tx.GetProject(q.ProjectID)
+			if err != nil {
+				return err
+			}
+			proj = p
+			snap.Revision = proj.PlanRev
+		} else {
+			proj = project.Project{MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+			ps, err := tx.ListProjects()
+			if err != nil {
+				return err
+			}
+			for i := range ps {
+				byID[ps[i].ID] = ps[i]
+			}
 		}
-		snap.Revision = proj.PlanRev
 		scope := sqlite.ScopeLive
 		if q.Filter == FilterArchived {
 			scope = sqlite.ScopeAll
@@ -63,18 +80,27 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		}
 		snap.Tasks, snap.Groups = []TaskView{}, []GroupView{}
 		for _, r := range records {
-			st := r.Status(now, proj.MaxAttempts)
+			rp := proj
+			if q.ProjectID == "" {
+				if p, ok := byID[r.Task.ProjectID]; ok {
+					rp = p
+				}
+				if rp.MaxAttempts == 0 {
+					rp.MaxAttempts = project.DefaultMaxAttempts
+				}
+			}
+			st := r.Status(now, rp.MaxAttempts)
 			if r.Task.Kind == task.KindGroup {
 				if (q.Filter == FilterArchived) != r.Task.Archived() {
 					continue
 				}
-				prog, err := e.groupProgress(tx, r.Task.ID, proj, now)
+				prog, err := e.groupProgress(tx, r.Task.ID, rp, now)
 				if err != nil {
 					return err
 				}
 				g := GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt, LastError: r.LastError}
 				if verification.HasRequired(r.Task.Verification.TaskChecks) {
-					gv, err := e.groupVerification(tx, r, proj, now, head)
+					gv, err := e.groupVerification(tx, r, rp, now, head)
 					if err != nil {
 						return err
 					}
@@ -105,11 +131,14 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					continue
 				}
 			}
-			v, err := e.buildViewDepth(tx, r, proj, now, viewList, head)
+			v, err := e.buildViewDepth(tx, r, rp, now, viewList, head)
 			if err != nil {
 				return err
 			}
 			snap.Tasks = append(snap.Tasks, v)
+		}
+		if q.ProjectID == "" {
+			return nil
 		}
 		snap.Summary, err = e.summaryIn(tx, proj, now, head)
 		return err

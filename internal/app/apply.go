@@ -204,9 +204,13 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 		return "", fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check; task checks cannot shadow regression checks", cid)
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, Pins: spec.Pins, Size: spec.Size, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, Pins: spec.Pins, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := 0; attempt < 5; attempt++ {
-		t.ID = a.e.newID()
+		if attempt == 0 {
+			t.ID = a.e.newID()
+		} else {
+			t.ID = task.NewIDWidth(taskIDWidth + attempt)
+		}
 		err := a.tx.InsertTask(t)
 		if err == nil {
 			if spec.Key != "" {
@@ -227,6 +231,8 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	return "", fault.New(fault.CodeInternal, "could not allocate a unique task id")
 }
 
+const taskIDWidth = 6
+
 func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	parent, err := a.parentGroup(c.Parent)
 	if err != nil {
@@ -238,11 +244,6 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	}
 	if err := spec.Validate(); err != nil {
 		return err
-	}
-	// A task is implementable only with a required check of its own:
-	// completion fails closed without one, so planning fails closed too.
-	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
-		return fault.New(fault.CodeMissingVerification, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
 	}
 	var requires []task.ID
 	for _, r := range c.Requires {
@@ -274,6 +275,17 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 			}
 			return fault.New(fault.CodeDuplicateKey, "key %q already names %s with a different definition; use an update to change it", c.Key, existing.Task.ID)
 		}
+	} else if existing, ok, err := a.tx.GetOpenByTitle(c.Title); err != nil {
+		return err
+	} else if ok {
+		name := a.createdName(i, "")
+		a.result.Created[name] = existing.Task.ID
+		return nil
+	}
+	// A task is implementable only with a required check of its own:
+	// completion fails closed without one, so planning fails closed too.
+	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
+		return fault.New(fault.CodeMissingVerification, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
 	}
 	id, err := a.insert(spec)
 	if err != nil {
@@ -304,6 +316,12 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	}
 	a.result.Created[a.createdName(i, c.Key)] = id
 	a.result.Changed++
+	if a.proj.Unscoped() {
+		if a.result.Warnings == nil {
+			a.result.Warnings = map[string][]string{}
+		}
+		a.result.Warnings[a.createdName(i, c.Key)] = append(a.result.Warnings[a.createdName(i, c.Key)], recommendProject)
+	}
 	if w := append(spec.Warnings(), planBudgetWarnings(spec, a.proj)...); len(w) > 0 {
 		if a.result.Warnings == nil {
 			a.result.Warnings = map[string][]string{}

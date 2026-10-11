@@ -15,7 +15,6 @@ func TestValidate(t *testing.T) {
 		cs   ChangeSet
 		code fault.Code
 	}{
-		{ChangeSet{Operations: []Change{AddTask{Title: "x"}}}, fault.CodeInvalidInput},
 		{ChangeSet{ProjectID: "p"}, fault.CodeInvalidInput},
 		{ChangeSet{ProjectID: "p", Operations: []Change{AddTask{Key: "k", Title: "a"}, AddTask{Key: "k", Title: "b"}}}, fault.CodeDuplicateKey},
 		{ChangeSet{ProjectID: "p", Operations: []Change{AddTask{Title: " "}}}, fault.CodeInvalidInput},

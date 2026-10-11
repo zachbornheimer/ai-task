@@ -132,6 +132,8 @@ type TaskView struct {
 	CompletedRevision string     `json:"completed_revision,omitempty"`
 	ArchivedAt        *time.Time `json:"archived_at,omitempty"`
 	ArchiveReason     string     `json:"archive_reason,omitempty"`
+	Creator           string     `json:"creator,omitempty"`
+	CreatedCwd        string     `json:"created_cwd,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	History           *History   `json:"history,omitempty"`
 }
@@ -317,7 +319,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
 		Checks: t.Verification.TaskChecks, Pins: t.Pins, Size: t.Size, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
-		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, CreatedAt: t.CreatedAt,
+		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, Creator: t.Creator, CreatedCwd: t.CreatedCwd, CreatedAt: t.CreatedAt,
 	}
 	if st == task.StatusNeedsAttention {
 		facts := r.Facts(now, p.MaxAttempts)
