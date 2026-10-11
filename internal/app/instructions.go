@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,7 +62,7 @@ Everything that changes this repository goes through ` + "`atask`" + `.
 
 ## Verbs
 
-` + "```" + `
+` + "```text" + `
 atask context                                           your task: outcome, checks, workspace, state, handoff (or the plan, with no task in hand)
 atask claim [REF] [--wait]                              one leased task, its worktree on atask/<id>; the token is stored there
 atask log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first
@@ -79,7 +80,7 @@ atask claim renew                                       extend the lease (every 
 // DefaultGuidelines is the repository section `atask init` writes into a
 // new AGENTS.md outside the markers: engineering rules the repository's
 // owners are expected to edit.
-const DefaultGuidelines = `# Engineering guidelines
+const DefaultGuidelines = `## Engineering guidelines
 
 Edit this section for the repository; the block above is owned by ` + "`atask init`" + `.
 
@@ -138,27 +139,59 @@ func InstallInstructions(root string) (InstallResult, error) {
 		res.Updated = content != string(existing)
 	}
 	if res.Updated {
-		if err := os.WriteFile(res.AgentsMD, []byte(content), 0o644); err != nil {
+		if err := writeUnder(root, "AGENTS.md", []byte(content)); err != nil {
 			return res, fault.Wrap(err, fault.CodeInternal, "write AGENTS.md")
 		}
 	}
 	claude := filepath.Join(root, "CLAUDE.md")
-	cb, err := os.ReadFile(claude)
+	cb, err := readUnder(root, "CLAUDE.md")
 	switch {
 	case os.IsNotExist(err):
-		if err := os.WriteFile(claude, []byte("@AGENTS.md\n"), 0o644); err != nil {
+		if err := writeUnder(root, "CLAUDE.md", []byte("@AGENTS.md\n")); err != nil {
 			return res, fault.Wrap(err, fault.CodeInternal, "write CLAUDE.md")
 		}
 		res.ClaudeMD = claude
 	case err != nil:
 		return res, fault.Wrap(err, fault.CodeInternal, "read CLAUDE.md")
 	case !strings.Contains(string(cb), "@AGENTS.md"):
-		if err := os.WriteFile(claude, []byte(strings.TrimRight(string(cb), "\n")+"\n\n@AGENTS.md\n"), 0o644); err != nil {
+		if err := writeUnder(root, "CLAUDE.md", []byte(strings.TrimRight(string(cb), "\n")+"\n\n@AGENTS.md\n")); err != nil {
 			return res, fault.Wrap(err, fault.CodeInternal, "amend CLAUDE.md")
 		}
 		res.ClaudeMD = claude
 	}
 	return res, nil
+}
+
+func writeUnder(root, name string, data []byte) error {
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	f, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
+}
+
+func readUnder(root, name string) ([]byte, error) {
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = dir.Close() }()
+	f, err := dir.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return io.ReadAll(f)
 }
 
 // ClaudeHooks are the Claude Code hooks `atask init --claude` installs: the
@@ -180,7 +213,7 @@ func InstallClaudeHooks(root string) (string, bool, error) {
 	dir := filepath.Join(root, ".claude")
 	path := filepath.Join(dir, "settings.json")
 	settings := map[string]any{}
-	if b, err := os.ReadFile(path); err == nil {
+	if b, err := readUnder(root, filepath.Join(".claude", "settings.json")); err == nil {
 		if err := json.Unmarshal(b, &settings); err != nil {
 			return path, false, fault.Wrap(err, fault.CodeInvalidInput, "%s is not valid JSON", path)
 		}
@@ -208,11 +241,11 @@ func InstallClaudeHooks(root string) (string, bool, error) {
 	if !changed {
 		return path, false, nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return path, false, fault.Wrap(err, fault.CodeInternal, "create %s", dir)
 	}
 	b, _ := json.MarshalIndent(settings, "", "  ")
-	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+	if err := writeUnder(root, filepath.Join(".claude", "settings.json"), append(b, '\n')); err != nil {
 		return path, false, fault.Wrap(err, fault.CodeInternal, "write %s", path)
 	}
 	return path, true, nil

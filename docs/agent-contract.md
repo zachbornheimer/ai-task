@@ -11,10 +11,10 @@ The CLI is a thin adapter over the Go engine; both apply the same rules.
 envelope on stdout and nothing else there, compact on one line (`--pretty`
 indents it):
 
-```json
+````json
 {"ok":true,"result":{...}}
 {"ok":false,"error":{"code":"TASK_BLOCKED","message":"...","details":{...}}}
-```
+```text
 
 Human mode prints an acknowledgement on stdout after commit and
 `error [CODE]: message` on stderr. Exit status: `0` success, `1` coded
@@ -51,18 +51,18 @@ stdout (an envelope in JSON mode) and exits `0`.
 | `INTERNAL`                                                                                | bug or I/O failure                                                                                                                                                                                                                 |
 
 ## Planning (planner authority)
+````
 
-```
-at add "title" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--cohort C]
-       [--outcome ..] [--constraint ..]* [--accept ..]* [--check "[id:] cmd"]* [--optional-check ..]*
-       [--pin PATH]* [--claim]
-       [--expect-rev N] [--idempotency-key K] [--planner]
+at add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
+[--outcome ..] [--constraint ..]*[--accept ..]* [--check "[id:] cmd"]*[--optional-check ..]*
+[--pin PATH]*[--claim]
+[--expect-rev N] [--idempotency-key K] [--planner]
 at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
-       [--requires REF]* [--remove-requires REF]* [--set-requires REF]*
-       [--accept ..]* [--constraint ..]* [--check ..]* [--pin PATH|""]*
-       [--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
-```
+[--requires REF]* [--remove-requires REF]*[--set-requires REF]*
+[--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
+[--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
 
+```text
 `REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
 plan revision; the Go `Apply` takes a whole batch; a batch that changes
 nothing is not a revision. `atask add -f plan.yaml` (or `.json`, or `-` for
@@ -148,16 +148,16 @@ stale `--expect-rev`), a different request under the same key is
 - There is no status flag of any kind. Status is derived.
 
 ## Execution (session authority)
-
 ```
-at context [REF] [--with-rules]          a task's working context as one prompt (no REF: this session's task)
-at claim [REF] [--wait] [--lease 30m]    one atomic leased attempt; prints the token once
-at claim renew [token|-]                 extend the lease (inside the worktree no token is needed)
+
+at context [REF] [--with-rules] a task's working context as one prompt (no REF: this session's task)
+at claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
+at claim renew [token|-] extend the lease (inside the worktree no token is needed)
 at claim release [token|-] [--note ..] [--failed]
-at log --done .. --next .. --learned .. --note ..     (token: see Token transport)
-at verify task | regression | complete               (same token sources)
-```
+at log --done .. --next .. --learned .. --note .. (token: see Token transport)
+at verify task | regression | complete (same token sources)
 
+```text
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;
 cooldowns, exhausted tasks and tasks whose worktree could not be prepared
 excluded). Eligibility is one rule: `list ready`, `status`, automatic and
@@ -259,8 +259,8 @@ instruction file, AGENTS.md (or a CLAUDE.md that imports it), holding the
 agent execution contract; (3) the task turn, `atask context`, which carries
 only task facts and never repeats the contract. `--with-rules` appends
 the contract for an agent that gets no project file. The bootstrap is:
-
 ```
+
 You are a coding agent responsible for one task in an isolated Git worktree.
 Use the shell and the `at` CLI to execute and manage the task; `at` is
 authoritative for task state, verification and completion. ATASK_OUTPUT=json is
@@ -269,8 +269,8 @@ one fails. Start with `atask context` and follow the project instructions.
 Commit before `atask verify complete`; only a passing verification completes
 the task. If any `atask` command returns LEASE_EXPIRED or SESSION_SUPERSEDED,
 stop editing immediately.
-```
 
+```text
 **Handoff.** The claim result carries the previous attempts' `latest_next`,
 learnings and recent log, plus `inherited` learnings recorded on the
 task's direct prerequisites and `last_failure`: the failed checks of the
@@ -325,16 +325,16 @@ tail; the complete output is in `details.evidence[].log`, and
 token after a committed completion returns the stored result.
 
 ## Reading
-
 ```
-at show REF [--full]        glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
-                            TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
-at list                     hierarchy of open work (groups indented; blocked tasks show requires:)
+
+at show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
+TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
+at list hierarchy of open work (groups indented; blocked tasks show requires:)
 at list ready | blocked | all | archived
-at status                   counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
-at prune                    remove worktrees of complete/archived tasks and quarantined directories of idle tasks
-```
+at status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
+at prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks
 
+```text
 `ATASK_OUTPUT=json at help` prints an envelope listing the commands; a bare
 `at` in JSON mode prints an `INVALID_INPUT` envelope (exit 2).
 
@@ -386,8 +386,8 @@ touched).
 A lost token is a stuck task until the lease expires; that is by design.
 
 ## The tiny agent prompt
-
 ```
+
 Implement the claimed task's outcome and acceptance criteria.
 Use the supplied workspace and session. You do not set task status.
 Use `atask log` for progress/discoveries.
@@ -402,4 +402,6 @@ ATASK_SESSION authorises it), log the handoff, and release the claim
 (`atask claim release`).
 Every `atask` command renews your lease; `atask log` at least every half hour.
 Stop editing immediately if claim renewal/authorization fails.
+
+```text
 ```
