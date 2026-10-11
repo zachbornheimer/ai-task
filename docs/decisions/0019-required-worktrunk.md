@@ -5,7 +5,7 @@
 **Decision.** `atask` requires Worktrunk (`wt` on PATH). Live task worktrees
 are created and located only with:
 
-```
+```sh
 wt switch [--create --base <base>] --no-cd --no-hooks --yes --format json atask/<id>
 ```
 

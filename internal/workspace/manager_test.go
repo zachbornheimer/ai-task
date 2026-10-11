@@ -49,7 +49,7 @@ type gitSwitcher struct {
 	root string
 }
 
-func (g gitSwitcher) Ensure(ctx context.Context, repo, branch, base string, create bool) (string, error) {
+func (g gitSwitcher) Ensure(ctx context.Context, _, branch, base string, create bool) (string, error) {
 	g.t.Helper()
 	path := filepath.Join(g.root, strings.ReplaceAll(branch, "/", "-"))
 	if resolved, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {

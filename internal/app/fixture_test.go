@@ -212,7 +212,7 @@ type addSwitcher struct {
 	root string
 }
 
-func (a addSwitcher) Ensure(ctx context.Context, repo, branch, base string, create bool) (string, error) {
+func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create bool) (string, error) {
 	if err := os.MkdirAll(a.root, 0o755); err != nil {
 		return "", err
 	}
