@@ -25,7 +25,8 @@ func scanLogs(rows interface {
 	Next() bool
 	Scan(...any) error
 	Err() error
-}) ([]execution.RecordedLog, error) {
+},
+) ([]execution.RecordedLog, error) {
 	var out []execution.RecordedLog
 	for rows.Next() {
 		var l execution.RecordedLog
@@ -90,9 +91,12 @@ func (t *Tx) Handoff(id task.ID) (execution.Handoff, error) {
 		return h, wrapInternal(err, "recent logs")
 	}
 	h.RecentLogs, err = scanLogs(rows)
-	rows.Close()
+	closeErr := rows.Close()
 	if err != nil {
 		return h, err
+	}
+	if closeErr != nil {
+		return h, wrapInternal(closeErr, "close recent logs")
 	}
 	err = t.tx.QueryRowContext(t.ctx, `SELECT next FROM task_log_entries WHERE task_id = ? AND next <> '' ORDER BY id DESC LIMIT 1`, id).Scan(&h.LatestNext)
 	if err != nil && !isNoRows(err) {

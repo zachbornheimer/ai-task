@@ -10,21 +10,21 @@ rationale for every deviation. It is kept current as milestones land.
 ### Contradictions and ambiguities found
 
 1. **`Take(ctx, task *TaskID)` has nowhere to put the project.** `Take(nil)`
-   must select from *some* project; the signature cannot express that.
+   must select from _some_ project; the signature cannot express that.
    Resolved with `Take(ctx, TakeRequest{Project, Task, Lease})`.
 
 2. **Who owns the regression policy?** `TaskSpec.Verification` carries a
    `Regression` list, but the spec also says the project owns "project-wide
    verification policy". Both are allowed: a task may carry its own checks;
    the project's regression checks are merged in at submission time and the
-   *merged* policy is digested into the submission. Task-level definitions
+   _merged_ policy is digested into the submission. Task-level definitions
    win on ID collision so a task can tighten (not loosen) a project check.
 
 3. **Milestone 1 has no verification, yet dependencies require "complete"
    prerequisites.** Without a completion fact nothing with a dependency could
    ever become available. Resolved by implementing `finish` fully in
    Milestone 1 with one honest rule: a submission whose effective policy
-   requires *nothing* is vacuously verified, and under integration policy
+   requires _nothing_ is vacuously verified, and under integration policy
    `none` the task is complete. A submission with checks is recorded as
    `awaiting_verification` and the task stays unreleased until Milestone 2
    executes the checks. No agent claim ever completes a task.
@@ -59,15 +59,14 @@ rationale for every deviation. It is kept current as milestones land.
 
 - **One submission per attempt**, enforced by a UNIQUE constraint; `finish`
   is idempotent per token.
-- **Generation advance is a conditional write** (`WHERE current_attempt_seq
-  = ?`), so even a bug that bypassed status checks could not create two
+- **Generation advance is a conditional write** (`WHERE current_attempt_seq = ?`), so even a bug that bypassed status checks could not create two
   current attempts.
 - **Status precedence** must be total. It is (see `docs/invariants.md`).
 - **Candidate selection must agree with the domain rule.** The SQL
   pre-filter for takeable tasks is re-checked in Go before the claim; a
   disagreement is an internal error, never a wrong claim.
 - **Dependency added to an in-progress task** does not evict the attempt; it
-  blocks the *next* take.
+  blocks the _next_ take.
 - **Removing a dependency never un-completes anything.** Eligibility is
   derived, so removal needs no recomputation step.
 
@@ -89,12 +88,12 @@ rationale for every deviation. It is kept current as milestones land.
 - Verification is bound to an immutable revision and a policy digest even in
   Milestone 1 where no checks run; the columns exist and are filled.
 - Tokens are stored only as SHA-256 digests.
-- Status is never stored; `completed_at` is a *fact* written in the same
+- Status is never stored; `completed_at` is a _fact_ written in the same
   transaction as the final gate, not a user-editable flag.
 
 ## 2. Final package map
 
-```
+```text
 tasks.go                 public facade (aliases + Open)
 cmd/tasks/main.go
 internal/fault           stable error codes (leaf)
@@ -124,7 +123,7 @@ verification runs; `completed_at`.
 
 Derived status precedence:
 
-```
+```text
 complete > awaiting_integration > awaiting_verification > in_progress
         > blocked > verification_failed > interrupted > available
 ```
@@ -148,15 +147,15 @@ weaker prerequisite kind in V1.
 Every write below is one `BEGIN IMMEDIATE` transaction; nothing external runs
 inside it:
 
-| Operation | Reads then writes |
-|---|---|
-| Add | project exists → insert task + criteria |
-| AddDependencies | both tasks, same project, duplicate?, reachability CTE → insert (per edge, all-or-nothing) |
-| RemoveDependency | delete |
-| Take | record + facts → status takeable? → conditional generation advance, supersede old attempt, insert attempt → read handoff |
-| Log | attempt by token digest + task generation → Authorize → insert |
-| Renew | same authorisation → update lease |
-| Finish | same authorisation (or idempotent replay) → insert submission, end attempt, insert run, maybe `completed_at` |
+| Operation        | Reads then writes                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Add              | project exists → insert task + criteria                                                                                  |
+| AddDependencies  | both tasks, same project, duplicate?, reachability CTE → insert (per edge, all-or-nothing)                               |
+| RemoveDependency | delete                                                                                                                   |
+| Take             | record + facts → status takeable? → conditional generation advance, supersede old attempt, insert attempt → read handoff |
+| Log              | attempt by token digest + task generation → Authorize → insert                                                           |
+| Renew            | same authorisation → update lease                                                                                        |
+| Finish           | same authorisation (or idempotent replay) → insert submission, end attempt, insert run, maybe `completed_at`             |
 
 Reads (`Show`, `List`, `Graph`, `History`) use one deferred read transaction
 so multi-query views are consistent.
@@ -210,35 +209,35 @@ judge (tx). Each boundary leaves a recoverable state (see
 
 ## 6. Deviations from the specification, with rationale
 
-| Spec | Implementation | Why |
-|---|---|---|
-| `Take(ctx, *TaskID)` | `Take(ctx, TakeRequest)` | project is required for automatic selection |
-| `Add` returns `(Task, error)` | returns `(Task, []string warnings, error)` | atomicity hints must reach the caller without blocking creation |
-| `Session.Workspace` | absent | no workspace boundary until M3 |
-| `Finish` returns only a result | `Finish(ctx, token, FinishOptions)`; a failed verdict is returned as `VERIFICATION_FAILED` with the result in `Details` | agents need both the facts and a non-zero exit |
-| Verification in an immutable checkout | M2 verifies in the project tree after confirming it is clean and at the submitted revision | detached worktrees arrive with the workspace boundary (M3); the check is honest about the window |
-| `VerificationPolicy.Version` field | computed digest `Policy.Digest()` | a user-settable version can lie; content hash cannot |
-| `renew-task-lease` only | also `renew` alias | shorter for agents; both documented |
-| Lease bounds unspecified | 1s..24h, default 1h | tests need real expiry; agents need a sane default |
-| `leases` table | columns on `execution_attempts` | one active attempt per task; no join needed |
-| `verification_policies`, `verification_checks` tables | JSON value + digest on task/submission | immutable value object; no referential churn |
-| `types.go` in root | aliases in `tasks.go` | one definition per concept |
-| `list` default | open tasks only; `--all` adds complete | the agent-facing default should be actionable work |
+| Spec                                                  | Implementation                                                                                                          | Why                                                                                              |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `Take(ctx, *TaskID)`                                  | `Take(ctx, TakeRequest)`                                                                                                | project is required for automatic selection                                                      |
+| `Add` returns `(Task, error)`                         | returns `(Task, []string warnings, error)`                                                                              | atomicity hints must reach the caller without blocking creation                                  |
+| `Session.Workspace`                                   | absent                                                                                                                  | no workspace boundary until M3                                                                   |
+| `Finish` returns only a result                        | `Finish(ctx, token, FinishOptions)`; a failed verdict is returned as `VERIFICATION_FAILED` with the result in `Details` | agents need both the facts and a non-zero exit                                                   |
+| Verification in an immutable checkout                 | M2 verifies in the project tree after confirming it is clean and at the submitted revision                              | detached worktrees arrive with the workspace boundary (M3); the check is honest about the window |
+| `VerificationPolicy.Version` field                    | computed digest `Policy.Digest()`                                                                                       | a user-settable version can lie; content hash cannot                                             |
+| `renew-task-lease` only                               | also `renew` alias                                                                                                      | shorter for agents; both documented                                                              |
+| Lease bounds unspecified                              | 1s..24h, default 1h                                                                                                     | tests need real expiry; agents need a sane default                                               |
+| `leases` table                                        | columns on `execution_attempts`                                                                                         | one active attempt per task; no join needed                                                      |
+| `verification_policies`, `verification_checks` tables | JSON value + digest on task/submission                                                                                  | immutable value object; no referential churn                                                     |
+| `types.go` in root                                    | aliases in `tasks.go`                                                                                                   | one definition per concept                                                                       |
+| `list` default                                        | open tasks only; `--all` adds complete                                                                                  | the agent-facing default should be actionable work                                               |
 
 ## Addendum: the `at` handoff (October 2026)
 
 The second specification ("Agent Task (`at`) implementation handoff")
 replaced several earlier decisions. Deviations from it, with reasons:
 
-| Handoff | Implementation | Why |
-|---|---|---|
-| `Engine` as a Go interface with eight methods | `at.Engine` interface plus `*at.Store` concrete type; bootstrap methods on the concrete type | an interface documents the everyday surface; bootstrap stays trusted and separate |
-| `Release(ctx, token, note) error` | `Release(ctx, token, ReleaseOptions{Note, Failed}) (TaskView, error)` | the host needs to record a recoverable agent failure for retry bookkeeping, and sees the resulting state |
-| `Log` returns `error` | returns the recorded entry | the sequence number is useful to agents |
-| `Show(ctx, id)` | `Show(ctx, project, ref, full)` | keys need a project; full history is opt-in |
-| Human-gated tasks retained or attestation path | removed; documented unsupported | an empty-check completion loophole is worse than no feature |
-| Parallel task/regression suites when isolated | sequential always | isolation cannot be proven from a declaration |
-| Priority field | none | as decided |
+| Handoff                                        | Implementation                                                                               | Why                                                                                                      |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `Engine` as a Go interface with eight methods  | `at.Engine` interface plus `*at.Store` concrete type; bootstrap methods on the concrete type | an interface documents the everyday surface; bootstrap stays trusted and separate                        |
+| `Release(ctx, token, note) error`              | `Release(ctx, token, ReleaseOptions{Note, Failed}) (TaskView, error)`                        | the host needs to record a recoverable agent failure for retry bookkeeping, and sees the resulting state |
+| `Log` returns `error`                          | returns the recorded entry                                                                   | the sequence number is useful to agents                                                                  |
+| `Show(ctx, id)`                                | `Show(ctx, project, ref, full)`                                                              | keys need a project; full history is opt-in                                                              |
+| Human-gated tasks retained or attestation path | removed; documented unsupported                                                              | an empty-check completion loophole is worse than no feature                                              |
+| Parallel task/regression suites when isolated  | sequential always                                                                            | isolation cannot be proven from a declaration                                                            |
+| Priority field                                 | none                                                                                         | as decided                                                                                               |
 
 Hazards 1–10 from the handoff's section 10 are each closed or documented
 in `docs/status.md`.
