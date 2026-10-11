@@ -87,11 +87,11 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	}
 }
 
-// TestChangedFilesReachChecks: checks see AT_CHANGED_FILES listing the
-// paths the candidate changed against the target, and AT_TARGET_BRANCH.
+// TestChangedFilesReachChecks: checks see ATASK_CHANGED_FILES listing the
+// paths the candidate changed against the target, and ATASK_TARGET_BRANCH.
 func TestChangedFilesReachChecks(t *testing.T) {
 	f := newGitFixture(t)
-	a := f.addWith("tia", `echo target=$AT_TARGET_BRANCH; cat "$AT_CHANGED_FILES"; test "$AT_TARGET_BRANCH" = main && grep -qx store/x.go "$AT_CHANGED_FILES" && grep -qx README.md "$AT_CHANGED_FILES" && ! grep -qx f.txt "$AT_CHANGED_FILES"`)
+	a := f.addWith("tia", `echo target=$ATASK_TARGET_BRANCH; cat "$ATASK_CHANGED_FILES"; test "$ATASK_TARGET_BRANCH" = main && grep -qx store/x.go "$ATASK_CHANGED_FILES" && grep -qx README.md "$ATASK_CHANGED_FILES" && ! grep -qx f.txt "$ATASK_CHANGED_FILES"`)
 	s := f.claim(string(a))
 	os.MkdirAll(filepath.Join(s.Workspace, "store"), 0o755)
 	f.commit(s.Workspace, "store/x.go", "package store\n")
@@ -114,5 +114,5 @@ func TestPlanWarnsOnWholeSuiteSmallTask(t *testing.T) {
 	if len(res.Warnings["l"]) != 0 {
 		t.Fatalf("large must not warn: %v", res.Warnings)
 	}
-	var _ = app.DefaultGuidelines
+	_ = app.DefaultGuidelines
 }

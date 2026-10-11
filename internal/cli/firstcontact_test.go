@@ -14,7 +14,7 @@ func runAt(t *testing.T, args ...string) (int, string, string) {
 	var out, errb bytes.Buffer
 	db := filepath.Join(t.TempDir(), "at.db")
 	code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: t.TempDir(), Getenv: func(k string) string {
-		if k == "AT_DB" {
+		if k == "ATASK_DB" {
 			return db
 		}
 		return ""
@@ -29,7 +29,7 @@ func TestTopLevelHelp(t *testing.T) {
 			t.Fatalf("at %s: exit %d\nstdout:\n%s\nstderr:\n%s", flag, code, out, errOut)
 		}
 	}
-	// `at help` is for reading (or paging): stdout, exit 0.
+	// `atask help` is for reading (or paging): stdout, exit 0.
 	if code, out, _ := runAt(t, "help"); code != ExitOK || !strings.Contains(out, "Commands:") {
 		t.Fatalf("at help: exit %d\n%s", code, out)
 	}

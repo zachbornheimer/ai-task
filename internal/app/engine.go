@@ -46,6 +46,8 @@ type Config struct {
 	// HeartbeatInterval is how often a long operation renews its lease.
 	// Zero means execution.HeartbeatInterval.
 	HeartbeatInterval time.Duration
+	// Switch creates task worktrees. Nil means WorktrunkSwitcher.
+	Switch workspace.Switcher
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -59,6 +61,7 @@ type Engine struct {
 	poll    time.Duration
 	// heartbeatEvery is the lease renewal interval of long operations.
 	heartbeatEvery time.Duration
+	swt            workspace.Switcher
 
 	mu      sync.Mutex
 	changed chan struct{}
@@ -109,6 +112,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
 		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, changed: make(chan struct{}),
+		swt: cfg.Switch,
 	}, nil
 }
 
@@ -134,22 +138,22 @@ func (e *Engine) changes() <-chan struct{} {
 }
 
 // DefaultPath returns the OS-appropriate state location, honouring the
-// AT_DB override. Task state lives outside any source repository.
+// ATASK_DB override. Task state lives outside any source repository.
 func DefaultPath() (string, error) {
-	if p := os.Getenv("AT_DB"); p != "" {
+	if p := os.Getenv("ATASK_DB"); p != "" {
 		return p, nil
 	}
 	base, err := stateDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "at", "at.db"), nil
+	return filepath.Join(base, "atask", "atask.db"), nil
 }
 
-// DefaultWorkspaceRoot places worktrees beside the database.
+// DefaultWorkspaceRoot places snapshots and quarantined trees beside the database.
 func DefaultWorkspaceRoot(dbPath string) string {
 	if dbPath == ":memory:" {
-		return filepath.Join(os.TempDir(), "at-workspaces")
+		return filepath.Join(os.TempDir(), "atask-workspaces")
 	}
 	return filepath.Join(filepath.Dir(dbPath), "workspaces")
 }
@@ -157,7 +161,7 @@ func DefaultWorkspaceRoot(dbPath string) string {
 // DefaultLogRoot places verification run logs beside the database.
 func DefaultLogRoot(dbPath string) string {
 	if dbPath == ":memory:" {
-		return filepath.Join(os.TempDir(), "at-logs")
+		return filepath.Join(os.TempDir(), "atask-logs")
 	}
 	return filepath.Join(filepath.Dir(dbPath), "logs")
 }
@@ -170,14 +174,7 @@ func stateDir() (string, error) {
 		}
 		return h, nil
 	}
-	switch runtime.GOOS {
-	case "darwin":
-		h, err := home()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(h, "Library", "Application Support"), nil
-	case "windows":
+	if runtime.GOOS == "windows" {
 		if base := os.Getenv("LOCALAPPDATA"); base != "" {
 			return base, nil
 		}
@@ -186,16 +183,15 @@ func stateDir() (string, error) {
 			return "", err
 		}
 		return filepath.Join(h, "AppData", "Local"), nil
-	default:
-		if base := os.Getenv("XDG_STATE_HOME"); base != "" {
-			return base, nil
-		}
-		h, err := home()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(h, ".local", "state"), nil
 	}
+	if base := os.Getenv("XDG_STATE_HOME"); base != "" {
+		return base, nil
+	}
+	h, err := home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, ".local", "state"), nil
 }
 
 // --- projects (bootstrap and trusted configuration) ---
@@ -217,7 +213,7 @@ type InitResult struct {
 // dir is not a repository one is created (with an initial commit); if it is
 // inside a repository, the main worktree root is registered. The current
 // branch becomes the target branch and integration policy is "promote".
-// Nothing is written into the repository's hooks; the CLI's `at init`
+// Nothing is written into the repository's hooks; the CLI's `atask init`
 // installs the agent instruction files (see InstallInstructions).
 func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Project, error) {
 	res, err := e.InitProjectResult(ctx, name, dir)
@@ -332,7 +328,7 @@ func (e *Engine) UpdateProject(ctx context.Context, p project.Project) error {
 }
 
 // ResolveProject finds the project for a command. Precedence:
-//  1. selector: a project ID or unique name (from --project / AT_PROJECT);
+//  1. selector: a project ID or unique name (from --project / ATASK_PROJECT);
 //  2. the Git repository containing dir, by registered main-worktree root;
 //  3. the longest registered root that contains dir.
 func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (project.Project, error) {
@@ -355,7 +351,7 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 			return nil
 		}
 		if dir == "" {
-			return fault.New(fault.CodeNoProject, "no project selected; pass --project or set AT_PROJECT")
+			return fault.New(fault.CodeNoProject, "no project selected; pass --project or set ATASK_PROJECT")
 		}
 		root, err := project.LocateRoot(dir)
 		if err != nil {
@@ -386,7 +382,7 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 			out = p
 			return err
 		}
-		return fault.New(fault.CodeNoProject, "no project registered for %s; run `at init` here or pass --project", canon)
+		return fault.New(fault.CodeNoProject, "no project registered for %s; run `atask init` here or pass --project", canon)
 	})
 	return out, err
 }
@@ -397,7 +393,7 @@ func (e *Engine) manager(p project.Project) workspace.Manager {
 	if root == "" {
 		root = filepath.Join(e.wsRoot, string(p.ID))
 	}
-	return workspace.Manager{Repo: p.RootPath, Root: root}
+	return workspace.Manager{Repo: p.RootPath, Root: root, Switch: e.swt}
 }
 
 // reconcile closes runs and jobs whose owners' leases expired so that no

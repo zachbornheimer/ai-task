@@ -50,16 +50,16 @@ func (c *ctxt) bindPlanFlags(pf *planFlags) {
 	c.fs.Uint64Var(&pf.expectRev, "expect-rev", 0, "fail with PLAN_CONFLICT unless the plan revision equals this")
 	c.fs.StringVar(&pf.idempotencyKey, "idempotency-key", "", "stable operation id; a replay returns the stored result")
 	c.fs.BoolVar(&pf.planner, "planner", false, "assert planning authority for edits to claimed tasks")
-	c.fs.StringVar(&pf.session, "session", "", "session token authorising a discovered blocker (default: AT_SESSION, or the task worktree's own token)")
+	c.fs.StringVar(&pf.session, "session", "", "session token authorizing a discovered blocker (default: ATASK_SESSION, or the task worktree's own token)")
 }
 
 // changeSet builds the ChangeSet; session authority comes from --session,
-// AT_SESSION, or the worktree the command runs in (same sources as the
+// ATASK_SESSION, or the worktree the command runs in (same sources as the
 // execution verbs, so `add --blocks` works from inside the worktree).
 func (c *ctxt) changeSet(ctx context.Context, pid project.ID, pf planFlags, ops ...plan.Change) plan.ChangeSet {
 	session := pf.session
 	if session == "" {
-		session = c.env.Getenv("AT_SESSION")
+		session = c.env.Getenv("ATASK_SESSION")
 	}
 	if session == "" {
 		session = workspace.LoadToken(ctx, c.env.Cwd)
@@ -125,7 +125,7 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 				fmt.Fprintf(w, "             untracked: %s\n", f)
 			}
 		}
-		fmt.Fprintf(w, "Target:      %s (integration: %s; task branches at/<id>)\n", p.TargetBranch, p.Integration)
+		fmt.Fprintf(w, "Target:      %s (integration: %s; task branches atask/<id>)\n", p.TargetBranch, p.Integration)
 		fmt.Fprintf(w, "State:       %s\n", e.Path())
 		if ir := o.Instructions; ir != nil {
 			switch {
@@ -145,7 +145,7 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 			}
 		}
 		if len(p.Regression) == 0 {
-			fmt.Fprintln(w, "Next:        define regression checks with `at project --regression-check \"id: cmd\"` (required before any claim), then `at doctor`")
+			fmt.Fprintln(w, "Next:        define regression checks with `atask project --regression-check \"id: cmd\"` (required before any claim), then `atask doctor`")
 		}
 	})
 }
@@ -427,7 +427,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	return c.emitAdd(ctx, pid, res, id, c.args[0], *claim && !*group)
 }
 
-// addOut is the acknowledgement of `at add`: the plan result, the task
+// addOut is the acknowledgement of `atask add`: the plan result, the task
 // (single-item adds), and the session when --claim was given.
 type addOut struct {
 	plan.Result

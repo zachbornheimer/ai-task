@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// TestSubcommandHelpListsFlags: `at <command> --help` (and -h) is a request
+// TestSubcommandHelpListsFlags: `atask <command> --help` (and -h) is a request
 // for help, not a usage error: it prints the command's usage line and every
 // flag with its description on stdout and exits 0; in JSON mode the same
-// content arrives in an envelope. `at help` names `verify groups`.
+// content arrives in an envelope. `atask help` names `verify groups`.
 func TestSubcommandHelpListsFlags(t *testing.T) {
 	e := newEnv(t)
 	for _, tc := range []struct {
@@ -22,8 +22,8 @@ func TestSubcommandHelpListsFlags(t *testing.T) {
 		{[]string{"claim", "release", "--help"}, []string{"-note", "-failed"}},
 		{[]string{"verify", "--help"}, []string{"-session"}},
 	} {
-		// Text mode (AT_OUTPUT unset): plain help on stdout, nothing on stderr.
-		r := e.runIn(e.cwd, "", []string{"AT_OUTPUT="}, tc.args...)
+		// Text mode (ATASK_OUTPUT unset): plain help on stdout, nothing on stderr.
+		r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, tc.args...)
 		if r.code != 0 || strings.TrimSpace(r.stderr) != "" || !strings.Contains(r.stdout, "Usage: ") || !strings.Contains(r.stdout, "at "+tc.args[0]) {
 			t.Fatalf("%v: code=%d stdout=%q stderr=%q", tc.args, r.code, r.stdout, r.stderr)
 		}
@@ -53,7 +53,7 @@ func TestSubcommandHelpListsFlags(t *testing.T) {
 	// A real mistake is still a usage error.
 	e.fails("INVALID_INPUT", "add", "--no-such-flag")
 	// The top-level help points at the group verification verb.
-	if r := e.runIn(e.cwd, "", []string{"AT_OUTPUT="}, "help"); !strings.Contains(r.stdout+r.stderr, "verify groups") {
+	if r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "help"); !strings.Contains(r.stdout+r.stderr, "verify groups") {
 		t.Fatalf("at help does not mention `verify groups`: %s%s", r.stdout, r.stderr)
 	}
 	if b, _ := json.Marshal(e.ok("help")); !strings.Contains(string(b), "verify groups") {

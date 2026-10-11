@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,7 @@ func (c *clock) Now() time.Time {
 	defer c.mu.Unlock()
 	return c.t
 }
+
 func (c *clock) Advance(d time.Duration) {
 	c.mu.Lock()
 	c.t = c.t.Add(d)
@@ -59,10 +61,19 @@ func newGitFixture(t *testing.T) *fixture {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("HK", "0")
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@t")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@t")
 	f := &fixture{t: t, ctx: context.Background(), c: newClock(), path: filepath.Join(t.TempDir(), "at.db"), repo: filepath.Join(t.TempDir(), "repo")}
 	f.e = f.open()
 	os.MkdirAll(f.repo, 0o755)
 	f.git(f.repo, "init", "-q", "-b", "main")
+	f.git(f.repo, "config", "user.name", "t")
+	f.git(f.repo, "config", "user.email", "t@t")
 	f.commit(f.repo, "f.txt", "one")
 	var err error
 	f.proj, err = f.e.InitProject(f.ctx, "gitproj", f.repo)
@@ -76,7 +87,7 @@ func newGitFixture(t *testing.T) *fixture {
 // open opens another engine on the same database, simulating a separate
 // process (separate connection pool, same file).
 func (f *fixture) open() *app.Engine {
-	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, PollInterval: 50 * time.Millisecond})
+	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, PollInterval: 50 * time.Millisecond, Switch: addSwitcher{repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")}})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -86,8 +97,8 @@ func (f *fixture) open() *app.Engine {
 
 func (f *fixture) git(dir string, args ...string) string {
 	f.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		f.t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
@@ -195,3 +206,35 @@ func wantCode(t *testing.T, err error, code fault.Code) {
 }
 
 func strptr(s string) *string { return &s }
+
+type addSwitcher struct {
+	repo string
+	root string
+}
+
+func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create bool) (string, error) {
+	if err := os.MkdirAll(a.root, 0o755); err != nil {
+		return "", err
+	}
+	root := a.root
+	if resolved, err := filepath.EvalSymlinks(a.root); err == nil {
+		root = resolved
+	}
+	path := filepath.Join(root, strings.ReplaceAll(branch, "/", "-"))
+	if create {
+		cmd := exec.CommandContext(ctx, "git", "-C", a.repo, "-c", "core.hooksPath=/dev/null", "branch", branch, base)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("branch: %w\n%s", err, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+		return path, nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", a.repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", path, branch)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("worktree add: %w\n%s", err, out)
+	}
+	return path, nil
+}

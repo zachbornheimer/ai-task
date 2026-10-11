@@ -138,7 +138,7 @@ func TestShowGolden(t *testing.T) {
 	// A claimed task with handoff and attempt details; no token anywhere.
 	c := tv("at-d83", "Implement PostgreSQL token store", task.StatusClaimed)
 	exp := time.Date(2026, 10, 9, 10, 12, 0, 0, time.UTC)
-	c.Attempt = &app.AttemptView{Seq: 2, StartedAt: exp.Add(-time.Hour), LeaseExpiresAt: exp, LeaseActive: true, Workspace: "/ws/at-d83-2", Branch: "at/at-d83/2"}
+	c.Attempt = &app.AttemptView{Seq: 2, StartedAt: exp.Add(-time.Hour), LeaseExpiresAt: exp, LeaseActive: true, Workspace: "/ws/at-d83-2", Branch: "atask/at-d83"}
 	c.Handoff = &execution.Handoff{LatestNext: "wire the migration", Learnings: []string{"pool size matters"}, TotalLogs: 1, RecentLogs: []execution.RecordedLog{{Seq: 4, AttemptSeq: 1, At: exp.Add(-2 * time.Hour), LogEntry: execution.LogEntry{Done: "schema drafted", Next: "wire the migration", Learned: "pool size matters"}}}}
 	b.Reset()
 	renderShow(&b, c, false)

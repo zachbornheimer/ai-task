@@ -1,4 +1,4 @@
-// Command at is the CLI for the agent-task engine. See `at help`.
+// Command atask is the CLI for the agent-task engine. See `atask help`.
 package main
 
 import (

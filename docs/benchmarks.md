@@ -12,13 +12,13 @@ of 10 tasks, each requiring every task of the previous layer, applied in
 200-operation `Apply` batches. Each benchmark opens a fresh file-backed
 engine.
 
-| Operation | Size | Latency | Notes |
-|---|---|---|---|
-| `Apply` of 200 new tasks (one transaction) | | 12.5 ms | ~60 µs per task incl. key checks |
-| `List(ready)` incl. summary and reconcile | 100 tasks (10 ready) | 6.5 ms | light list rows: group + prerequisites of blocked tasks only |
-| | 1 000 tasks (10 ready) | 63 ms | dominated by the summary's scan of live tasks (~60 µs/row) |
-| `Claim` (automatic, no edges, project without Git) | | 2.2 ms | includes reconcile, candidate query, generation advance, handoff read |
-| CLI process (`at version` / `at list`) | | ~4.5 ms / ~7 ms | measured for the earlier engine; unchanged startup path |
+| Operation                                          | Size                   | Latency         | Notes                                                                 |
+| -------------------------------------------------- | ---------------------- | --------------- | --------------------------------------------------------------------- |
+| `Apply` of 200 new tasks (one transaction)         |                        | 12.5 ms         | ~60 µs per task incl. key checks                                      |
+| `List(ready)` incl. summary and reconcile          | 100 tasks (10 ready)   | 6.5 ms          | light list rows: group + prerequisites of blocked tasks only          |
+|                                                    | 1 000 tasks (10 ready) | 63 ms           | dominated by the summary's scan of live tasks (~60 µs/row)            |
+| `Claim` (automatic, no edges, project without Git) |                        | 2.2 ms          | includes reconcile, candidate query, generation advance, handoff read |
+| CLI process (`atask version` / `atask list`)       |                        | ~4.5 ms / ~7 ms | measured for the earlier engine; unchanged startup path               |
 
 ## Findings that changed the code
 

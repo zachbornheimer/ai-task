@@ -1,14 +1,14 @@
-# at — agent task engine
+# atask — agent task engine
 
 A small, durable, harness-agnostic task/dependency/claim/verification
 engine for AI coding agents. An external application turns a prompt into a
-plan, adversarially revises it, and runs N model workers; `at` stores the
+plan, adversarially revises it, and runs N model workers; `atask` stores the
 graph, atomically hands out eligible work, fences workers with leased
 session tokens, preserves handoffs, and establishes completion only from
 fresh verification. It does not call models.
 
 Go library (`github.com/zachbornheimer/ai-task`, package `at`) with a thin
-CLI (`cmd/at`) over one SQLite file. No daemon, no API keys.
+CLI (`cmd/atask`) over one SQLite file. No daemon, no API keys.
 
 ## Install
 
@@ -16,43 +16,43 @@ Needs Go 1.24 or later and Git. Linux is the tested platform; macOS and
 Windows build but are untested.
 
 ```sh
-go install github.com/zachbornheimer/ai-task/cmd/at@main
-export PATH="$(go env GOPATH)/bin:$PATH"   # if `at` is not found
-at version                                 # the commit you installed, e.g. v0.0.0-20261011…-e83b0eafd593
+go install github.com/zachbornheimer/ai-task/cmd/atask@main
+export PATH="$(go env GOPATH)/bin:$PATH"   # if `atask` is not found
+atask version                                 # the commit you installed, e.g. v0.0.0-20261011…-e83b0eafd593
 ```
 
 There are no release tags yet, so `@main` (or `@latest`, which resolves to
 the same commit) installs the newest commit on `main`. State lives in one
-SQLite file, `~/.local/state/at/at.db` on Linux (`AT_DB` overrides; `at
+SQLite file, `~/.local/state/atask/atask.db` on Linux (`ATASK_DB` overrides; `at
 --help` shows the default), with task worktrees and run logs beside it.
 
 Every repository you use it in needs a Git identity (`git config
-user.name` / `user.email`): agents commit with it, and `at` records the
+user.name` / `user.email`): agents commit with it, and `atask` records the
 merges it makes when the target branch has moved as the same identity,
 with an `At-Task:` trailer.
 
 ## Tour
 
 ```sh
-export AT_OUTPUT=json
-cd my-repo && at init --claude                         # register the repo, install AGENTS.md + CLAUDE.md, and (--claude) the Claude Code hooks
-git add AGENTS.md CLAUDE.md .claude && git commit -m "Install at"   # worktrees and checks see only committed files
-at project --regression-check 'test: go test ./...' \
+export ATASK_OUTPUT=json
+cd my-repo && atask init --claude                         # register the repo, install AGENTS.md + CLAUDE.md, and (--claude) the Claude Code hooks
+git add AGENTS.md CLAUDE.md .claude && git commit -m "Install atask"   # worktrees and checks see only committed files
+atask project --regression-check 'test: go test ./...' \
            --regression-check 'fmt: sh -c "test -z \"$(gofmt -l .)\""'   # trusted gate, required before any claim; checks run without a shell, so shell syntax goes in sh -c
-at doctor                                              # repository, target, identity, regression suite green on the target, worktrees
-at add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
-at add "Fix the typo" --check "unit: go test ./..." --claim   # one small change: add and claim in one step
-at add "Identity Core" --group --key identity
-at add "Confirm OAuth API compatibility" --key compat --parent identity --check "unit: go test ./auth/..."
-at add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
-at list                                                # ○ ◐ ● hierarchy
-cd "$(at claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on at/<id>, token stored inside
-at context                                             # the task as one prompt: contract, checks, workspace, handoff, sibling tasks
-at log --done "..." --next "..."                       # inside the worktree no token is needed; every command renews the lease
-at verify task                                         # diagnostic
+atask doctor                                              # repository, target, identity, regression suite green on the target, worktrees
+atask add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
+atask add "Fix the typo" --check "unit: go test ./..." --claim   # one small change: add and claim in one step
+atask add "Identity Core" --group --key identity
+atask add "Confirm OAuth API compatibility" --key compat --parent identity --check "unit: go test ./auth/..."
+atask add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
+atask list                                                # ○ ◐ ● hierarchy
+cd "$(atask claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on atask/<id>, token stored inside
+atask context                                             # the task as one prompt: contract, checks, workspace, handoff, sibling tasks
+atask log --done "..." --next "..."                       # inside the worktree no token is needed; every command renews the lease
+atask verify task                                         # diagnostic
 # commit in the worktree, then:
-at verify complete                                     # both suites fresh on a snapshot, promote, complete
-at claim --wait                                        # next eligible task, or DONE / STALLED
+atask verify complete                                     # both suites fresh on a snapshot, promote, complete
+atask claim --wait                                        # next eligible task, or DONE / STALLED
 ```
 
 Things that surprise people the first time:
@@ -90,11 +90,11 @@ workers.
 
 ## Using it from your AI systems
 
-`at init` installs the project instruction block into AGENTS.md (read by
+`atask init` installs the project instruction block into AGENTS.md (read by
 Codex, OpenCode and current Claude Code) and a CLAUDE.md that imports it,
 so every request an agent receives in that repository is routed through
-`at`: plan with checks, claim, work in the task worktree, `at verify
-complete`. `at init --claude` adds the Claude Code hooks that make it hold
+`at`: plan with checks, claim, work in the task worktree, `atask verify
+complete`. `atask init --claude` adds the Claude Code hooks that make it hold
 when instructions fade: the plan or task context at session start, edits
 refused outside task worktrees, and no ending a turn with a claimed task
 neither verified nor released. `docs/integrations.md` has the recipe per
@@ -108,7 +108,7 @@ loops.
   groups that never imply edges.
 - One leased attempt per task; tokens stored as digests; stale tokens are
   inert; oldest-eligible deterministic claims; `DONE` / `STALLED` for
-  waiting workers. One worktree per task (`at/<id>`), reused across
+  waiting workers. One worktree per task (`atask/<id>`), reused across
   attempts, carrying the session token so commands run there need none;
   an attempt that never ended has its worktree quarantined on takeover,
   so a stale process can neither act on the task nor reach the branch.

@@ -57,7 +57,7 @@ func (e *Engine) submitForCohort(ctx context.Context, fr finalRun) (VerifyResult
 		res.Message = fmt.Sprintf("submitted for cohort %q; waiting for peers to submit (claim ended)", fr.rec.Task.Cohort)
 		return res, nil
 	case res.Status == task.StatusAwaitingVerification:
-		res.Message = fmt.Sprintf("submitted; cohort %q verification could not finish yet and will be retried by the next verifier (see `at show`)", fr.rec.Task.Cohort)
+		res.Message = fmt.Sprintf("submitted; cohort %q verification could not finish yet and will be retried by the next verifier (see `atask show`)", fr.rec.Task.Cohort)
 		return res, nil
 	}
 	res.Message = "cohort verification failed for this task; it is claimable for repair"

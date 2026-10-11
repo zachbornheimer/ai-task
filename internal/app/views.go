@@ -323,11 +323,11 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		facts := r.Facts(now, p.MaxAttempts)
 		switch {
 		case facts.Unverifiable:
-			v.AttentionReason = "no required task check; add one with `at update --check`"
+			v.AttentionReason = "no required task check; add one with `atask update --check`"
 		case facts.Exhausted:
-			v.AttentionReason = fmt.Sprintf("attempts exhausted (%d failures); `at update --reset-attempts` after fixing the cause", r.Failures)
+			v.AttentionReason = fmt.Sprintf("attempts exhausted (%d failures); `atask update --reset-attempts` after fixing the cause", r.Failures)
 		case facts.WorkspaceBlocked:
-			v.AttentionReason = "workspace unusable: " + r.WorkspaceError + "; fix the worktree and `at claim " + string(t.ID) + "`, or `at update --reset-attempts`"
+			v.AttentionReason = "workspace unusable: " + r.WorkspaceError + "; fix the worktree and `atask claim " + string(t.ID) + "`, or `atask update --reset-attempts`"
 		}
 	}
 	if st == task.StatusAwaitingIntegration {

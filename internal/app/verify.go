@@ -247,7 +247,7 @@ func (e *Engine) runChecksSkipping(ctx context.Context, policy verification.Poli
 // runOpts tunes one suite run: the time budget for the whole suite (0 =
 // none), what the budget is called in messages, and the files the
 // candidate changed against the target, handed to checks as
-// AT_CHANGED_FILES so a regression check can target affected tests.
+// ATASK_CHANGED_FILES so a regression check can target affected tests.
 type runOpts struct {
 	budget     time.Duration
 	budgetName string
@@ -388,7 +388,7 @@ func checkEnv(dir string) []string {
 	flags := "-count=1"
 	for _, kv := range os.Environ() {
 		switch {
-		case strings.HasPrefix(kv, "AT_SESSION="), strings.HasPrefix(kv, "TASKS_SESSION="):
+		case strings.HasPrefix(kv, "ATASK_SESSION="), strings.HasPrefix(kv, "TASKS_SESSION="):
 			continue
 		case strings.HasPrefix(kv, "GOFLAGS="):
 			// An at check can run a suite that itself runs at checks: keep
@@ -409,14 +409,14 @@ func checkEnv(dir string) []string {
 	} else {
 		_ = os.MkdirAll(tmp, 0o700)
 	}
-	return append(env, "GOFLAGS="+flags, "AT_CHECK_DIR="+dir, "TMPDIR="+tmp)
+	return append(env, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+tmp)
 }
 
 // changedFilesEnv writes the candidate's changed paths next to the
 // snapshot and names the file and the target branch for the checks.
 // Always non-nil so execStep can tell a spent budget from "no budget".
 func changedFilesEnv(dir string, opts runOpts) []string {
-	env := []string{"AT_TARGET_BRANCH=" + opts.target}
+	env := []string{"ATASK_TARGET_BRANCH=" + opts.target}
 	tmp := os.TempDir()
 	if dir != "" {
 		tmp = dir + ".tmp"
@@ -424,7 +424,7 @@ func changedFilesEnv(dir string, opts runOpts) []string {
 	}
 	path := filepath.Join(tmp, "at-changed-files")
 	if err := os.WriteFile(path, []byte(strings.Join(opts.changed, "\n")+"\n"), 0o600); err == nil {
-		env = append(env, "AT_CHANGED_FILES="+path)
+		env = append(env, "ATASK_CHANGED_FILES="+path)
 	}
 	return env
 }
@@ -576,9 +576,9 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		case class == classAttempt:
 			res.Message = "task NOT complete: a required check failed; the claim stays live for repair (counted against the attempt budget once)"
 		case code == fault.CodeIntegrationFailed && len(res.Conflicts) > 0:
-			res.Message = fmt.Sprintf("task NOT complete: the submitted revision conflicts with %s (%s); in the worktree run %s, resolve the conflicts, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, strings.Join(res.Conflicts, ", "), integrateStep(fr.proj.TargetBranch))
+			res.Message = fmt.Sprintf("task NOT complete: the submitted revision conflicts with %s (%s); in the worktree run %s, resolve the conflicts, commit, and `atask verify complete` again (not counted as a failure)", fr.proj.TargetBranch, strings.Join(res.Conflicts, ", "), integrateStep(fr.proj.TargetBranch))
 		case code == fault.CodeIntegrationFailed:
-			res.Message = fmt.Sprintf("task NOT complete: the submitted revision could not be promoted to %s; in the worktree run %s, commit, and `at verify complete` again (not counted as a failure)", fr.proj.TargetBranch, integrateStep(fr.proj.TargetBranch))
+			res.Message = fmt.Sprintf("task NOT complete: the submitted revision could not be promoted to %s; in the worktree run %s, commit, and `atask verify complete` again (not counted as a failure)", fr.proj.TargetBranch, integrateStep(fr.proj.TargetBranch))
 		case class == classEnvironment:
 			res.Message = "task NOT complete: the environment stopped the run, not the checks; fix the cause and verify again (not counted as a failure)"
 		default:
@@ -945,10 +945,10 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudg
 	}
 	var parts []string
 	if len(taskIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task, or the code it runs hangs; make the check prove only this outcome, or make it fast first as its own task (`at add \"fast check for ...\" --blocks <task> --check ...`, then `at claim release`) so the slow proof never lands, or have the planner set a larger --size", strings.Join(taskIDs, ", "), size, taskBudget))
+		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task, or the code it runs hangs; make the check prove only this outcome, or make it fast first as its own task (`atask add \"fast check for ...\" --blocks <task> --check ...`, then `atask claim release`) so the slow proof never lands, or have the planner set a larger --size", strings.Join(taskIDs, ", "), size, taskBudget))
 	}
 	if len(regIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (AT_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))
+		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (ATASK_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))
 	}
 	return "task NOT complete: " + strings.Join(parts, "; ") + " (a timeout is never counted against the attempt)"
 }

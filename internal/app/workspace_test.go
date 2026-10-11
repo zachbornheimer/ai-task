@@ -70,7 +70,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 	// Repair the worktree; the explicit claim now succeeds and clears the mark.
-	f.git(s.Workspace, "checkout", "-q", "at/"+string(old))
+	f.git(s.Workspace, "checkout", "-q", "atask/"+string(old))
 	s2, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &old})
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	if f.status(string(z)) != task.StatusNeedsAttention {
 		t.Fatal("not marked")
 	}
-	f.git(sz.Workspace, "checkout", "-q", "at/"+string(z))
+	f.git(sz.Workspace, "checkout", "-q", "atask/"+string(z))
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(z), ResetAttempts: true}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestPruneWorkspaces(t *testing.T) {
 	if _, err := os.Stat(sb.Workspace); err != nil {
 		t.Fatal("live claim's worktree pruned")
 	}
-	if strings.TrimSpace(f.git(f.repo, "branch", "--list", "at/"+string(a))) == "" {
+	if strings.TrimSpace(f.git(f.repo, "branch", "--list", "atask/"+string(a))) == "" {
 		t.Fatal("branch deleted by prune")
 	}
 }

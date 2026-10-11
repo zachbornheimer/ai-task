@@ -50,7 +50,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	// The human form says it too.
 	h := newEnv(t)
 	os.WriteFile(filepath.Join(h.cwd, "lib.go"), []byte("package lib\n"), 0o644)
-	if r := h.runIn(h.cwd, "", []string{"AT_OUTPUT=text"}, "init", "--no-instructions"); !strings.Contains(r.stdout, "untracked") || !strings.Contains(r.stdout, "lib.go") {
+	if r := h.runIn(h.cwd, "", []string{"ATASK_OUTPUT=text"}, "init", "--no-instructions"); !strings.Contains(r.stdout, "untracked") || !strings.Contains(r.stdout, "lib.go") {
 		t.Fatalf("human init output: %s", r.stdout)
 	}
 	// An empty directory has nothing to warn about.

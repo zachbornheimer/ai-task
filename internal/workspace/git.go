@@ -103,7 +103,7 @@ func RequireClean(ctx context.Context, dir string) (GitState, error) {
 }
 
 // gitRetry runs git and retries briefly when it lost a race for one of
-// Git's lock files: many `at` processes claiming at once each add a
+// Git's lock files: many `atask` processes claiming at once each add a
 // worktree to the same repository, and `git worktree add` takes
 // repository-wide locks for a few milliseconds.
 func gitRetry(ctx context.Context, dir string, args ...string) (string, error) {

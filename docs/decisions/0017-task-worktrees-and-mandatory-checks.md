@@ -4,17 +4,17 @@
 
 **Decision.**
 
-- Every project is a Git repository. `at init` runs `git init` (with an
+- Every project is a Git repository. `atask init` runs `git init` (with an
   initial commit) when the directory is not one. Non-Git projects are gone.
-- Every task has one worktree on branch `at/<task-id>`, created from the
+- Every task has one worktree on branch `atask/<task-id>`, created from the
   target branch at the first claim and reused by every later attempt. `at`
   never deletes it; worktree tooling prunes it.
 - The claim stores the session token in the worktree's private Git
-  directory (`.git/worktrees/<name>/at-session`). Commands run inside the
-  worktree find it without `AT_SESSION`; explicit sources still win.
+  directory (`.git/worktrees/<name>/atask-session`). Commands run inside the
+  worktree find it without `ATASK_SESSION`; explicit sources still win.
 - Leases default to 30 minutes (5 minutes to 4 hours). Every authenticated
   command renews the lease, and `init` installs a post-commit hook that
-  runs `at claim renew`, so committing is renewing.
+  runs `atask claim renew`, so committing is renewing.
 - Checks are mandatory: `add` refuses a task without task checks, `update`
   cannot empty them, and `claim` refuses while the project has no
   regression checks (`MISSING_VERIFICATION`). A trivial check is the
@@ -26,7 +26,7 @@
 **Rationale.** Agents lose tokens and forget to renew; a token that lives
 where the agent works and a lease that follows its commits remove both
 failure modes without a side channel. One branch per task is what humans
-and worktree tools expect (`at/<id>`), and reusing it makes a retry start
+and worktree tools expect (`atask/<id>`), and reusing it makes a retry start
 where the last attempt stopped instead of re-deriving it. A task that can
 never complete should never be planned or handed out, so the checks that
 completion depends on are required up front. A new attempt that does not

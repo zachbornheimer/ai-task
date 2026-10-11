@@ -16,6 +16,13 @@ func TestRunnerDrainsGraphWithFakeModel(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("HK", "0")
+	t.Setenv("GIT_AUTHOR_NAME", "at-example")
+	t.Setenv("GIT_AUTHOR_EMAIL", "at@example")
+	t.Setenv("GIT_COMMITTER_NAME", "at-example")
+	t.Setenv("GIT_COMMITTER_EMAIL", "at@example")
 	repo := filepath.Join(t.TempDir(), "repo")
 	os.MkdirAll(repo, 0o755)
 	if err := initRepo(repo); err != nil {

@@ -39,16 +39,19 @@ func (e *ConflictError) Error() string {
 func (e *ConflictError) Unwrap() error { return e.Err }
 
 // Manager performs Git worktree operations for one repository. Every task
-// gets one branch (`at/<id>`) and one worktree, reused across attempts so
-// uncommitted work survives a crash; final verification runs in a detached
-// snapshot of the exact revision; promotion is a two-phase merge (prepare a
-// candidate, then compare-and-swap the target) so a failing candidate never
-// moves the target.
+// gets one branch (`atask/<id>`) and one worktree created through
+// Worktrunk, reused across attempts so uncommitted work survives a crash;
+// final verification runs in a detached snapshot of the exact revision;
+// promotion is a two-phase merge (prepare a candidate, then
+// compare-and-swap the target) so a failing candidate never moves the
+// target.
 type Manager struct {
 	// Repo is the main worktree root of the repository.
 	Repo string
-	// Root is the directory that holds task worktrees and snapshots.
+	// Root is the directory that holds snapshots and quarantined trees.
 	Root string
+	// Switch creates live task worktrees. Nil means WorktrunkSwitcher{}.
+	Switch Switcher
 }
 
 // Info describes a task worktree.
@@ -65,29 +68,38 @@ type Info struct {
 	Quarantined string
 }
 
-// TaskBranch names the branch of a task.
-func TaskBranch(taskID string) string { return "at/" + taskID }
+func (m Manager) switcher() Switcher {
+	if m.Switch != nil {
+		return m.Switch
+	}
+	return WorktrunkSwitcher{}
+}
 
-// EnsureTask creates the task's worktree on branch at/<id> from base (a
-// branch name or revision) or reuses it when it already exists.
+// TaskBranch names the branch of a task.
+func TaskBranch(taskID string) string { return "atask/" + taskID }
+
+// EnsureTask creates the task's worktree on branch atask/<id> from base
+// (a branch name or revision) via Worktrunk, or reuses it when it
+// already exists.
 //
 // quarantineSeq is the sequence number of a previous attempt that did not
 // end cleanly (lease expired, process possibly still alive), or 0. When
 // set and the worktree exists, the worktree is moved aside to
 // <path>.stale-<seq> with HEAD detached, and a fresh worktree on the same
-// branch takes its place at the task path. The stale process keeps its
-// files and its own Git directory (with its own, expired, token) and can
-// no longer reach the branch or the new attempt's files.
+// branch is created at Worktrunk's template path. The stale process keeps
+// its files and its own Git directory (with its own, expired, token) and
+// can no longer reach the branch or the new attempt's files.
 func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, quarantineSeq int) (Info, error) {
-	info := Info{Path: filepath.Join(m.Root, taskID), Branch: TaskBranch(taskID)}
+	info := Info{Branch: TaskBranch(taskID)}
 	if err := os.MkdirAll(m.Root, 0o755); err != nil {
 		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create workspace root")
 	}
-	if _, err := os.Stat(filepath.Join(info.Path, ".git")); err == nil {
-		head, err := git(ctx, info.Path, "rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil || strings.TrimSpace(head) != info.Branch {
-			return info, fault.New(fault.CodeWorkspaceUnavailable, "%s exists but is not the worktree for %s", info.Path, info.Branch)
-		}
+	existing, err := m.worktreeFor(ctx, info.Branch)
+	if err != nil {
+		return info, err
+	}
+	if existing != "" {
+		info.Path = existing
 		if st, err := Inspect(ctx, info.Path); err == nil {
 			info.Dirty = !st.Clean()
 		}
@@ -102,32 +114,21 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "detach quarantined worktree %s", stale)
 		}
 		info.Quarantined = stale
-		// The branch is free again; attach a fresh worktree below.
+		info.Path = ""
 	}
-	// Two idempotent steps instead of `worktree add -b`: under concurrent
-	// claims Git can create the branch and then fail on another
-	// worktree's half-written metadata, and a retry of `-b` would then
-	// refuse because the branch exists.
-	if !m.BranchExists(ctx, info.Branch) {
-		if _, err := gitRetry(ctx, m.Repo, "branch", info.Branch, base); err != nil && !m.BranchExists(ctx, info.Branch) {
-			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create branch %s from %s", info.Branch, base)
-		}
+	create := !m.BranchExists(ctx, info.Branch)
+	path, err := m.switcher().Ensure(ctx, m.Repo, info.Branch, base, create)
+	if err != nil {
+		return info, err
 	}
-	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", info.Path, info.Branch); err != nil {
-		// A retried add may have registered the worktree before failing.
-		if CurrentBranch(ctx, info.Path) == info.Branch {
-			return info, nil
+	info.Path = path
+	if head := CurrentBranch(ctx, info.Path); head != info.Branch {
+		return info, fault.New(fault.CodeWorkspaceUnavailable, "%s exists but is not the worktree for %s (HEAD is %q)", info.Path, info.Branch, head)
+	}
+	if !info.Dirty {
+		if st, err := Inspect(ctx, info.Path); err == nil {
+			info.Dirty = !st.Clean()
 		}
-		// A worktree deleted outside Git leaves a stale registration that
-		// pins the branch; prune only then (an unconditional prune races
-		// with other processes' half-created worktrees).
-		if msg := err.Error(); strings.Contains(msg, "already checked out") || strings.Contains(msg, "already registered") || strings.Contains(msg, "already used by worktree") {
-			_, _ = git(ctx, m.Repo, "worktree", "prune")
-			if _, err2 := gitRetry(ctx, m.Repo, "worktree", "add", info.Path, info.Branch); err2 == nil || CurrentBranch(ctx, info.Path) == info.Branch {
-				return info, nil
-			}
-		}
-		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "attach worktree for %s", info.Branch)
 	}
 	return info, nil
 }
@@ -142,7 +143,13 @@ func (m Manager) BranchExists(ctx context.Context, branch string) bool {
 // directory, and the live worktree too unless keepLive. Branches are
 // kept. It is best-effort and reports the directories removed.
 func (m Manager) Prune(ctx context.Context, taskID string, keepLive bool) ([]string, error) {
-	live := filepath.Join(m.Root, taskID)
+	live, err := m.worktreeFor(ctx, TaskBranch(taskID))
+	if err != nil {
+		return nil, err
+	}
+	if live == "" {
+		live = filepath.Join(m.Root, taskID)
+	}
 	matches, _ := filepath.Glob(live + ".stale-*")
 	if !keepLive {
 		if _, err := os.Stat(live); err == nil {
@@ -408,6 +415,9 @@ func (m Manager) worktreeFor(ctx context.Context, branch string) (string, error)
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			path = strings.TrimPrefix(line, "worktree ")
+			if resolved, err := filepath.EvalSymlinks(path); err == nil {
+				path = resolved
+			}
 		case line == "branch refs/heads/"+branch:
 			return path, nil
 		}
@@ -454,7 +464,7 @@ func InitRepo(ctx context.Context, dir string) (bool, error) {
 // the repository's Git identity; only when Git has none does it fall back
 // to "at", so creating a project never fails for want of one.
 func rootCommit(ctx context.Context, dir string) error {
-	args := []string{"commit", "-q", "--allow-empty", "-m", "at: initialize repository"}
+	args := []string{"commit", "-q", "--allow-empty", "-m", "chore: initialize repository"}
 	if _, err := Identity(ctx, dir); err != nil {
 		args = append([]string{"-c", "user.name=at", "-c", "user.email=at@localhost"}, args...)
 	}

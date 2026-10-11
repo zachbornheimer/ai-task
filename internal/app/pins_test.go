@@ -14,7 +14,7 @@ import (
 // TestPinnedPathsCannotChange: a task that pins a path cannot complete
 // after changing it, the failure is the attempt's own (a strike), and
 // reverting the change lets it complete. Directory pins cover their
-// contents; the pin is part of the contract (`at show` carries it).
+// contents; the pin is part of the contract (`atask show` carries it).
 func TestPinnedPathsCannotChange(t *testing.T) {
 	f := newGitFixture(t)
 	os.MkdirAll(filepath.Join(f.repo, "checks"), 0o755)

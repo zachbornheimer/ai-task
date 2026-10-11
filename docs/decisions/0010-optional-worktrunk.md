@@ -1,6 +1,6 @@
 # ADR 0010: Optional Worktrunk, no mandatory worktree coupling
 
-**Status:** accepted (implementation in Milestone 3)
+**Status:** Superseded by [ADR-0019](0019-required-worktrunk.md)
 
 **Decision.** A small `Workspace` boundary (`Ensure`, `Inspect`, `Revision`)
 with three implementations: Worktrunk adapter (`wt switch -c task-<id>`, `wt

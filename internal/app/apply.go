@@ -428,7 +428,7 @@ func (a *applier) authorizeEligibilityChange(target sqlite.Record) error {
 		}
 		return fault.New(fault.CodeSessionSuperseded, "session does not hold %s", target.Task.ID)
 	}
-	return fault.New(fault.CodePlanConflict, "%s is claimed; changing its prerequisites needs its session token (AT_SESSION) or planner authority (--planner)", target.Task.ID)
+	return fault.New(fault.CodePlanConflict, "%s is claimed; changing its prerequisites needs its session token (ATASK_SESSION) or planner authority (--planner)", target.Task.ID)
 }
 
 func (a *applier) insertEdges(ctx context.Context, edges []dependency.Edge) error {

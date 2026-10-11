@@ -19,7 +19,7 @@ import (
 
 // Context is one task's working context for a coding agent: the prompt a
 // host hands the agent, plus the facts it was built from. The text is the
-// same for every harness; the agent only needs a shell with `at` on PATH.
+// same for every harness; the agent only needs a shell with `atask` on PATH.
 type Context struct {
 	Prompt       string                   `json:"prompt"`
 	Project      project.ID               `json:"project"`
@@ -147,7 +147,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 // of the plan and what to do next (claim, or plan).
 func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules bool) (Context, error) {
 	if pid == "" {
-		return Context{}, fault.New(fault.CodeNoProject, "no project here: run `at init` in the repository, or pass --project")
+		return Context{}, fault.New(fault.CodeNoProject, "no project here: run `atask init` in the repository, or pass --project")
 	}
 	proj, err := e.Project(ctx, pid)
 	if err != nil {
@@ -176,11 +176,11 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	w.WriteString(".\n")
 	switch {
 	case sum.Total == 0:
-		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`at add \"title\" --check \"id: cmd\"`, several at once with `at add -f plan.yaml` or `--plan`), then claim one. `at add ... --claim` adds and claims a single task in one step. Run `at doctor` first in a repository you have not worked in.\n")
+		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`atask add \"title\" --check \"id: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step. Run `atask doctor` first in a repository you have not worked in.\n")
 	case sum.Done:
-		w.WriteString("Every task is complete. New work needs new tasks (`at add`).\n")
+		w.WriteString("Every task is complete. New work needs new tasks (`atask add`).\n")
 	case len(c.Claimable) > 0:
-		w.WriteString("Claimable now (`at claim <id>`, or `at claim --wait` for the oldest):\n")
+		w.WriteString("Claimable now (`atask claim <id>`, or `atask claim --wait` for the oldest):\n")
 		for _, r := range c.Claimable {
 			fmt.Fprintf(&w, "- %s %s\n", r.ID, r.Title)
 		}
@@ -190,9 +190,9 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 			fmt.Fprintf(&w, "- %s\n", r)
 		}
 	default:
-		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `at claim --wait` blocks until something is.\n")
+		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `atask claim --wait` blocks until something is.\n")
 	}
-	fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `at context` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+	fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask context` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
 	c.Prompt = w.String()
 	if withRules {
 		c.Prompt += "\n" + Rules
@@ -229,14 +229,14 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	w.WriteString("Done when `at verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n")
+	w.WriteString("Done when `atask verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n")
 	size := v.Size
 	if size == "" {
 		size = task.SizeSmall
 	}
-	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get AT_CHANGED_FILES (a file listing the paths this change touched) and AT_TARGET_BRANCH.\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size, budgetLabelFor(c.Budgets.RegressionBudget()))
+	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size, budgetLabelFor(c.Budgets.RegressionBudget()))
 	if len(v.Checks) > 0 {
-		w.WriteString("Task checks (`at verify task`):\n")
+		w.WriteString("Task checks (`atask verify task`):\n")
 		for _, ch := range v.Checks {
 			req := "required"
 			if !ch.Required {
@@ -247,9 +247,9 @@ func renderContext(c Context) string {
 		w.WriteString("\n")
 	}
 	if len(v.Pins) > 0 {
-		fmt.Fprintf(&w, "Pinned (this task may not change them; `at verify complete` refuses if it did): %s\n\n", strings.Join(v.Pins, ", "))
+		fmt.Fprintf(&w, "Pinned (this task may not change them; `atask verify complete` refuses if it did): %s\n\n", strings.Join(v.Pins, ", "))
 	}
-	w.WriteString("Regression checks (`at verify regression`):\n")
+	w.WriteString("Regression checks (`atask verify regression`):\n")
 	for _, ch := range c.Regression {
 		fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, shellJoin(ch.Command))
 	}
@@ -283,7 +283,7 @@ func renderContext(c Context) string {
 		case task.StatusComplete:
 			fmt.Fprintf(&w, "This task is complete (revision %s); nothing is left to do.\n", short(v.CompletedRevision))
 		case task.StatusReady, task.StatusInterrupted, task.StatusVerificationFailed:
-			fmt.Fprintf(&w, "Nobody holds this task; `at claim %s` gives you a workspace.\n", v.ID)
+			fmt.Fprintf(&w, "Nobody holds this task; `atask claim %s` gives you a workspace.\n", v.ID)
 		default:
 			fmt.Fprintf(&w, "This task is %s and cannot be claimed right now.\n", v.Status)
 		}
@@ -322,7 +322,7 @@ func renderState(w *strings.Builder, c Context) {
 		fmt.Fprintf(w, "- learned on prerequisite %s: %s\n", l.TaskID, l.Learned)
 	}
 	if f := h.LastFailure; f != nil {
-		fmt.Fprintf(w, "Last `at verify %s`: %s\n", f.Mode, f.Summary)
+		fmt.Fprintf(w, "Last `atask verify %s`: %s\n", f.Mode, f.Summary)
 		for _, ch := range f.Checks {
 			fmt.Fprintf(w, "- %s %s", ch.CheckID, ch.Outcome)
 			if ch.Message != "" {
@@ -368,7 +368,7 @@ Complete one independently verifiable task at a time.
 
 Start
 
-- Run ` + "`at context`" + ` before working. Review the handoff, the existing changes and ` + "`git status`" + ` before editing; preserve useful prior work.
+- Run ` + "`atask context`" + ` before working. Review the handoff, the existing changes and ` + "`git status`" + ` before editing; preserve useful prior work.
 - Work only in the assigned workspace. The session token is stored there, so ` + "`at`" + ` commands run there need no token.
 - Do not implement other tasks.
 
@@ -376,22 +376,22 @@ Execute
 
 - Implement the outcome and satisfy its acceptance criteria.
 - The checks are the contract: never weaken, skip or bypass a check or the tests it runs.
-- Iterate with ` + "`at verify task`" + ` and ` + "`at verify regression`" + ` (diagnostic; they never complete anything).
-- Record progress with ` + "`at log --done \"...\" --next \"...\" --learned \"...\"`" + `; ` + "`--next`" + ` is what the next attempt reads first.
+- Iterate with ` + "`atask verify task`" + ` and ` + "`atask verify regression`" + ` (diagnostic; they never complete anything).
+- Record progress with ` + "`atask log --done \"...\" --next \"...\" --learned \"...\"`" + `; ` + "`--next`" + ` is what the next attempt reads first.
 - The lease lasts 30 minutes and every ` + "`at`" + ` command renews it; log before it runs out.
-- On LEASE_EXPIRED or SESSION_SUPERSEDED, stop editing immediately. The next ` + "`at claim <task>`" + ` returns your handoff.
+- On LEASE_EXPIRED or SESSION_SUPERSEDED, stop editing immediately. The next ` + "`atask claim <task>`" + ` returns your handoff.
 
 Complete
 
-- Commit before ` + "`at verify complete`" + ` (` + "`wt step commit`" + ` where Worktrunk is installed, plain git otherwise). The tree must be clean; nothing is committed for you.
-- You never set status. Only a passing ` + "`at verify complete`" + ` completes the task: it runs every required task check and regression check fresh on the committed revision, then promotes the branch to the target. When the target had moved it merges for you and reports ` + "`integrated_revision`" + `.
+- Commit before ` + "`atask verify complete`" + ` (` + "`wt step commit`" + ` where Worktrunk is installed, plain git otherwise). The tree must be clean; nothing is committed for you.
+- You never set status. Only a passing ` + "`atask verify complete`" + ` completes the task: it runs every required task check and regression check fresh on the committed revision, then promotes the branch to the target. When the target had moved it merges for you and reports ` + "`integrated_revision`" + `.
 - On VERIFICATION_FAILED, read ` + "`error.details`" + `, fix the cause, commit, verify again. Your claim stays live.
 - On INTEGRATION_FAILED, the target moved against you: ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve ` + "`error.details.conflicts`" + `, commit, verify again. It is not counted against you.
-- If completion depends on work that is not yours: ` + "`at add \"prereq\" --blocks <task> --check \"id: cmd\"`" + `, ` + "`at log`" + ` the handoff, ` + "`at claim release`" + `. Do not implement the blocking task.
+- If completion depends on work that is not yours: ` + "`atask add \"prereq\" --blocks <task> --check \"id: cmd\"`" + `, ` + "`atask log`" + ` the handoff, ` + "`atask claim release`" + `. Do not implement the blocking task.
 
 Exit
 
-- ` + "`at claim --wait`" + ` ends with DONE (everything is complete) or STALLED (a planner is needed); both are normal exits for a worker loop.
+- ` + "`atask claim --wait`" + ` ends with DONE (everything is complete) or STALLED (a planner is needed); both are normal exits for a worker loop.
 - Never claim success without a passing final verification.
 `
 

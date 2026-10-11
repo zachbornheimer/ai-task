@@ -312,20 +312,20 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	s.Stalled = (s.Open > 0 || epicsFailed > 0 || epicsErrored > 0) && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
 	if s.Stalled {
 		if epicsFailed > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d epic(s) failed their own checks on the current target; see the group's last_error, then add follow-up member tasks or fix the checks (`at update <group> --check ...`)", epicsFailed))
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d epic(s) failed their own checks on the current target; see the group's last_error, then add follow-up member tasks or fix the checks (`atask update <group> --check ...`)", epicsFailed))
 		}
 		s.Reasons = append(s.Reasons, epicErrors...)
 		if exhausted > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `at update <task> --reset-attempts`", exhausted))
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `atask update <task> --reset-attempts`", exhausted))
 		}
 		if workspaceBlocked > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have an unusable workspace; fix the worktree and `at claim <task>`, or `at update <task> --reset-attempts`", workspaceBlocked))
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have an unusable workspace; fix the worktree and `atask claim <task>`, or `atask update <task> --reset-attempts`", workspaceBlocked))
 		}
 		if cohortsStuck > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort(s) keep failing to promote; see the members' last_error", cohortsStuck))
 		}
 		if unverifiable > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `at update <task> --check ...`", unverifiable))
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `atask update <task> --check ...`", unverifiable))
 		}
 		if c := s.Counts[task.StatusAwaitingVerification]; c > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort member(s) await peers that cannot progress", c))

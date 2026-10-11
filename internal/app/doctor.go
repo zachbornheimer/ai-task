@@ -72,7 +72,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 
 	// Repository.
 	if st, err := os.Stat(p.RootPath); err != nil || !st.IsDir() {
-		add("repository", false, "error", fmt.Sprintf("project root %s is not a directory", p.RootPath), "restore the checkout or re-register the project with `at init --path`")
+		add("repository", false, "error", fmt.Sprintf("project root %s is not a directory", p.RootPath), "restore the checkout or re-register the project with `atask init --path`")
 		return rep, nil
 	}
 	if out, err := exec.CommandContext(ctx, "git", "-C", p.RootPath, "rev-parse", "--is-inside-work-tree").CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "true" {
@@ -81,10 +81,16 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 	}
 	add("repository", true, "info", fmt.Sprintf("Git repository at %s", p.RootPath), "")
 
+	if _, err := exec.LookPath("wt"); err != nil {
+		add("worktrunk", false, "error", "Worktrunk (wt) is not on PATH; task worktrees cannot be created", "install Worktrunk from https://worktrunk.dev and put `wt` on PATH")
+	} else {
+		add("worktrunk", true, "info", "Worktrunk (wt) is on PATH; task worktrees follow worktree-path", "")
+	}
+
 	// Target branch.
 	rev, err := mgr.Revision(ctx, "refs/heads/"+p.TargetBranch)
 	if err != nil {
-		add("target_branch", false, "error", fmt.Sprintf("target branch %s does not exist", p.TargetBranch), fmt.Sprintf("create it (`git branch %s`) or set another with `at project --target-branch`", p.TargetBranch))
+		add("target_branch", false, "error", fmt.Sprintf("target branch %s does not exist", p.TargetBranch), fmt.Sprintf("create it (`git branch %s`) or set another with `atask project --target-branch`", p.TargetBranch))
 	} else {
 		rep.TargetRevision = rev
 		add("target_branch", true, "info", fmt.Sprintf("target %s at %s", p.TargetBranch, short(rev)), "")
@@ -149,7 +155,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 			switch {
 			case len(failed) > 0:
 			case budget > 0 && took > budget:
-				add("regression_budget", false, "error", fmt.Sprintf("the regression suite took %s on %s, over the %s budget; `verify complete` would time out for every task", took, p.TargetBranch, budget), "narrow the gate to affected tests (checks get AT_CHANGED_FILES), move the full suite to CI or an epic check, or raise `at project --regression-budget`")
+				add("regression_budget", false, "error", fmt.Sprintf("the regression suite took %s on %s, over the %s budget; `verify complete` would time out for every task", took, p.TargetBranch, budget), "narrow the gate to affected tests (checks get ATASK_CHANGED_FILES), move the full suite to CI or an epic check, or raise `atask project --regression-budget`")
 			case budget > 0 && took*2 > budget:
 				add("regression_budget", false, "warning", fmt.Sprintf("the regression suite took %s, more than half of the %s budget; CI machines are slower", took, budget), "speed the gate up before it starts timing out")
 			default:

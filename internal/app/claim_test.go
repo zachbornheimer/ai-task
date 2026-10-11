@@ -310,7 +310,7 @@ func TestHandoffCarriesPrerequisiteLearningsAndLastFailure(t *testing.T) {
 	if sc2.QuarantinedWorkspace != "" || workspace.LoadToken(f.ctx, sc2.Workspace) != string(sc2.Token) {
 		t.Fatalf("clean handoff: %+v", sc2)
 	}
-	if _, err := os.Stat(filepath.Join(sc2.Workspace, "at-session")); err == nil {
+	if _, err := os.Stat(filepath.Join(sc2.Workspace, "atask-session")); err == nil {
 		t.Fatal("token stored inside the tree")
 	}
 }
@@ -358,7 +358,7 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	// never reach the task branch or B's files.
 	tip := strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "HEAD"))
 	f.commit(stale, "late.txt", "committed by A after takeover")
-	if strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "HEAD")) != tip || strings.TrimSpace(f.git(stale, "rev-parse", "refs/heads/at/"+string(a))) != tip {
+	if strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "HEAD")) != tip || strings.TrimSpace(f.git(stale, "rev-parse", "refs/heads/atask/"+string(a))) != tip {
 		t.Fatal("stale attempt moved the task branch")
 	}
 	if _, err := os.Stat(filepath.Join(sB.Workspace, "late.txt")); err == nil {

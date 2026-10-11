@@ -15,7 +15,7 @@ import (
 )
 
 // planItem is one task or group in a plan file. The field names are the
-// ones `at show` prints, so a planner can read the plan out and write it
+// ones `atask show` prints, so a planner can read the plan out and write it
 // back in the same vocabulary.
 type planItem struct {
 	Kind           string      `json:"kind"` // task (default) | group
