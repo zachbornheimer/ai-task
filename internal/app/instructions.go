@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,30 +162,36 @@ func InstallInstructions(root string) (InstallResult, error) {
 	return res, nil
 }
 
-func underRoot(root, name string) (string, error) {
-	root = filepath.Clean(root)
-	path := filepath.Join(root, name)
-	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("refusing path %q outside %q", name, root)
-	}
-	return path, nil
-}
-
 func writeUnder(root, name string, data []byte) error {
-	path, err := underRoot(root, name)
+	dir, err := os.OpenRoot(root)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	defer dir.Close()
+	f, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
 }
 
 func readUnder(root, name string) ([]byte, error) {
-	path, err := underRoot(root, name)
+	dir, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(path)
+	defer dir.Close()
+	f, err := dir.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 // ClaudeHooks are the Claude Code hooks `atask init --claude` installs: the
