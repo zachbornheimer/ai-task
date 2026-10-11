@@ -23,7 +23,8 @@ const (
 // verbs, and the execution contract. `atask init` installs it into
 // AGENTS.md between the markers and keeps it current on re-runs.
 func Instructions() string {
-	return `# Working with ` + "`atask`" + ` (for coding agents)
+	return `
+# Working with ` + "`atask`" + ` (for coding agents)
 
 ` + "`atask`" + ` is the task engine for this repository: it hands you one claimed task
 at a time, remembers what the previous attempt learned, and decides

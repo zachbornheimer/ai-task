@@ -393,6 +393,7 @@ Exit
 
 - ` + "`atask claim --wait`" + ` ends with DONE (everything is complete) or STALLED (a planner is needed); both are normal exits for a worker loop.
 - Never claim success without a passing final verification.
+
 `
 
 func budgetLabelFor(d time.Duration) string {
