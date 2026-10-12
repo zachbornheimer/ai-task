@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,7 +110,7 @@ func TestListTagsProjectOnMixedBoard(t *testing.T) {
 	}
 }
 
-func TestCommentIsLogNote(t *testing.T) {
+func TestCommentIsNotACommand(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "at.db")
 	cwd := t.TempDir()
 	getenv := func(k string) string {
@@ -122,71 +121,22 @@ func TestCommentIsLogNote(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   []string{"--json", "add", "claimed note", "--check", "u: true", "--claim"},
+		Args:   []string{"comment", "agents type this"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &out,
 		Stderr: &errb,
 		Cwd:    cwd,
 		Getenv: getenv,
 	})
-	if code != ExitOK {
-		t.Fatalf("add --claim: %d %s", code, errb.String())
+	if code == ExitOK {
+		t.Fatalf("comment must not be a command")
 	}
-	var env struct {
-		OK     bool `json:"ok"`
-		Result struct {
-			Task struct {
-				ID string `json:"id"`
-			} `json:"task"`
-			Session struct {
-				Token string `json:"token"`
-			} `json:"session"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil || env.Result.Session.Token == "" || env.Result.Task.ID == "" {
-		t.Fatalf("claim token: %v %s", err, out.String())
-	}
-	token := env.Result.Session.Token
-	id := env.Result.Task.ID
-	withTok := func(k string) string {
-		if k == "ATASK_SESSION" {
-			return token
-		}
-		return getenv(k)
-	}
-	var cOut, cErr bytes.Buffer
-	code = Main(Env{
-		Args:   []string{"comment", "agents type this"},
-		Stdin:  strings.NewReader(""),
-		Stdout: &cOut,
-		Stderr: &cErr,
-		Cwd:    cwd,
-		Getenv: withTok,
-	})
-	if code != ExitOK {
-		t.Fatalf("comment: %d %s", code, cErr.String())
-	}
-	if !strings.Contains(cOut.String(), "Logged") {
-		t.Fatalf("comment ack:\n%s", cOut.String())
-	}
-	var sOut, sErr bytes.Buffer
-	code = Main(Env{
-		Args:   []string{"show", id, "--full"},
-		Stdin:  strings.NewReader(""),
-		Stdout: &sOut,
-		Stderr: &sErr,
-		Cwd:    cwd,
-		Getenv: getenv,
-	})
-	if code != ExitOK {
-		t.Fatalf("show: %d %s", code, sErr.String())
-	}
-	if !strings.Contains(sOut.String(), "agents type this") {
-		t.Fatalf("comment should land as a note:\n%s", sOut.String())
+	if !strings.Contains(errb.String(), `unknown command "comment"`) {
+		t.Fatalf("comment unknown:\n%s", errb.String())
 	}
 }
 
-func TestReadyListsClaimable(t *testing.T) {
+func TestReadyIsNotACommand(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "at.db")
 	cwd := t.TempDir()
 	getenv := func(k string) string {
@@ -195,19 +145,19 @@ func TestReadyListsClaimable(t *testing.T) {
 		}
 		return ""
 	}
-	run := func(args ...string) (int, string, string) {
-		var out, errb bytes.Buffer
-		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
-		return code, out.String(), errb.String()
+	var out, errb bytes.Buffer
+	code := Main(Env{
+		Args:   []string{"ready"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &out,
+		Stderr: &errb,
+		Cwd:    cwd,
+		Getenv: getenv,
+	})
+	if code == ExitOK {
+		t.Fatalf("ready must not be a command")
 	}
-	if code, _, errOut := run("add", "claimable work", "--check", "u: true"); code != ExitOK {
-		t.Fatalf("add: %d %s", code, errOut)
-	}
-	code, out, errOut := run("ready")
-	if code != ExitOK {
-		t.Fatalf("ready: %d %s", code, errOut)
-	}
-	if !strings.Contains(out, "claimable work") {
-		t.Fatalf("ready should list claimable tasks:\n%s", out)
+	if !strings.Contains(errb.String(), `unknown command "ready"`) {
+		t.Fatalf("ready unknown:\n%s", errb.String())
 	}
 }

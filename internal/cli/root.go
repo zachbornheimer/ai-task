@@ -329,7 +329,7 @@ func (c *ctxt) printHelp(w io.Writer) {
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
 	fmt.Fprintln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
-	fmt.Fprintln(w, "Agent verbs: claim, log, comment, verify task|regression|complete, claim release|renew. Planning: add, update, show, list, ready, status.")
+	fmt.Fprintln(w, "Agent verbs: claim, log, verify task|regression|complete, claim release|renew. Planning: add, update, show, list.")
 }
 
 var commands = map[string]command{}
