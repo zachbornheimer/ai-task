@@ -47,7 +47,7 @@ func TestEmptyChecksFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	emptyPol, _ := json.Marshal(verification.Policy{TaskChecks: okChecks()})
 	if _, err := db.Exec(`UPDATE tasks SET policy_json = ? WHERE id = ?`, string(emptyPol), a); err != nil {
 		t.Fatal(err)

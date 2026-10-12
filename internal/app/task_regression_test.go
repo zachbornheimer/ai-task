@@ -33,7 +33,7 @@ func TestTaskRequiresRegressionAndCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { _ = st.Close() })
 	id := res.Created["both"]
 	var rec sqlite.Record
 	if err := st.Read(f.ctx, func(tx *sqlite.Tx) error {

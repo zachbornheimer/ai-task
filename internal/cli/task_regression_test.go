@@ -37,7 +37,7 @@ func TestTaskRequiresRegressionAndCompletion(t *testing.T) {
 	var env struct {
 		Result struct {
 			Task struct {
-				ID           string `json:"id"`
+				ID           string                `json:"id"`
 				TaskChecks   []struct{ ID string } `json:"task_checks"`
 				Verification struct {
 					Regression []struct {
