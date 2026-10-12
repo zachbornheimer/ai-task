@@ -15,8 +15,11 @@ calls a model; the harness does.
 | Task turn            | outcome, constraints, acceptance, checks, workspace, state, handoff | `atask context ID` (worker handoff); `atask show` for the current claim; `atask list` for the plan                                                    |
 
 The project file is the lever: it says that any change starts with the
-plan, that questions are not tasks, and that the target branch is never
-edited directly. Hooks make it hold when a long session forgets.
+plan, that questions are not tasks, and that git-backed work is never
+edited on the target branch. Optional SessionStart only injects the
+current live claim. Grok ignores SessionStart stdout; do not treat hook
+JSON as proof the model saw it. Host loops export `ATASK_SESSION` and
+heartbeat the lease.
 
 ## Setup, once per repository
 
@@ -61,7 +64,7 @@ as above without hooks. Headless: `examples/hosts/codex.sh` (`codex exec
 
 OpenCode reads `AGENTS.md`; `examples/hosts/opencode.sh` drives `opencode
 run`. Grok reads `AGENTS.md`; `examples/hosts/grok.sh` drives
-`grok --always-approve --output-format text` with `atask context ID` as the
+`grok --always-approve --output-format plain -p` with `atask context ID` as the
 prompt. For any other harness, `examples/hosts/custom.sh` takes
 `AGENT_CMD`: the command receives the worker handoff (`atask context ID`) on stdin with
 `ATASK_SESSION` exported and must work in the printed workspace. For a bare

@@ -224,10 +224,14 @@ stored acknowledgement.
 **Context.** `atask context` with no arguments prints the agent operating
 contract as one block of text (JSON: `prompt`). It needs no project,
 database, or session. `atask context ID` is the worker handoff for that
-task: objective, acceptance, checks, blockers, worktree, and how
-completion is decided. A completed task's handoff reports that it is
-done and issues no new work. Discover work with `atask list`; inspect a
-task with `atask show` (no argument: the current claim).
+task: objective, acceptance, checks, blockers, workspace, and how
+completion is decided. Git-backed tasks get commit and promotion
+instructions. Unscoped tasks get live-directory check instructions and
+no git commands. Unscoped verification proves a command passed; it does
+not independently prove research accuracy or document quality. A
+completed task's handoff reports that it is done and issues no new work.
+Discover work with `atask list`; inspect a task with `atask show` (no
+argument: the current live claim).
 
 **Installing the instructions.** `atask init` registers the repository and
 installs the project instruction block (`app.Instructions`: one paragraph

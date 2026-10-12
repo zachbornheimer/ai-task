@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	register("hook", "host adapter (not an agent verb): atask hook session-start | guard-edit | stop", runHook)
+	registerHidden("hook", "host adapter (not an agent verb): atask hook session-start | guard-edit | stop", runHook)
 }
 
 // hookInput is the subset of Claude Code's hook JSON the hooks read.

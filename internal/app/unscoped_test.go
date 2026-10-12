@@ -2,13 +2,17 @@ package app_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
 func openBoard(t *testing.T) (*app.Engine, context.Context) {
@@ -138,4 +142,64 @@ func TestGlobalListIncludesUnscopedAndNamed(t *testing.T) {
 		t.Fatalf("board-wide summary should count both projects: %+v", sum)
 	}
 	_ = project.UnscopedID
+}
+
+func TestUnscopedWaitingClaimReturnsDoneOnEmptyBoard(t *testing.T) {
+	e, ctx := openBoard(t)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, err := e.Claim(ctx, app.ClaimRequest{Wait: true})
+	if !errors.Is(err, app.ErrDone) {
+		t.Fatalf("empty unscoped wait: %v", err)
+	}
+}
+
+func TestUnscopedWaitingClaimReturnsDoneAfterComplete(t *testing.T) {
+	e, ctx := openBoard(t)
+	p, err := e.EnsureUnscoped(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.Apply(ctx, plan.ChangeSet{ProjectID: p.ID, Operations: []plan.Change{plan.AddTask{Title: "unscoped wait", TaskChecks: okChecks()}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.Created["#0"]
+	s, err := e.Claim(ctx, app.ClaimRequest{TaskID: &id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Verify(ctx, s.Token, verification.ModeComplete); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, err = e.Claim(ctx, app.ClaimRequest{Wait: true})
+	if !errors.Is(err, app.ErrDone) {
+		t.Fatalf("completed unscoped wait: %v", err)
+	}
+}
+
+func TestUnscopedContextOmitsGitInstructions(t *testing.T) {
+	e, ctx := openBoard(t)
+	p, err := e.EnsureUnscoped(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.Apply(ctx, plan.ChangeSet{ProjectID: p.ID, Operations: []plan.Change{plan.AddTask{Title: "research note", TaskChecks: okChecks()}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cx, err := e.Context(ctx, p.ID, string(res.Created["#0"]), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, banned := range []string{"Commit with", "promotes it", "wt step", "git merge"} {
+		if strings.Contains(cx.Prompt, banned) {
+			t.Fatalf("unscoped handoff must not include %q:\n%s", banned, cx.Prompt)
+		}
+	}
+	if !strings.Contains(cx.Prompt, "live working directory") {
+		t.Fatalf("unscoped handoff should describe live checks:\n%s", cx.Prompt)
+	}
 }

@@ -54,6 +54,7 @@ type command struct {
 	name    string
 	summary string
 	run     func(ctx context.Context, c *ctxt, args []string) error
+	hidden  bool // host adapters; omitted from atask help
 }
 
 // ctxt is the per-invocation context handed to commands.
@@ -342,6 +343,9 @@ Commands:`)
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		if commands[n].hidden {
+			continue
+		}
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
 	fmt.Fprintln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
@@ -353,12 +357,39 @@ func register(name, summary string, run func(ctx context.Context, c *ctxt, args 
 	commands[name] = command{name: name, summary: summary, run: run}
 }
 
+func registerHidden(name, summary string, run func(ctx context.Context, c *ctxt, args []string) error) {
+	commands[name] = command{name: name, summary: summary, run: run, hidden: true}
+}
+
 func init() {
-	register("help", "show this help", func(_ context.Context, c *ctxt, args []string) error {
+	register("help", "show this help", func(ctx context.Context, c *ctxt, args []string) error {
 		if c.fs != nil {
 			if err := c.parse(args); err != nil {
 				return err
 			}
+		}
+		if len(c.args) > 1 {
+			return usage("help takes at most one command name")
+		}
+		if len(c.args) == 1 {
+			name := c.args[0]
+			cmd, ok := commands[name]
+			if !ok {
+				return usage("unknown command %q", name)
+			}
+			c.name = name
+			c.fs = flag.NewFlagSet(name, flag.ContinueOnError)
+			c.fs.SetOutput(io.Discard)
+			c.bindGlobals(c.fs)
+			err := cmd.run(ctx, c, []string{"-h"})
+			var hreq *helpRequest
+			if errors.As(err, &hreq) {
+				return c.printCommandHelp(cmd)
+			}
+			if err != nil {
+				return err
+			}
+			return c.printCommandHelp(cmd)
 		}
 		type cmd struct {
 			Name    string `json:"name"`
@@ -371,6 +402,9 @@ func init() {
 		}
 		names := make([]string, 0, len(commands))
 		for n := range commands {
+			if commands[n].hidden {
+				continue
+			}
 			names = append(names, n)
 		}
 		sort.Strings(names)

@@ -256,6 +256,33 @@ func TestHelpIsTheCommandReference(t *testing.T) {
 	if strings.Contains(got, "whoami") {
 		t.Fatalf("help must not list whoami:\n%s", got)
 	}
+	if strings.Contains(got, "  hook ") || strings.Contains(got, "\nhook ") {
+		t.Fatalf("help must not list hook as an agent command:\n%s", got)
+	}
+}
+
+func TestHelpDispatchesToCommand(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := Main(Env{
+		Args:   []string{"help", "add"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &out,
+		Stderr: &errb,
+		Cwd:    t.TempDir(),
+		Getenv: func(string) string { return "" },
+	})
+	if code != ExitOK {
+		t.Fatalf("help add: %d %s", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "Usage: atask add") || !strings.Contains(got, "-check") {
+		t.Fatalf("help add should show add flags:\n%s", got)
+	}
+	var top bytes.Buffer
+	Main(Env{Args: []string{"help"}, Stdin: strings.NewReader(""), Stdout: &top, Stderr: new(bytes.Buffer), Cwd: t.TempDir(), Getenv: func(string) string { return "" }})
+	if got == top.String() {
+		t.Fatal("help add must not be the top-level reference")
+	}
 }
 
 func TestShowWithoutClaimNeedsAnID(t *testing.T) {

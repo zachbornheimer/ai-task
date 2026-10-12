@@ -51,14 +51,17 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 	if !req.Wait {
 		return e.claimOnce(ctx, req, lease)
 	}
+	// Empty ProjectID is the unscoped board, not "every project".
+	scope := req.ProjectID
+	if scope == "" {
+		scope = project.UnscopedID
+	}
 	for {
-		if req.ProjectID != "" {
-			if _, err := e.RunPendingGroups(ctx, req.ProjectID, ""); err != nil && ctx.Err() != nil {
-				return Session{}, ctx.Err()
-			}
-			if _, err := e.RunPendingCohorts(ctx, req.ProjectID); err != nil && ctx.Err() != nil {
-				return Session{}, ctx.Err()
-			}
+		if _, err := e.RunPendingGroups(ctx, scope, ""); err != nil && ctx.Err() != nil {
+			return Session{}, ctx.Err()
+		}
+		if _, err := e.RunPendingCohorts(ctx, scope); err != nil && ctx.Err() != nil {
+			return Session{}, ctx.Err()
 		}
 		wake := e.changes() // subscribe before checking so no change is missed
 		s, err := e.claimOnce(ctx, req, lease)
@@ -69,23 +72,21 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 			return Session{}, err
 		}
 		wait := e.poll
-		if req.ProjectID != "" {
-			sum, serr := e.Summary(ctx, req.ProjectID)
-			if serr != nil {
-				return Session{}, serr
-			}
-			if sum.Done {
-				return Session{}, ErrDone
-			}
-			if sum.Stalled {
-				return Session{}, &fault.Error{Code: fault.CodeStalled, Message: ErrStalled.Message, Details: sum}
-			}
-			// A cooldown resolves itself: wait for it, no later than its
-			// expiry, rather than report a stall.
-			if sum.NextEligibleAt != nil {
-				if d := sum.NextEligibleAt.Sub(e.now()); d > 0 && d < wait {
-					wait = d
-				}
+		sum, serr := e.Summary(ctx, scope)
+		if serr != nil {
+			return Session{}, serr
+		}
+		if sum.Done {
+			return Session{}, ErrDone
+		}
+		if sum.Stalled {
+			return Session{}, &fault.Error{Code: fault.CodeStalled, Message: ErrStalled.Message, Details: sum}
+		}
+		// A cooldown resolves itself: wait for it, no later than its
+		// expiry, rather than report a stall.
+		if sum.NextEligibleAt != nil {
+			if d := sum.NextEligibleAt.Sub(e.now()); d > 0 && d < wait {
+				wait = d
 			}
 		}
 		select {
@@ -471,13 +472,18 @@ func (e *Engine) Log(ctx context.Context, token execution.Token, entry execution
 	return rec, err
 }
 
-// Whoami resolves a token to its task without mutating anything.
+// Whoami resolves a live claim from a token without mutating anything.
+// Expired, finished, or superseded sessions are rejected; inspect those
+// tasks with Show by id.
 func (e *Engine) Whoami(ctx context.Context, token execution.Token) (TaskView, error) {
 	now := e.now()
 	var v TaskView
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		auth, err := tx.AttemptByDigest(token.Digest())
 		if err != nil {
+			return err
+		}
+		if err := execution.Authorize(auth.Attempt, auth.CurrentSeq, now); err != nil {
 			return err
 		}
 		r, err := tx.GetRecord(auth.Attempt.TaskID)

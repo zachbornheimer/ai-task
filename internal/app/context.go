@@ -255,12 +255,21 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	w.WriteString("Done when `atask verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n")
+	gitBacked := c.TargetBranch != ""
+	if gitBacked {
+		w.WriteString("Done when `atask verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n")
+	} else {
+		w.WriteString("Done when `atask verify complete` passes: every required task check runs in the live working directory, not a git snapshot. The checks prove the command passed. They do not independently prove factual accuracy of research or the quality of a document.\n")
+	}
 	size := v.Size
 	if size == "" {
 		size = task.SizeSmall
 	}
-	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size, budgetLabelFor(c.Budgets.RegressionBudget()))
+	if gitBacked {
+		fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size, budgetLabelFor(c.Budgets.RegressionBudget()))
+	} else {
+		fmt.Fprintf(&w, "Budgets: task checks %s (size %s); a check that runs out of time fails the run as a timeout (never a strike).\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size)
+	}
 	if len(v.Checks) > 0 {
 		w.WriteString("Task checks (`atask verify task`):\n")
 		for _, ch := range v.Checks {
@@ -275,11 +284,13 @@ func renderContext(c Context) string {
 	if len(v.Pins) > 0 {
 		fmt.Fprintf(&w, "Pinned (this task may not change them; `atask verify complete` refuses if it did): %s\n\n", strings.Join(v.Pins, ", "))
 	}
-	w.WriteString("Regression checks (`atask verify regression`):\n")
-	for _, ch := range c.Regression {
-		fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, shellJoin(ch.Command))
+	if gitBacked {
+		w.WriteString("Regression checks (`atask verify regression`):\n")
+		for _, ch := range c.Regression {
+			fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, shellJoin(ch.Command))
+		}
+		w.WriteString("\n")
 	}
-	w.WriteString("\n")
 	if len(v.Requires) > 0 {
 		w.WriteString("Prerequisites (complete; their work is on the target branch):\n")
 		for _, r := range v.Requires {
@@ -295,7 +306,11 @@ func renderContext(c Context) string {
 		w.WriteString("\n")
 	}
 	if c.Workspace != "" {
-		fmt.Fprintf(&w, "Workspace: %s (branch %s; completion promotes it to %s).", c.Workspace, c.Branch, c.TargetBranch)
+		if gitBacked {
+			fmt.Fprintf(&w, "Workspace: %s (branch %s; completion promotes it to %s).", c.Workspace, c.Branch, c.TargetBranch)
+		} else {
+			fmt.Fprintf(&w, "Workspace: %s (no git worktree; pass ATASK_SESSION for log, verify, and release).", c.Workspace)
+		}
 		if c.LeaseUntil != nil {
 			fmt.Fprintf(&w, " Lease until %s.", c.LeaseUntil.UTC().Format(time.RFC3339))
 		}
@@ -303,7 +318,7 @@ func renderContext(c Context) string {
 		if !retry {
 			renderState(&w, c)
 		}
-	} else {
+	} else if gitBacked {
 		fmt.Fprintf(&w, "Completion promotes the task branch to %s. ", c.TargetBranch)
 		switch v.Status {
 		case task.StatusComplete:
@@ -316,11 +331,25 @@ func renderContext(c Context) string {
 		if !retry {
 			renderState(&w, c)
 		}
-	}
-	if c.Worktrunk {
-		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk is installed: `wt step diff` shows all changes since branching, `wt step squash` folds commits; on INTEGRATION_FAILED use `wt step rebase %s`).\n", c.TargetBranch)
 	} else {
-		fmt.Fprintf(&w, "Commit with git; on INTEGRATION_FAILED use `git merge %s`.\n", c.TargetBranch)
+		switch v.Status {
+		case task.StatusReady, task.StatusInterrupted, task.StatusVerificationFailed:
+			fmt.Fprintf(&w, "Nobody holds this task; `atask claim %s` starts work in the recorded directory.\n", v.ID)
+		default:
+			fmt.Fprintf(&w, "This task is %s and cannot be claimed right now.\n", v.Status)
+		}
+		if !retry {
+			renderState(&w, c)
+		}
+	}
+	if gitBacked {
+		if c.Worktrunk {
+			fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk is installed: `wt step diff` shows all changes since branching, `wt step squash` folds commits; on INTEGRATION_FAILED use `wt step rebase %s`).\n", c.TargetBranch)
+		} else {
+			fmt.Fprintf(&w, "Commit with git; on INTEGRATION_FAILED use `git merge %s`.\n", c.TargetBranch)
+		}
+	} else {
+		w.WriteString("Do not commit or promote a branch. Record progress with `atask log` and request completion with `atask verify complete`.\n")
 	}
 	return w.String()
 }

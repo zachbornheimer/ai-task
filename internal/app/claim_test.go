@@ -156,6 +156,18 @@ func TestContinuousQueueReleasesDependentsImmediately(t *testing.T) {
 	}
 }
 
+func TestWhoamiRejectsExpiredLease(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("held")
+	s := f.claim(string(a))
+	if _, err := f.e.Whoami(f.ctx, s.Token); err != nil {
+		t.Fatal(err)
+	}
+	f.c.Advance(31 * time.Minute)
+	_, err := f.e.Whoami(f.ctx, s.Token)
+	wantCode(t, err, fault.CodeLeaseExpired)
+}
+
 func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	f := newGitFixture(t)
 	a := f.add("a")
