@@ -27,17 +27,17 @@ func TestSmallSizeRunFilterAllowsNarrowGoTest(t *testing.T) {
 	f := newGitFixture(t)
 
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "filtered", Title: "filtered", TaskChecks: []verification.CheckSpec{goCheck("a", "go", "test", "./...", "-run", "TestX")}},
-		plan.AddTask{Key: "filtered-sh", Title: "filtered-sh", TaskChecks: []verification.CheckSpec{goCheck("b", "sh", "-c", "go test ./pkg -run '^TestX$' -v")}},
+		plan.AddTask{Key: "filtered", Title: "filtered", TaskChecks: []verification.CheckSpec{goCheck("a", "go", "test", "./...", "-run", "TestX")}, Regression: okReg()},
+		plan.AddTask{Key: "filtered-sh", Title: "filtered-sh", TaskChecks: []verification.CheckSpec{goCheck("b", "sh", "-c", "go test ./pkg -run '^TestX$' -v")}, Regression: okReg()},
 	}}); err != nil {
 		t.Fatalf("narrowed go test: %v", err)
 	}
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "wide", Title: "wide", TaskChecks: []verification.CheckSpec{goCheck("c", "go", "test", "./...")}},
+		plan.AddTask{Key: "wide", Title: "wide", TaskChecks: []verification.CheckSpec{goCheck("c", "go", "test", "./...")}, Regression: okReg()},
 	}})
 	wantSmallSizeReject(t, err)
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "pkg", Title: "pkg", TaskChecks: []verification.CheckSpec{goCheck("d", "go", "test", "./pkg")}},
+		plan.AddTask{Key: "pkg", Title: "pkg", TaskChecks: []verification.CheckSpec{goCheck("d", "go", "test", "./pkg")}, Regression: okReg()},
 	}})
 	wantSmallSizeReject(t, err)
 
@@ -54,7 +54,7 @@ func TestSmallSizeRunFilterAllowsNarrowGoTest(t *testing.T) {
 
 	large := "large"
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{
-		plan.AddTask{Key: "pkg", Title: "pkg", Size: large, TaskChecks: []verification.CheckSpec{goCheck("d", "go", "test", "./pkg")}},
+		plan.AddTask{Key: "pkg", Title: "pkg", Size: large, TaskChecks: []verification.CheckSpec{goCheck("d", "go", "test", "./pkg")}, Regression: okReg()},
 	}}); err != nil {
 		t.Fatalf("large add: %v", err)
 	}

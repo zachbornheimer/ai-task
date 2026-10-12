@@ -15,7 +15,7 @@ func TestCheckWithShellOperatorsIsRejected(t *testing.T) {
 		cmd := "echo one " + op + " echo two"
 		for name, args := range map[string][]string{
 			"flag":     {"add", "T", "--check", "u: " + cmd},
-			"optional": {"add", "T", "--check", "ok: true", "--optional-check", "o: " + cmd},
+			"optional": {"add", "T", "--check", "ok: true", "--regression-check", "r: true", "--optional-check", "o: " + cmd},
 			"plan":     {"add", "--plan", `{"key":"p","title":"P","checks":["u: ` + cmd + `"]}`},
 		} {
 			r := e.fails("INVALID_INPUT", args...)
@@ -35,7 +35,7 @@ func TestCheckWithShellOperatorsIsRejected(t *testing.T) {
 	}
 	// Wrapped in sh -c, or with the operator quoted inside an argument,
 	// the check is fine.
-	e.ok("add", "Wrapped", "--key", "wrapped", "--check", "u: sh -c 'test -f a.txt && test -f b.txt'")
-	e.ok("add", "Quoted", "--key", "quoted", "--check", `u: echo '&&' "|" ';' a>b`)
-	e.ok("add", "--plan", `{"key":"planned","title":"Planned","checks":["u: sh -c 'true || false'"]}`)
+	e.ok("add", "Wrapped", "--key", "wrapped", "--check", "u: sh -c 'test -f a.txt && test -f b.txt'", "--regression-check", "r: true")
+	e.ok("add", "Quoted", "--key", "quoted", "--check", `u: echo '&&' "|" ';' a>b`, "--regression-check", "r: true")
+	e.ok("add", "--plan", `{"key":"planned","title":"Planned","checks":["u: sh -c 'true || false'"],"regression_checks":["r: true"]}`)
 }

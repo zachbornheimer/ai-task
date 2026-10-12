@@ -58,7 +58,7 @@ func TestSpecValidate(t *testing.T) {
 		{ProjectID: pid, Key: "bad key", Description: "x"},
 		{ProjectID: pid, Kind: KindGroup, Description: "g", Pins: []string{"x"}},
 		{ProjectID: pid, Kind: KindGroup, Description: "g", Cohort: "c"},
-		{ProjectID: pid, Description: "x", Verification: verification.Policy{Regression: []verification.CheckSpec{{ID: "a", Command: []string{"true"}}}}},
+		{ProjectID: pid, Kind: KindGroup, Description: "x", Verification: verification.Policy{Regression: []verification.CheckSpec{{ID: "a", Command: []string{"true"}}}}},
 	}
 	for i, b := range bad {
 		if err := b.Validate(); !fault.Is(err, fault.CodeInvalidInput) {

@@ -24,8 +24,8 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 	a := f.add("a")
 	// Unknown prerequisite: the whole set is rejected.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "b", Title: "b", TaskChecks: okChecks()},
-		plan.AddTask{Key: "c", Title: "c", Requires: []plan.Ref{"nope"}, TaskChecks: okChecks()},
+		plan.AddTask{Key: "b", Title: "b", TaskChecks: okChecks(), Regression: okReg()},
+		plan.AddTask{Key: "c", Title: "c", Requires: []plan.Ref{"nope"}, TaskChecks: okChecks(), Regression: okReg()},
 	}})
 	wantCode(t, err, fault.CodeNotFound)
 	if count(f, app.FilterAll) != 1 {
@@ -33,8 +33,8 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 	}
 	// Cycle inside the set: nothing changes.
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "y", Title: "y", Requires: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()},
-		plan.AddTask{Key: "x", Title: "x", Requires: []plan.Ref{"y"}, TaskChecks: okChecks()},
+		plan.AddTask{Key: "y", Title: "y", Requires: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks(), Regression: okReg()},
+		plan.AddTask{Key: "x", Title: "x", Requires: []plan.Ref{"y"}, TaskChecks: okChecks(), Regression: okReg()},
 		plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{"x"}},
 	}})
 	wantCode(t, err, fault.CodeDependencyCycle)
@@ -52,7 +52,7 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 	}
 	// Groups cannot be prerequisites or claim targets.
 	g := f.apply(plan.AddGroup{Key: "g", Title: "G"}).Created["g"]
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "t", Requires: []plan.Ref{"g"}, TaskChecks: okChecks()}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "t", Requires: []plan.Ref{"g"}, TaskChecks: okChecks(), Regression: okReg()}}})
 	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &g})
 	wantCode(t, err, fault.CodeInvalidInput)
@@ -60,7 +60,7 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 
 func TestStableKeysAndIdempotency(t *testing.T) {
 	f := newFixture(t)
-	op := plan.AddTask{Key: "oauth", Title: "OAuth endpoint", Acceptance: []string{"400 on bad code"}, TaskChecks: []verification.CheckSpec{check("unit", "true", true)}}
+	op := plan.AddTask{Key: "oauth", Title: "OAuth endpoint", Acceptance: []string{"400 on bad code"}, TaskChecks: []verification.CheckSpec{check("unit", "true", true)}, Regression: okReg()}
 	r1, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "plan-1", Operations: []plan.Change{op}})
 	if err != nil || r1.Changed != 1 {
 		t.Fatalf("%+v %v", r1, err)
@@ -84,7 +84,7 @@ func TestStableKeysAndIdempotency(t *testing.T) {
 		t.Fatal("overwritten")
 	}
 	// Keys resolve within the same set and from the store.
-	r4 := f.apply(plan.AddTask{Key: "dep", Title: "dep", Requires: []plan.Ref{"oauth"}, TaskChecks: okChecks()}, plan.AddTask{Key: "dep2", Title: "dep2", Requires: []plan.Ref{"dep"}, TaskChecks: okChecks()})
+	r4 := f.apply(plan.AddTask{Key: "dep", Title: "dep", Requires: []plan.Ref{"oauth"}, TaskChecks: okChecks(), Regression: okReg()}, plan.AddTask{Key: "dep2", Title: "dep2", Requires: []plan.Ref{"dep"}, TaskChecks: okChecks(), Regression: okReg()})
 	if len(r4.Created) != 2 || f.status("dep2") != task.StatusBlocked {
 		t.Fatalf("%+v", r4)
 	}
@@ -96,8 +96,8 @@ func TestReviewMutationIsOneRevisionWithOptimisticConcurrency(t *testing.T) {
 	snap, _ := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterAll})
 	// A reviewer splits a into a1/a2, repoints b, archives a: one revision.
 	res, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, ExpectedPlanRev: snap.Revision, Operations: []plan.Change{
-		plan.AddTask{Key: "a1", Title: "a part 1", TaskChecks: []verification.CheckSpec{check("u1", "true", true)}},
-		plan.AddTask{Key: "a2", Title: "a part 2", Requires: []plan.Ref{"a1"}, TaskChecks: []verification.CheckSpec{check("u2", "true", true)}},
+		plan.AddTask{Key: "a1", Title: "a part 1", TaskChecks: []verification.CheckSpec{check("u1", "true", true)}, Regression: okReg()},
+		plan.AddTask{Key: "a2", Title: "a part 2", Requires: []plan.Ref{"a1"}, TaskChecks: []verification.CheckSpec{check("u2", "true", true)}, Regression: okReg()},
 		plan.UpdateTask{Target: plan.Ref(b), Requires: plan.Replace([]plan.Ref{"a2"})},
 		plan.ArchiveTask{Target: plan.Ref(a), Reason: "test"},
 	}})
@@ -111,7 +111,7 @@ func TestReviewMutationIsOneRevisionWithOptimisticConcurrency(t *testing.T) {
 		t.Fatal("a not archived")
 	}
 	// Stale revision is rejected and nothing changes.
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, ExpectedPlanRev: snap.Revision, Operations: []plan.Change{plan.AddTask{Key: "late", Title: "late", TaskChecks: okChecks()}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, ExpectedPlanRev: snap.Revision, Operations: []plan.Change{plan.AddTask{Key: "late", Title: "late", TaskChecks: okChecks(), Regression: okReg()}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	if _, err := f.e.Show(f.ctx, f.proj.ID, "late", false); !fault.Is(err, fault.CodeNotFound) {
 		t.Fatal("late created despite conflict")
@@ -147,7 +147,7 @@ func TestGroupsAreOrganizationalOnly(t *testing.T) {
 		plan.AddTask{Key: "t1", Title: "t1", Parent: "identity", TaskChecks: []verification.CheckSpec{check("u", "true", true)}},
 		plan.AddTask{Key: "t2", Title: "t2", Parent: "identity", Requires: []plan.Ref{"t1"}, TaskChecks: []verification.CheckSpec{check("u", "true", true)}},
 		plan.AddGroup{Key: "sub", Title: "Sub", Parent: "identity"},
-		plan.AddTask{Key: "t3", Title: "t3", Parent: "sub", TaskChecks: okChecks()},
+		plan.AddTask{Key: "t3", Title: "t3", Parent: "sub", TaskChecks: okChecks(), Regression: okReg()},
 	)
 	g := f.show(string(res.Created["identity"]))
 	if g.Kind != task.KindGroup || g.Status != task.StatusGroup || g.Progress == nil || g.Progress.Total != 3 || g.Progress.Complete != 0 {
@@ -179,7 +179,7 @@ func refptr(s string) *plan.Ref { r := plan.Ref(s); return &r }
 func TestRegressionNamespaceIsSeparate(t *testing.T) {
 	f := newFixture(t)
 	f.setRegression(check("lint", "true", true))
-	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", TaskChecks: []verification.CheckSpec{check("lint", "exit 1", true)}}}})
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", TaskChecks: []verification.CheckSpec{check("lint", "exit 1", true)}, Regression: []verification.CheckSpec{check("lint", "true", true)}}}})
 	wantCode(t, err, fault.CodeInvalidInput)
 	f.add("ok")
 	p, _ := f.e.Project(f.ctx, f.proj.ID)
@@ -192,11 +192,11 @@ func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 	c := f.add("c")
 	s := f.claim(string(c))
 	// Without authority: the claimed task's eligibility cannot change.
-	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks()}}})
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks(), Regression: okReg()}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	// With the holder's session: allowed; c stays claimed (claim outranks
 	// blocked) and becomes blocked once released.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks()}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks(), Regression: okReg()}}}); err != nil {
 		t.Fatal(err)
 	}
 	if f.status(string(c)) != task.StatusClaimed {
@@ -229,40 +229,40 @@ func TestIdempotencyIsBoundToThePayload(t *testing.T) {
 	f := newFixture(t)
 	base := f.add("base")
 	other := f.add("other")
-	r1, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", Operations: []plan.Change{plan.AddTask{Key: "i1", Title: "i1", TaskChecks: okChecks()}}})
+	r1, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", Operations: []plan.Change{plan.AddTask{Key: "i1", Title: "i1", TaskChecks: okChecks(), Regression: okReg()}}})
 	if err != nil || r1.Changed != 1 {
 		t.Fatalf("%+v %v", r1, err)
 	}
 	// Same key, different payload: conflict, nothing created.
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", Operations: []plan.Change{plan.AddTask{Key: "i2", Title: "i2-different", TaskChecks: okChecks()}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", Operations: []plan.Change{plan.AddTask{Key: "i2", Title: "i2-different", TaskChecks: okChecks(), Regression: okReg()}}})
 	wantCode(t, err, fault.CodeIdempotencyConflict)
 	if _, err := f.e.Show(f.ctx, f.proj.ID, "i2", false); !fault.Is(err, fault.CodeNotFound) {
 		t.Fatal("conflicting replay created a task")
 	}
 	// Exact replay, even with a now-stale expected revision: the committed result.
-	r2, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", ExpectedPlanRev: 1, Operations: []plan.Change{plan.AddTask{Key: "i1", Title: "i1", TaskChecks: okChecks()}}})
+	r2, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K1", ExpectedPlanRev: 1, Operations: []plan.Change{plan.AddTask{Key: "i1", Title: "i1", TaskChecks: okChecks(), Regression: okReg()}}})
 	if err != nil || !r2.Replayed || r2.Created["i1"] != r1.Created["i1"] {
 		t.Fatalf("%+v %v", r2, err)
 	}
 	// A stale expected revision on a NEW request is still a conflict.
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K2", ExpectedPlanRev: 1, Operations: []plan.Change{plan.AddTask{Key: "i3", Title: "i3", TaskChecks: okChecks()}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K2", ExpectedPlanRev: 1, Operations: []plan.Change{plan.AddTask{Key: "i3", Title: "i3", TaskChecks: okChecks(), Regression: okReg()}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	// Stable-key replay with a blocker: the first application records the
 	// edge; an identical replay is a no-op that does not bump the revision;
 	// a replay naming a different blocker is a conflicting definition.
 	before, _ := f.e.Project(f.ctx, f.proj.ID)
-	rb, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(base)}, TaskChecks: okChecks()}}})
+	rb, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(base)}, TaskChecks: okChecks(), Regression: okReg()}}})
 	if err != nil || rb.Changed != 1 || rb.PlanRev != before.PlanRev+1 {
 		t.Fatalf("%+v %v", rb, err)
 	}
 	if v := f.show(string(base)); len(v.Requires) != 1 {
 		t.Fatalf("blocker edge missing: %+v", v.Requires)
 	}
-	rb2, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(base)}, TaskChecks: okChecks()}}})
+	rb2, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(base)}, TaskChecks: okChecks(), Regression: okReg()}}})
 	if err != nil || rb2.Changed != 0 || rb2.PlanRev != rb.PlanRev {
 		t.Fatalf("identical replay changed the plan: %+v %v", rb2, err)
 	}
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(other)}, TaskChecks: okChecks()}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(other)}, TaskChecks: okChecks(), Regression: okReg()}}})
 	wantCode(t, err, fault.CodeDuplicateKey)
 	if v := f.show(string(other)); len(v.Requires) != 0 {
 		t.Fatal("conflicting replay added an edge")
@@ -282,7 +282,7 @@ func TestIdempotencyIsBoundToThePayload(t *testing.T) {
 // completed members keep their history attached.
 func TestArchiveGroupWithCompletedMembers(t *testing.T) {
 	f := newFixture(t)
-	res := f.apply(plan.AddGroup{Key: "g", Title: "G"}, plan.AddTask{Key: "done", Title: "done", Parent: "g", TaskChecks: okChecks()}, plan.AddTask{Key: "open", Title: "open", Parent: "g", TaskChecks: okChecks()})
+	res := f.apply(plan.AddGroup{Key: "g", Title: "G"}, plan.AddTask{Key: "done", Title: "done", Parent: "g", TaskChecks: okChecks(), Regression: okReg()}, plan.AddTask{Key: "open", Title: "open", Parent: "g", TaskChecks: okChecks(), Regression: okReg()})
 	f.complete(f.claim(string(res.Created["done"])))
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "g", Reason: "reorg"}}})
 	wantCode(t, err, fault.CodePlanConflict) // "open" would be orphaned

@@ -128,7 +128,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
 				return err
 			}
-			if err := regressionGate(proj); err != nil {
+			if err := regressionGate(proj, r.Task); err != nil {
 				return err
 			}
 			// An explicit claim is the retry path for a task whose worktree
@@ -142,9 +142,6 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				if proj, err = tx.GetProject(req.ProjectID); err != nil {
 					return err
 				}
-				if err := regressionGate(proj); err != nil {
-					return err
-				}
 				maxAttempts = proj.MaxAttempts
 			}
 			cand, ok, err := tx.ClaimCandidate(req.ProjectID, now, maxAttempts)
@@ -156,6 +153,9 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			}
 			r = cand
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
+				return err
+			}
+			if err := regressionGate(proj, r.Task); err != nil {
 				return err
 			}
 			// The SQL pre-filter must agree with the domain rule; a
@@ -301,7 +301,13 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 
 // regressionGate refuses to hand out work in a project whose regression
 // checks cannot act as a gate: nothing claimed there could ever complete.
-func regressionGate(proj project.Project) error {
+func regressionGate(proj project.Project, t task.Task) error {
+	if len(t.Verification.Regression) > 0 {
+		if err := verification.RequireGate(t.Verification.Regression, "required regression checks"); err != nil {
+			return fault.New(fault.CodeMissingVerification, "task %s: %v", t.ID, fault.MessageOf(err))
+		}
+		return nil
+	}
 	if proj.Unscoped() || proj.Integration != project.IntegrationPromote {
 		return nil
 	}

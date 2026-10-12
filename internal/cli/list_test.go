@@ -35,7 +35,7 @@ func TestListAllProjectsThenOne(t *testing.T) {
 	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
 		t.Fatalf("projects should name every project:\n%s", out)
 	}
-	if code, _, errOut := run(alpha, "add", "from-alpha", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run(alpha, "add", "from-alpha", "--check", "u: true", "--regression-check", "r: true"); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	code, out, errOut = run(alpha, "list")
@@ -98,7 +98,7 @@ func TestListFromUnregisteredDirIsInboxTasks(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run("add", "file the tracker", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run("add", "file the tracker", "--check", "u: true", "--regression-check", "r: true"); code != ExitOK {
 		t.Fatalf("add from unregistered dir: %d %s", code, errOut)
 	}
 	code, out, errOut := run("list")
@@ -127,11 +127,11 @@ func TestAddSameOpenTitleIsNoOp(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	code, first, errOut := run("add", "rename host loops", "--check", "u: true")
+	code, first, errOut := run("add", "rename host loops", "--check", "u: true", "--regression-check", "r: true")
 	if code != ExitOK {
 		t.Fatalf("first add: %d %s", code, errOut)
 	}
-	code, second, errOut := run("add", "rename host loops", "--check", "u: true")
+	code, second, errOut := run("add", "rename host loops", "--check", "u: true", "--regression-check", "r: true")
 	if code != ExitOK {
 		t.Fatalf("second add: %d %s", code, errOut)
 	}

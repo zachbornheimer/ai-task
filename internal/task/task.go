@@ -261,8 +261,8 @@ func (s *Spec) Validate() error {
 			return fault.New(fault.CodeInvalidInput, "a group cannot pin files; pins belong to the tasks that work")
 		}
 	}
-	if len(s.Verification.Regression) > 0 {
-		return fault.New(fault.CodeInvalidInput, "regression checks are project-level; tasks define task checks only")
+	if s.Kind == KindGroup && len(s.Verification.Regression) > 0 {
+		return fault.New(fault.CodeInvalidInput, "regression checks belong on tasks, not groups")
 	}
 	return s.Verification.Validate()
 }

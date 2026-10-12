@@ -201,8 +201,12 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
 	}
-	if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
-		return "", fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check; task checks cannot shadow regression checks", cid)
+	reg := spec.Verification.Regression
+	if len(reg) == 0 {
+		reg = a.proj.Regression
+	}
+	if cid := verification.Collides(spec.Verification.TaskChecks, reg); cid != "" {
+		return "", fault.New(fault.CodeInvalidInput, "task check id %q collides with a regression check; task checks cannot shadow regression checks", cid)
 	}
 	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, Pins: spec.Pins, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := 0; attempt < 5; attempt++ {
@@ -238,7 +242,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins, Size: c.Size}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks, Regression: verification.WithSize(c.Regression, c.RegressionSize)}, Pins: c.Pins, Size: c.Size}
 	for _, acc := range c.Acceptance {
 		spec.Acceptance = append(spec.Acceptance, task.AcceptanceCriterion{Description: acc})
 	}
@@ -286,6 +290,9 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	// completion fails closed without one, so planning fails closed too.
 	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
 		return fault.New(fault.CodeMissingVerification, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
+	}
+	if err := verification.RequireGate(spec.Verification.Regression, "required regression checks"); err != nil {
+		return fault.New(fault.CodeMissingVerification, "task %q: %v (--regression-check defines a required regression check; size comes from --regression-size or the check)", c.Title, fault.MessageOf(err))
 	}
 	if err := planBudgetError(spec, a.proj); err != nil {
 		return err
@@ -490,7 +497,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
+	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Regression.Set || c.Parent != nil || c.Pins.Set || c.Size != nil || c.RegressionSize != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
 		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
@@ -577,7 +584,22 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 				return fault.New(fault.CodeMissingVerification, "%s: %v; archive the task instead of removing its gate", t.ID, fault.MessageOf(err))
 			}
 		}
-		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value}
+		t.Verification.TaskChecks = c.TaskChecks.Value
+		changed = true
+	}
+	if c.Regression.Set {
+		if t.Kind != task.KindTask {
+			return fault.New(fault.CodeInvalidInput, "%s is a group; regression checks belong on tasks", t.ID)
+		}
+		size := ""
+		if c.RegressionSize != nil {
+			size = *c.RegressionSize
+		}
+		reg := verification.WithSize(c.Regression.Value, size)
+		if err := verification.RequireGate(reg, "required regression checks"); err != nil {
+			return fault.New(fault.CodeMissingVerification, "%s: %v; archive the task instead of removing its gate", t.ID, fault.MessageOf(err))
+		}
+		t.Verification.Regression = reg
 		changed = true
 	}
 	if c.Parent != nil {
@@ -612,13 +634,17 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			return err
 		}
 		t.Pins, t.Size = spec.Pins, spec.Size
-		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Size != nil) {
+		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Size != nil || c.Regression.Set) {
 			if err := planBudgetError(spec, a.proj); err != nil {
 				return err
 			}
 		}
-		if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
-			return fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check", cid)
+		reg := spec.Verification.Regression
+		if len(reg) == 0 {
+			reg = a.proj.Regression
+		}
+		if cid := verification.Collides(spec.Verification.TaskChecks, reg); cid != "" {
+			return fault.New(fault.CodeInvalidInput, "task check id %q collides with a regression check", cid)
 		}
 		t.Description, t.Outcome, t.Constraints, t.Acceptance, t.Cohort = spec.Description, spec.Outcome, spec.Constraints, spec.Acceptance, spec.Cohort
 		if err := a.tx.UpdateTaskContract(t, a.now); err != nil {
@@ -865,14 +891,28 @@ func planBudgetError(spec task.Spec, proj project.Project) error {
 		return nil
 	}
 	for _, c := range spec.Verification.TaskChecks {
-		cmd := strings.Join(c.Command, " ")
-		if runFilter.MatchString(cmd) {
+		if err := smallGoTestError(c, proj); err != nil {
+			return err
+		}
+	}
+	for _, c := range spec.Verification.Regression {
+		if c.Size != "" && c.Size != string(task.SizeSmall) {
 			continue
 		}
-		if !goTestCmd.MatchString(cmd) {
-			continue
+		if err := smallGoTestError(c, proj); err != nil {
+			return err
 		}
-		return fault.New(fault.CodeInvalidInput, "check %q is go test without -run; a small task's checks must finish within %s. Narrow with -run so it proves only this outcome, or set --size medium|large", c.ID, proj.Budgets.ForSize(task.SizeSmall))
 	}
 	return nil
+}
+
+func smallGoTestError(c verification.CheckSpec, proj project.Project) error {
+	cmd := strings.Join(c.Command, " ")
+	if runFilter.MatchString(cmd) {
+		return nil
+	}
+	if !goTestCmd.MatchString(cmd) {
+		return nil
+	}
+	return fault.New(fault.CodeInvalidInput, "check %q is go test without -run; a small task's checks must finish within %s. Narrow with -run so it proves only this outcome, or set --size medium|large", c.ID, proj.Budgets.ForSize(task.SizeSmall))
 }

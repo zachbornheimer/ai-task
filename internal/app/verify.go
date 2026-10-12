@@ -277,7 +277,11 @@ func suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, r
 		size = task.SizeSmall
 	}
 	taskOpts = runOpts{budget: proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch}
-	regOpts = runOpts{budget: proj.Budgets.RegressionBudget(), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch}
+	regBudget := proj.Budgets.RegressionBudget()
+	if len(t.Verification.Regression) > 0 && t.Verification.Regression[0].Size != "" {
+		regBudget = proj.Budgets.ForSize(t.Verification.Regression[0].Size)
+	}
+	regOpts = runOpts{budget: regBudget, budgetName: "the regression budget", changed: changed, target: proj.TargetBranch}
 	return taskOpts, regOpts
 }
 

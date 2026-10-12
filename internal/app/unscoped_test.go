@@ -51,7 +51,7 @@ func TestResolveProjectKeepsRegisteredRepo(t *testing.T) {
 
 func TestAddSameOpenTitleReusesTask(t *testing.T) {
 	f := newGitFixture(t)
-	op := plan.AddTask{Title: "rename host loops", TaskChecks: okChecks()}
+	op := plan.AddTask{Title: "rename host loops", TaskChecks: okChecks(), Regression: okReg()}
 	first, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{op}})
 	if err != nil || first.Changed != 1 {
 		t.Fatalf("first add: %+v %v", first, err)
@@ -88,7 +88,7 @@ func TestUnscopedAddStampsOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := e.Apply(ctx, plan.ChangeSet{ProjectID: p.ID, Operations: []plan.Change{plan.AddTask{Title: "note with a gate", TaskChecks: okChecks()}}})
+	res, err := e.Apply(ctx, plan.ChangeSet{ProjectID: p.ID, Operations: []plan.Change{plan.AddTask{Title: "note with a gate", TaskChecks: okChecks(), Regression: okReg()}}})
 	if err != nil || res.Changed != 1 {
 		t.Fatalf("add: %+v %v", res, err)
 	}
@@ -109,14 +109,14 @@ func TestCodeProjectAddWithoutCheckStillFails(t *testing.T) {
 
 func TestGlobalListIncludesUnscopedAndNamed(t *testing.T) {
 	f := newGitFixture(t)
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "from git", TaskChecks: okChecks()}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "from git", TaskChecks: okChecks(), Regression: okReg()}}}); err != nil {
 		t.Fatal(err)
 	}
 	u, err := f.e.EnsureUnscoped(f.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: u.ID, Operations: []plan.Change{plan.AddTask{Title: "from anywhere", TaskChecks: okChecks()}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: u.ID, Operations: []plan.Change{plan.AddTask{Title: "from anywhere", TaskChecks: okChecks(), Regression: okReg()}}}); err != nil {
 		t.Fatal(err)
 	}
 	snap, err := f.e.List(f.ctx, app.ListQuery{Filter: app.FilterOpen})

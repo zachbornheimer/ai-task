@@ -110,13 +110,13 @@ func TestChangedFilesReachChecks(t *testing.T) {
 func TestSmallSizeRejectsGoTestWithoutRun(t *testing.T) {
 	f := newGitFixture(t)
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "w", Title: "w", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}},
+		plan.AddTask{Key: "w", Title: "w", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}, Regression: okReg()},
 	}})
 	if fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "-run") || !strings.Contains(err.Error(), "--size") {
 		t.Fatalf("unbounded go test on small: %v", err)
 	}
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "l", Title: "l", Size: "large", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}},
+		plan.AddTask{Key: "l", Title: "l", Size: "large", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}, Regression: okReg()},
 	}}); err != nil {
 		t.Fatalf("large: %v", err)
 	}

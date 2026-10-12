@@ -15,7 +15,7 @@ import (
 func TestPinnedFileRenamedAwayIsRefused(t *testing.T) {
 	f := newGitFixture(t)
 	f.commit(f.repo, "f.txt", "pinned content that is long enough to be detected as a rename\n")
-	res := f.apply(plan.AddTask{Key: "a", Title: "a", TaskChecks: okChecks(), Pins: []string{"f.txt"}})
+	res := f.apply(plan.AddTask{Key: "a", Title: "a", TaskChecks: okChecks(), Regression: okReg(), Pins: []string{"f.txt"}})
 	a := res.Created["a"]
 	s := f.claim(string(a))
 	f.git(s.Workspace, "mv", "f.txt", "g.txt")

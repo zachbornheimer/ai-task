@@ -54,6 +54,9 @@ func newFixture(t *testing.T) *fixture { t.Helper(); return newGitFixture(t) }
 // okChecks is the minimal task check set every task must carry.
 func okChecks() []verification.CheckSpec { return []verification.CheckSpec{check("u", "true", true)} }
 
+// okReg is the minimal required regression set every task must carry.
+func okReg() []verification.CheckSpec { return []verification.CheckSpec{check("reg", "true", true)} }
+
 // newGitFixture creates a project whose root is a Git repository with one
 // commit on main and a passing regression check.
 func newGitFixture(t *testing.T) *fixture {
@@ -137,7 +140,19 @@ func check(id, script string, required bool) verification.CheckSpec {
 // apply applies one or more changes and fails the test on error.
 func (f *fixture) apply(ops ...plan.Change) plan.Result {
 	f.t.Helper()
-	res, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: ops})
+	filled := make([]plan.Change, len(ops))
+	for i, op := range ops {
+		if t, ok := op.(plan.AddTask); ok && len(t.Regression) == 0 {
+			if len(f.proj.Regression) > 0 {
+				t.Regression = append([]verification.CheckSpec(nil), f.proj.Regression...)
+			} else {
+				t.Regression = okReg()
+			}
+			op = t
+		}
+		filled[i] = op
+	}
+	res, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: filled})
 	if err != nil {
 		f.t.Fatal(err)
 	}
