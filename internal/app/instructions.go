@@ -24,59 +24,8 @@ const (
 // AGENTS.md between the markers and keeps it current on re-runs.
 func Instructions() string {
 	return `
-# Working with ` + "`atask`" + ` (for coding agents)
-
-` + "`atask`" + ` is the task engine for this repository: it hands you one claimed task
-at a time, remembers what the previous attempt learned, and decides
-completion from fresh verification, never from your word. It works the
-same from Claude Code, Codex CLI, OpenCode, Grok, or a shell. Every ` + "`atask`" + `
-command prints one JSON envelope when ` + "`ATASK_OUTPUT=json`" + ` is set; read
-` + "`error.details`" + ` when one fails.
-
-## How work gets done here
-
-Everything that changes this repository goes through ` + "`atask`" + `.
-
-- A question, an explanation, or a review is not a task: answer it.
-- Anything else starts with ` + "`atask context`" + ` (the operating contract), then
-  ` + "`atask list`" + ` and ` + "`atask show`" + `. If a task already covers the request, claim it. Otherwise
-  add tasks, each with a check that proves it, then claim one:
-  ` + "`atask add \"title\" --check \"id: cmd\"`" + `, several at once with
-  ` + "`atask add -f plan.yaml`" + `, and ` + "`atask add \"title\" --check \"...\" --claim`" + ` for
-  one small change. Run ` + "`atask doctor`" + ` before planning in a repository you
-  have not worked in.
-- Never edit the target branch directly; a passing ` + "`atask verify complete`" + `
-  promotes verified work there.
-- One task = one independently verifiable outcome. Plan the checks before
-  the code; the regression suite carries the weight, task checks prove
-  the outcome, and ` + "`--pin`" + ` protects files the task must not touch.
-- Checks must be fast. A task is ` + "`--size small`" + ` (30s of checks) unless
-  declared medium (5m) or large (15m); the regression gate has 2m. A check
-  that runs out of time is a verification-construction problem, not a
-  code failure: prove only this outcome (` + "`-run`" + `, one package), split the
-  task, or declare the size. Regression checks get ` + "`ATASK_CHANGED_FILES`" + ` to
-  target affected tests; the full suite belongs in CI.
-- An epic is a group with its own checks (` + "`atask add \"Epic\" --group --check \"e2e: ...\"`" + `,
-  size large by default): the integration tier, run once on the target
-  branch when every member is complete. The group is complete only when
-  they pass; a failure needs follow-up member tasks, not a bigger budget.
-
-## Verbs
-
-` + "```text" + `
-atask context                                           operating contract (no project or database)
-atask list / atask show [ID]                            discover the plan; show with no ID is the current claim
-atask claim [REF] [--wait]                              one leased task, its worktree on atask/<id>; the token is stored there
-atask log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first
-atask verify task                                       run this task's checks (diagnostic, repeatable)
-atask verify regression                                 run the project's regression checks (diagnostic)
-atask verify complete                                   commit first; runs BOTH suites fresh and completes only if all pass
-atask add "prereq" --blocks <task> --check "id: cmd"    discovered prerequisite: then log and release
-atask claim release                                     hand the task back; keeps your handoff
-atask claim renew                                       extend the lease (every command does too)
-` + "```" + `
-
-` + Rules
+**Track verifiable objectives with ` + "`atask`" + `.** An objective is work with a specific outcome and meaningful completion criteria. Run ` + "`atask context`" + ` to learn the workflow. Ensure an objective has a task before doing or delegating its work. The worker claims the task, follows its handoff (` + "`atask context ID`" + `), and requests verification with ` + "`atask verify complete`" + `. The engine determines whether completion requirements are satisfied.
+`
 }
 
 // DefaultGuidelines is the repository section `atask init` writes into a
@@ -196,16 +145,14 @@ func readUnder(root, name string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// ClaudeHooks are the Claude Code hooks `atask init --claude` installs: the
-// plan or task context at session start, a guard that keeps edits inside
-// task worktrees, and a stop that refuses to end a turn with a claimed
-// task neither verified nor released. Each one calls `atask hook <event>`,
-// which reads the hook's JSON on stdin and answers in Claude Code's
-// format, so the project settings carry no shell logic.
+// ClaudeHooks are the optional Claude Code hooks `atask init --claude`
+// installs. Only SessionStart is installed: it injects the current claim
+// when one exists, never the full board. guard-edit and stop remain
+// callable as `atask hook` for a host that opts in, but they are not
+// default enforcement. guard-edit only sees Edit/Write tools; it does
+// not catch shell writes.
 var ClaudeHooks = map[string][]map[string]any{
 	"SessionStart": {{"hooks": []map[string]any{{"type": "command", "command": "atask hook session-start", "timeout": 30}}}},
-	"PreToolUse":   {{"matcher": "Edit|Write|NotebookEdit", "hooks": []map[string]any{{"type": "command", "command": "atask hook guard-edit", "timeout": 15}}}},
-	"Stop":         {{"hooks": []map[string]any{{"type": "command", "command": "atask hook stop", "timeout": 15}}}},
 }
 
 // InstallClaudeHooks merges ClaudeHooks into <root>/.claude/settings.json,

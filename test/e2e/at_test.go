@@ -189,11 +189,14 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(ws, "", nil, "show"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
 		t.Fatalf("show in worktree: %s %s", r.stdout, r.stderr)
 	}
-	if cx := e.ok("context"); !strings.Contains(cx["prompt"].(string), "atask is the task engine") {
+	if cx := e.ok("context"); !strings.Contains(cx["prompt"].(string), "verifiable objectives") {
 		t.Fatalf("context contract: %v", cx)
 	}
 	if r := e.runIn(ws, "", []string{"ATASK_OUTPUT="}, "context"); r.code != 0 || !strings.Contains(r.stdout, "verify complete") {
 		t.Fatalf("human context: %s %s", r.stdout, r.stderr)
+	}
+	if handoff := e.ok("context", a); !strings.Contains(handoff["prompt"].(string), "# Task "+a) {
+		t.Fatalf("context id handoff: %v", handoff)
 	}
 	if !strings.HasSuffix(sess["branch"].(string), "/"+a) || !strings.HasPrefix(sess["branch"].(string), "atask/") {
 		t.Fatalf("branch %v", sess["branch"])
@@ -564,16 +567,15 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 
 // TestInitInstallsInstructionsAndHooks: `atask init` writes the AGENTS.md
 // block and the CLAUDE.md import, re-runs refresh only the block and keep
-// the repository's own text, `--claude` merges the hooks into
+// the repository's own text, `--claude` merges only SessionStart into
 // .claude/settings.json beside existing settings, and `atask hook` answers
-// Claude Code's events: context at session start, edits denied outside
-// a task worktree and allowed inside one, and a stop refused while the
-// worktree holds an unfinished claim.
+// Claude Code's events: current claim at session start (nothing with no
+// claim), optional guard-edit still callable, stop is a no-op.
 func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 	e := gitEnv(t) // init ran once already
 	agents := filepath.Join(e.cwd, "AGENTS.md")
 	b, err := os.ReadFile(agents)
-	if err != nil || !strings.Contains(string(b), "<!-- atask:begin -->") || !strings.Contains(string(b), "## Agent execution contract") || !strings.Contains(string(b), "# Engineering guidelines") {
+	if err != nil || !strings.Contains(string(b), "<!-- atask:begin -->") || !strings.Contains(string(b), "Track verifiable objectives") || !strings.Contains(string(b), "# Engineering guidelines") {
 		t.Fatalf("AGENTS.md: %v\n%s", err, b)
 	}
 	if c, _ := os.ReadFile(filepath.Join(e.cwd, "CLAUDE.md")); strings.TrimSpace(string(c)) != "@AGENTS.md" {
@@ -599,20 +601,24 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 		t.Fatalf("settings merge: %v %s", err, sb)
 	}
 	hooks := settings["hooks"].(map[string]any)
-	for _, ev := range []string{"SessionStart", "PreToolUse", "Stop"} {
-		if hooks[ev] == nil {
-			t.Fatalf("hook %s missing: %s", ev, sb)
-		}
+	if hooks["SessionStart"] == nil {
+		t.Fatalf("SessionStart missing: %s", sb)
+	}
+	if hooks["PreToolUse"] != nil || hooks["Stop"] != nil {
+		t.Fatalf("--claude must not install edit or stop guards: %s", sb)
 	}
 	e.ok("init", "--claude") // idempotent: no duplicate entries
 	sb2, _ := os.ReadFile(filepath.Join(e.cwd, ".claude", "settings.json"))
-	if strings.Count(string(sb2), "atask hook guard-edit") != 1 {
+	if strings.Count(string(sb2), "atask hook session-start") != 1 {
 		t.Fatalf("hooks duplicated: %s", sb2)
 	}
-	// Hooks. Session start with no task: the plan.
+	if strings.Contains(string(sb2), "guard-edit") || strings.Contains(string(sb2), "hook stop") {
+		t.Fatalf("guard-edit/stop must not be installed: %s", sb2)
+	}
+	// Session start with no claim injects nothing.
 	a := taskID(e.ok("add", "Guarded", "--check", "u: test -f g.txt"))
-	if r := e.runIn(e.cwd, `{"hook_event_name":"SessionStart","cwd":"`+e.cwd+`"}`, nil, "hook", "session-start"); r.code != 0 || !strings.Contains(r.stdout, `"hookEventName":"SessionStart"`) || !strings.Contains(r.stdout, "Guarded") {
-		t.Fatalf("session-start: %d %s %s", r.code, r.stdout, r.stderr)
+	if r := e.runIn(e.cwd, `{"hook_event_name":"SessionStart","cwd":"`+e.cwd+`"}`, nil, "hook", "session-start"); r.code != 0 || strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("session-start without claim: %d %s %s", r.code, r.stdout, r.stderr)
 	}
 	// Edit in the project root: denied; outside any project: allowed.
 	deny := e.runIn(e.cwd, `{"tool_name":"Write","tool_input":{"file_path":"`+filepath.Join(e.cwd, "f.txt")+`"},"cwd":"`+e.cwd+`"}`, nil, "hook", "guard-edit")
@@ -625,7 +631,7 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 	if r := e.runIn(e.cwd, `{"tool_name":"Write","tool_input":{"file_path":"`+filepath.Join(e.cwd, "f.txt")+`"},"cwd":"`+e.cwd+`"}`, []string{"ATASK_ALLOW_DIRECT=1"}, "hook", "guard-edit"); strings.TrimSpace(r.stdout) != "" {
 		t.Fatalf("ATASK_ALLOW_DIRECT ignored: %s", r.stdout)
 	}
-	// Inside the task worktree: allowed; stop refused while the claim is live.
+	// Inside the task worktree: allowed; stop is a no-op while the claim is live.
 	sess := e.ok("claim", a)
 	ws := sess["workspace"].(string)
 	if r := e.runIn(ws, `{"tool_name":"Edit","tool_input":{"file_path":"`+filepath.Join(ws, "g.txt")+`"},"cwd":"`+ws+`"}`, nil, "hook", "guard-edit"); r.code != 0 || strings.TrimSpace(r.stdout) != "" {
@@ -635,18 +641,15 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 		t.Fatalf("session-start in worktree: %s", r.stdout)
 	}
 	stop := e.runIn(ws, `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"`+ws+`"}`, nil, "hook", "stop")
-	if !strings.Contains(stop.stdout, `"decision":"block"`) || !strings.Contains(stop.stdout, a) {
-		t.Fatalf("stop with live claim: %s", stop.stdout)
-	}
-	if r := e.runIn(ws, `{"hook_event_name":"Stop","stop_hook_active":true,"cwd":"`+ws+`"}`, nil, "hook", "stop"); strings.TrimSpace(r.stdout) != "" {
-		t.Fatalf("stop_hook_active must end the loop: %s", r.stdout)
+	if stop.code != 0 || strings.TrimSpace(stop.stdout) != "" {
+		t.Fatalf("stop with live claim must not block: %s", stop.stdout)
 	}
 	e.commit(ws, "g.txt", "g")
 	if r := e.runIn(ws, "", nil, "verify", "complete"); r.code != 0 {
 		t.Fatalf("verify complete: %s %s", r.stdout, r.stderr)
 	}
 	if r := e.runIn(ws, `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"`+ws+`"}`, nil, "hook", "stop"); strings.TrimSpace(r.stdout) != "" {
-		t.Fatalf("stop after completion must allow: %s", r.stdout)
+		t.Fatalf("stop after completion must still be silent: %s", r.stdout)
 	}
 	// --no-instructions writes nothing.
 	bare := newEnv(t)

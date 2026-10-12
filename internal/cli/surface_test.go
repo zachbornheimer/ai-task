@@ -35,7 +35,8 @@ func TestContextNeedsNoDatabase(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"atask is the task engine",
+		"verifiable objectives",
+		"atask context ID",
 		"atask list",
 		"atask show",
 		"atask claim",
@@ -54,10 +55,10 @@ func TestContextNeedsNoDatabase(t *testing.T) {
 	}
 }
 
-func TestContextTakesNoArgs(t *testing.T) {
+func TestContextRejectsTwoArgs(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   []string{"context", "at-abc123"},
+		Args:   []string{"context", "at-abc123", "at-def456"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &out,
 		Stderr: &errb,
@@ -65,10 +66,137 @@ func TestContextTakesNoArgs(t *testing.T) {
 		Getenv: func(string) string { return "" },
 	})
 	if code == ExitOK {
-		t.Fatal("context with a ref must be usage")
+		t.Fatal("context with two ids must be usage")
 	}
-	if !strings.Contains(errb.String(), "no arguments") && !strings.Contains(errb.String(), "atask show") {
+	if !strings.Contains(errb.String(), "no arguments, or one task id") {
 		t.Fatalf("context extra args:\n%s", errb.String())
+	}
+}
+
+func TestContextHandoffForTaskID(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "at.db")
+	cwd := t.TempDir()
+	getenv := func(k string) string {
+		if k == "ATASK_DB" {
+			return db
+		}
+		return ""
+	}
+	var out, errb bytes.Buffer
+	code := Main(Env{
+		Args:   []string{"--json", "add", "handoff-work", "--check", "u: true"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &out,
+		Stderr: &errb,
+		Cwd:    cwd,
+		Getenv: getenv,
+	})
+	if code != ExitOK {
+		t.Fatalf("add: %d %s", code, errb.String())
+	}
+	var env struct {
+		Result struct {
+			Task struct {
+				ID string `json:"id"`
+			} `json:"task"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil || env.Result.Task.ID == "" {
+		t.Fatalf("add json: %v %s", err, out.String())
+	}
+	var cOut, cErr bytes.Buffer
+	code = Main(Env{
+		Args:   []string{"context", env.Result.Task.ID},
+		Stdin:  strings.NewReader(""),
+		Stdout: &cOut,
+		Stderr: &cErr,
+		Cwd:    cwd,
+		Getenv: getenv,
+	})
+	if code != ExitOK {
+		t.Fatalf("context id: %d %s", code, cErr.String())
+	}
+	got := cOut.String()
+	if !strings.Contains(got, "# Task "+env.Result.Task.ID) || !strings.Contains(got, "handoff-work") {
+		t.Fatalf("handoff should name the task:\n%s", got)
+	}
+	if strings.Contains(got, "atask tracks verifiable objectives") {
+		t.Fatalf("task handoff must not reprint the operating contract:\n%s", got)
+	}
+	if strings.Contains(got, "Claimable now") || strings.Contains(got, "# Board") {
+		t.Fatalf("task handoff must not dump the board:\n%s", got)
+	}
+}
+
+func TestContextCompletedTaskIssuesNoWork(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "at.db")
+	cwd := t.TempDir()
+	getenv := func(k string) string {
+		if k == "ATASK_DB" {
+			return db
+		}
+		return ""
+	}
+	var out, errb bytes.Buffer
+	code := Main(Env{
+		Args:   []string{"--json", "add", "already-done", "--check", "u: true", "--claim"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &out,
+		Stderr: &errb,
+		Cwd:    cwd,
+		Getenv: getenv,
+	})
+	if code != ExitOK {
+		t.Fatalf("add --claim: %d %s", code, errb.String())
+	}
+	var env struct {
+		Result struct {
+			Task struct {
+				ID string `json:"id"`
+			} `json:"task"`
+			Session struct {
+				Token string `json:"token"`
+			} `json:"session"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil || env.Result.Session.Token == "" {
+		t.Fatalf("claim: %v %s", err, out.String())
+	}
+	getenvTok := func(k string) string {
+		if k == "ATASK_SESSION" {
+			return env.Result.Session.Token
+		}
+		return getenv(k)
+	}
+	var vOut, vErr bytes.Buffer
+	if code := Main(Env{Args: []string{"verify", "complete"}, Stdin: strings.NewReader(""), Stdout: &vOut, Stderr: &vErr, Cwd: cwd, Getenv: getenvTok}); code != ExitOK {
+		t.Fatalf("verify complete: %d %s %s", code, vOut.String(), vErr.String())
+	}
+	var cOut, cErr bytes.Buffer
+	code = Main(Env{
+		Args:   []string{"context", env.Result.Task.ID},
+		Stdin:  strings.NewReader(""),
+		Stdout: &cOut,
+		Stderr: &cErr,
+		Cwd:    cwd,
+		Getenv: getenv,
+	})
+	if code != ExitOK {
+		t.Fatalf("context complete: %d %s", code, cErr.String())
+	}
+	got := cOut.String()
+	if !strings.Contains(got, "This task is complete") {
+		t.Fatalf("completed handoff:\n%s", got)
+	}
+	for _, banned := range []string{
+		"Nobody holds this task",
+		"atask claim " + env.Result.Task.ID,
+		"Done when `atask verify complete`",
+		"Commit with",
+	} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("completed handoff must not instruct more work (%q):\n%s", banned, got)
+		}
 	}
 }
 
@@ -106,6 +234,7 @@ func TestHelpIsTheCommandReference(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"atask context",
+		"atask context ID",
 		"atask help",
 		"atask version",
 		"atask add",

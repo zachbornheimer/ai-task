@@ -10,14 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 func init() {
-	register("hook", "answer a Claude Code hook (JSON on stdin): atask hook session-start | guard-edit | stop", runHook)
+	register("hook", "host adapter (not an agent verb): atask hook session-start | guard-edit | stop", runHook)
 }
 
 // hookInput is the subset of Claude Code's hook JSON the hooks read.
@@ -60,37 +59,29 @@ func runHook(ctx context.Context, c *ctxt, args []string) error {
 	return usage("unknown hook event %q", c.args[0])
 }
 
-// hookSessionStart injects the open board (the bd-prime analog) so a
-// session starts knowing the work. A live claim also injects the current task.
-// The body is hookSpecificOutput.additionalContext: Grok ignores
-// SessionStart stdout, and Claude's bd prime --hook-json uses this envelope.
+// hookSessionStart injects the current claim when one exists. It does
+// not dump the board. With no claim it writes nothing.
 func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
 	e, err := c.engine(ctx)
 	if err != nil {
 		return nil
 	}
-	var body strings.Builder
 	tok := workspace.LoadToken(ctx, cwd)
 	if tok == "" {
 		tok = c.env.Getenv("ATASK_SESSION")
 	}
-	if tok != "" {
-		if token, err := execution.ParseToken(tok); err == nil {
-			if v, err := e.Whoami(ctx, token); err == nil {
-				fmt.Fprintf(&body, "# Task %s: %s\n\n", v.ID, v.Title)
-			}
-		}
+	if tok == "" {
+		return nil
 	}
-	snap, err := e.List(ctx, app.ListQuery{Filter: app.FilterAll})
+	token, err := execution.ParseToken(tok)
 	if err != nil {
-		return c.emitSessionStart(body.String())
+		return nil
 	}
-	if len(snap.Tasks) == 0 && len(snap.Groups) == 0 {
-		body.WriteString("no tasks registered.")
-	} else {
-		renderList(&body, snap, app.FilterAll, painter{})
+	v, err := e.Whoami(ctx, token)
+	if err != nil {
+		return nil
 	}
-	return c.emitSessionStart(body.String())
+	return c.emitSessionStart(fmt.Sprintf("# Task %s: %s", v.ID, v.Title))
 }
 
 func (c *ctxt) emitSessionStart(context string) error {
@@ -138,7 +129,7 @@ func (c *ctxt) hookGuardEdit(ctx context.Context, cwd string, in hookInput) erro
 	if err != nil {
 		return nil // not an atask project
 	}
-	reason := fmt.Sprintf("%s is on branch %q of project %s, not in a task worktree. Work goes through atask: `atask list` to see the plan, `atask claim <task>` (or `atask add \"...\" --check \"...\" --claim` for a new change), then edit inside the workspace the claim prints. Set ATASK_ALLOW_DIRECT=1 to bypass deliberately.", path, branch, p.Name)
+	reason := fmt.Sprintf("%s is on branch %q of project %s, not in a task worktree. Work goes through atask: `atask list` to see the plan, `atask claim <task>` (or `atask add \"...\" --check \"...\" --claim` for a new change), then edit inside the workspace the claim prints. This guard only sees Edit/Write/NotebookEdit; shell and other writers are not blocked. Set ATASK_ALLOW_DIRECT=1 to bypass deliberately.", path, branch, p.Name)
 	return c.encoder().Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
 }
 
@@ -158,33 +149,10 @@ func nearestExistingDir(dir string) string {
 	}
 }
 
-// hookStop refuses to end a turn while the session holds a task that is
-// neither verified nor released: the agent is told what to run. The
-// task is the one whose worktree the session is in (or ATASK_SESSION);
-// stop_hook_active ends the loop as Claude Code documents.
-func (c *ctxt) hookStop(ctx context.Context, cwd string, in hookInput) error {
-	if in.StopHookActive {
-		return nil
-	}
-	tok := workspace.LoadToken(ctx, cwd)
-	if tok == "" {
-		tok = c.env.Getenv("ATASK_SESSION")
-	}
-	if tok == "" {
-		return nil
-	}
-	token, err := execution.ParseToken(tok)
-	if err != nil {
-		return nil
-	}
-	e, err := c.engine(ctx)
-	if err != nil {
-		return nil
-	}
-	v, err := e.Whoami(ctx, token)
-	if err != nil || v.Attempt == nil || v.Attempt.EndedAt != nil || !v.Attempt.LeaseActive {
-		return nil
-	}
-	reason := fmt.Sprintf("You still hold %s (%s). Finish it: commit and run `atask verify complete`; or hand it back with `atask log --next \"...\"` and `atask claim release --note \"...\"`.", v.ID, v.Title)
-	return c.encoder().Encode(map[string]any{"decision": "block", "reason": reason})
+// hookStop is a no-op. An open claim is not a reason to block ending a
+// turn: an orchestrator may delegate and return while a worker holds a
+// lease. The command exists so a host that still registers the hook
+// does not fail.
+func (c *ctxt) hookStop(context.Context, string, hookInput) error {
+	return nil
 }

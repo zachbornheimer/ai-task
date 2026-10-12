@@ -1,9 +1,10 @@
 # Agent contract: `atask` CLI and JSON
 
 Nine everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
-`list`, `help`, `version`. `atask context` is the operating contract (no
-project or database). Project bootstrap (`init`, `project`, `projects`),
-`status`, `doctor`, `prune` and `hook` exist outside that set.
+`list`, `help`, `version`. `atask context` with no arguments is the
+operating contract (no project or database). `atask context ID` is the
+worker handoff for that task. Project bootstrap (`init`, `project`,
+`projects`), `status`, `doctor`, `prune` and `hook` exist outside that set.
 The CLI is a thin adapter over the Go engine; both apply the same rules.
 
 ## Output and exit codes
@@ -153,6 +154,7 @@ stale `--expect-rev`), a different request under the same key is
 ```
 
 atask context operating contract (no project or database)
+atask context ID worker handoff for that task
 atask show [REF] current claim, or a particular task
 atask claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
 atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
@@ -219,37 +221,43 @@ released. Only a run charged against its attempt derives to
 is refused with `VERIFICATION_RUNNING`; after completion it returns the
 stored acknowledgement.
 
-**Context.** `atask context` prints the agent operating contract as one
-block of text (JSON: `prompt`). It needs no project, database, or session.
-Discover work with `atask list`; inspect a task with `atask show` (no
-argument: the current claim).
+**Context.** `atask context` with no arguments prints the agent operating
+contract as one block of text (JSON: `prompt`). It needs no project,
+database, or session. `atask context ID` is the worker handoff for that
+task: objective, acceptance, checks, blockers, worktree, and how
+completion is decided. A completed task's handoff reports that it is
+done and issues no new work. Discover work with `atask list`; inspect a
+task with `atask show` (no argument: the current claim).
 
 **Installing the instructions.** `atask init` registers the repository and
-installs the project instruction block (`app.Instructions`: how work gets
-done through `atask`, the verbs, the execution contract) into `AGENTS.md`
+installs the project instruction block (`app.Instructions`: one paragraph
+that points agents at `atask context`) into `AGENTS.md`
 between `<!-- atask:begin -->` and `<!-- atask:end -->`, creating the file with a
 default engineering-guidelines section when absent and refreshing only
 the block on re-runs; it also makes sure `CLAUDE.md` imports it
 (`@AGENTS.md`). When `init` creates the repository in a directory that
 already has files, they stay untracked (init never commits them); the
 result carries `untracked_files` and a `warning` that they must be
-committed before the baseline can pass. `--no-instructions` skips that. `atask init --claude` merges
-three hooks into `.claude/settings.json`, each calling `atask hook <event>`
-with the hook's JSON on stdin: `session-start` prints the plan or task
-context; `guard-edit` denies an Edit/Write to a file inside a registered
-project that is not in a task worktree (`ATASK_ALLOW_DIRECT=1` bypasses);
-`stop` refuses to end a turn while the session's worktree (or
-`ATASK_SESSION`) holds a live claim that is neither verified nor released.
-An `at` failure inside a hook never blocks the harness.
+committed before the baseline can pass. `--no-instructions` skips that.
+`atask init --claude` is optional and reversible: it merges only the
+SessionStart hook into `.claude/settings.json` (`atask hook session-start`),
+which injects the current claim when one exists and writes nothing
+otherwise. It does not install `guard-edit` or `stop`. `atask hook
+guard-edit` remains callable for a host that opts in; it only sees
+Edit/Write/NotebookEdit and does not catch shell writes.
+`atask hook stop` is a no-op: an open claim is not a reason to block
+ending a turn. An `atask` failure inside a hook never blocks the harness.
+Init never rewrites personal `AGENTS.md`/`CLAUDE.md` or global host
+hooks; it only writes under the registered repository root.
 
-**Prompt layers.** An agent runs under three layers and `at` supplies
+**Prompt layers.** An agent runs under three layers and `atask` supplies
 the third: (1) a bootstrap system prompt, set by the host where the
 harness allows it (Claude Code `-p --append-system-prompt`, a bare model's
 system message; Codex has none and relies on AGENTS.md); (2) the project
 instruction file, AGENTS.md (or a CLAUDE.md that imports it), holding the
-agent execution contract; (3) the task turn, `atask show` for the current
-claim and `atask list` for the plan. `atask context` is the operating
-contract and does not dump tasks. The bootstrap is:
+short atask paragraph; (3) the task turn, `atask context ID` as the
+worker handoff and `atask list` for the plan. `atask context` with no
+arguments is the operating contract and does not dump tasks. The bootstrap is:
 ```
 
 You are a coding agent responsible for one task in an isolated Git worktree.
