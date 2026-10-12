@@ -2,7 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"flag"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,7 +28,7 @@ func TestHookSessionStartSilentWithoutClaim(t *testing.T) {
 	if code, _, errOut := run("", "add", "prime me", "--check", "u: true"); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
-	code, out, errOut := run(`{"hook_event_name":"SessionStart","cwd":"`+cwd+`"}`, "hook", "session-start")
+	code, out, errOut := invokeHook(t, cwd, getenv, `{"hook_event_name":"SessionStart","cwd":"`+cwd+`"}`, "session-start")
 	if code != ExitOK {
 		t.Fatalf("session-start: %d %s", code, errOut)
 	}
@@ -90,19 +93,11 @@ func TestHookSessionStartCurrentClaimOnly(t *testing.T) {
 		}
 		return getenv(k)
 	}
-	var hOut, hErr bytes.Buffer
-	code = Main(Env{
-		Args:   []string{"hook", "session-start"},
-		Stdin:  strings.NewReader(`{"hook_event_name":"SessionStart","cwd":"` + ws + `"}`),
-		Stdout: &hOut,
-		Stderr: &hErr,
-		Cwd:    ws,
-		Getenv: withTok,
-	})
+	code, hOut, hErr := invokeHook(t, ws, withTok, `{"hook_event_name":"SessionStart","cwd":"`+ws+`"}`, "session-start")
 	if code != ExitOK {
-		t.Fatalf("session-start claimed: %d %s", code, hErr.String())
+		t.Fatalf("session-start claimed: %d %s", code, hErr)
 	}
-	got := sessionStartContext(t, hOut.String())
+	got := sessionStartContext(t, hOut)
 	if !strings.Contains(got, "# Task "+env.Result.Task.ID) || !strings.Contains(got, "held work") {
 		t.Fatalf("claimed session-start should name the current task:\n%s", got)
 	}
@@ -147,26 +142,52 @@ func TestHookStopDoesNotBlockOpenClaim(t *testing.T) {
 	if ws == "" {
 		ws = cwd
 	}
-	var sOut, sErr bytes.Buffer
-	code = Main(Env{
-		Args:   []string{"hook", "stop"},
-		Stdin:  strings.NewReader(`{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"` + ws + `"}`),
-		Stdout: &sOut,
-		Stderr: &sErr,
-		Cwd:    ws,
-		Getenv: func(k string) string {
-			if k == "ATASK_SESSION" {
-				return env.Result.Session.Token
-			}
-			return getenv(k)
-		},
-	})
+	code, sOut, sErr := invokeHook(t, ws, func(k string) string {
+		if k == "ATASK_SESSION" {
+			return env.Result.Session.Token
+		}
+		return getenv(k)
+	}, `{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"`+ws+`"}`, "stop")
 	if code != ExitOK {
-		t.Fatalf("stop: %d %s", code, sErr.String())
+		t.Fatalf("stop: %d %s", code, sErr)
 	}
-	if strings.TrimSpace(sOut.String()) != "" {
-		t.Fatalf("stop must not block an open claim:\n%s", sOut.String())
+	if strings.TrimSpace(sOut) != "" {
+		t.Fatalf("stop must not block an open claim:\n%s", sOut)
 	}
+}
+
+func TestHookIsNotAPublicVerb(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := Main(Env{
+		Args:   []string{"hook", "session-start"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &out,
+		Stderr: &errb,
+		Cwd:    t.TempDir(),
+		Getenv: func(string) string { return "" },
+	})
+	if code != ExitUsage {
+		t.Fatalf("hook as CLI verb: exit %d\n%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), `unknown command "hook"`) {
+		t.Fatalf("hook should be unknown: %s", errb.String())
+	}
+}
+
+func invokeHook(t *testing.T, cwd string, getenv func(string) string, stdin, event string) (int, string, string) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	env := Env{Args: []string{event}, Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv}
+	c := &ctxt{env: env, name: "hook"}
+	c.g = globals{db: getenv("ATASK_DB")}
+	c.fs = flag.NewFlagSet("hook", flag.ContinueOnError)
+	c.fs.SetOutput(io.Discard)
+	c.bindGlobals(c.fs)
+	err := runHook(context.Background(), c, []string{event})
+	if err != nil {
+		return c.fail(err), out.String(), errb.String()
+	}
+	return ExitOK, out.String(), errb.String()
 }
 
 func sessionStartContext(t *testing.T, out string) string {

@@ -326,8 +326,8 @@ atask context ID                      worker handoff for that task
 atask help [command]                  this reference, or one command's flags
 atask version                         build version
 
-atask add "title" --check "id: cmd" [--claim] [--parent ID] [--requires ID] [--group]
-atask update ID [--title ...] [--check ...] [--archive --reason ...]
+atask add "title" --check "id: cmd" [--claim] [--parent ID] [--requires ID] [--group] [--on-complete-json ...]
+atask update ID [--check ...] [--archive --reason ...]
 atask list [project] [ready|blocked|complete|archived|open]
 atask show [ID] [--full]
 atask claim [ID] [--wait]

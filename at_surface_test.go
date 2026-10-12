@@ -163,6 +163,7 @@ func shortType(t reflect.Type) string {
 		{"verification.", ""},
 		{"task.", ""},
 		{"fault.", ""},
+		{"at.", ""},
 	}
 	for _, r := range repl {
 		s = strings.ReplaceAll(s, r[0], r[1])

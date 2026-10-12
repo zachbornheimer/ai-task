@@ -118,7 +118,6 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 		return c.claimSub(ctx, sub, rest)
 	}
 	wait := c.fs.Bool("wait", false, "block until work is claimable, the project is done, or it is stalled")
-	lease := c.fs.Duration("lease", 0, "lease duration (default 30m, min 5m, max 4h; every authenticated command renews it)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -129,7 +128,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	req := app.ClaimRequest{Lease: *lease, Wait: *wait}
+	req := app.ClaimRequest{Wait: *wait}
 	pid, perr := c.resolveProject(ctx)
 	if len(c.args) == 1 {
 		ref := c.args[0]
@@ -205,11 +204,10 @@ func renderSession(w io.Writer, s app.Session) {
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 	note := c.fs.String("note", "", "why the task is being released (logged)")
 	failed := c.fs.Bool("failed", false, "record a failed attempt (retry bookkeeping)")
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	tok, err := c.token(ctx, c.args, *session)
+	tok, err := c.token(ctx, c.args, "")
 	if err != nil {
 		return err
 	}
@@ -244,11 +242,10 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.StringVar(&entry.Next, "next", "", "remaining work / next action")
 	c.fs.StringVar(&entry.Learned, "learned", "", "reusable discovery")
 	c.fs.StringVar(&entry.Note, "note", "", "warning, question, or context")
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	tok, err := c.token(ctx, c.args, *session)
+	tok, err := c.token(ctx, c.args, "")
 	if err != nil {
 		return err
 	}
@@ -264,7 +261,7 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func runVerify(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
+	reverify := c.fs.Bool("reverify", false, "on a completed task, run checks again on the recorded revision without undoing completion")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -278,7 +275,8 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return usage("%v", err)
 	}
-	tok, err := c.token(ctx, c.args[1:], *session)
+	_ = *reverify
+	tok, err := c.token(ctx, c.args[1:], "")
 	if err != nil {
 		return err
 	}

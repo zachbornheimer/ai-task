@@ -218,9 +218,9 @@ func TestCLITouchableSurface(t *testing.T) {
 	globals := []string{"db", "json", "output", "pretty", "project"}
 	commandFlags := map[string][]string{
 		"add": {
-			"accept", "blocks", "check", "claim", "cohort", "constraint", "group",
+			"accept", "blocks", "check", "claim", "cohort", "constraint", "f", "group",
 			"key", "on-complete-json", "optional-check", "outcome", "parent",
-			"pin", "requires", "size",
+			"pin", "plan", "requires", "size",
 		},
 		"update": {
 			"accept", "archive", "check", "cohort", "constraint", "expect-rev",
@@ -583,7 +583,7 @@ func TestListColorsGlyphsAndDimsProject(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
+	if code, _, errOut := run(alpha, "init", "--name", "alpha"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
 	if code, _, errOut := run(alpha, "add", "colored-work", "--check", "u: true"); code != ExitOK {

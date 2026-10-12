@@ -22,11 +22,11 @@ import (
 )
 
 func init() {
-	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import [--no-instructions] [--claude: optional SessionStart only]; re-run to refresh", runInit)
+	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import; re-run to refresh", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --regression-check, --integration, --target-branch, budgets", runProject)
-	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
-	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
+	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--on-complete-json ..] [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
+	register("update", "change a plan item: atask update REF [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
 	register("list", "list non-archived tasks: atask list [<project>] [ready|blocked|complete|archived|open]", runList)
 	register("status", "board-wide counts, or one project with --project", runStatus)
@@ -47,21 +47,19 @@ type planFlags struct {
 	session        string
 }
 
-func (c *ctxt) bindPlanFlags(pf *planFlags) {
+func (c *ctxt) bindPlanFlags(pf *planFlags, update bool) {
+	if !update {
+		return
+	}
 	c.fs.Uint64Var(&pf.expectRev, "expect-rev", 0, "fail with PLAN_CONFLICT unless the plan revision equals this")
 	c.fs.StringVar(&pf.idempotencyKey, "idempotency-key", "", "stable operation id; a replay returns the stored result")
-	c.fs.BoolVar(&pf.planner, "planner", false, "assert planning authority for edits to claimed tasks")
-	c.fs.StringVar(&pf.session, "session", "", "session token authorizing a discovered blocker (default: ATASK_SESSION, or the task worktree's own token)")
 }
 
 // changeSet builds the ChangeSet; session authority comes from --session,
 // ATASK_SESSION, or the worktree the command runs in (same sources as the
 // execution verbs, so `add --blocks` works from inside the worktree).
 func (c *ctxt) changeSet(ctx context.Context, pid project.ID, pf planFlags, ops ...plan.Change) plan.ChangeSet {
-	session := pf.session
-	if session == "" {
-		session = c.env.Getenv("ATASK_SESSION")
-	}
+	session := c.env.Getenv("ATASK_SESSION")
 	if session == "" {
 		session = workspace.LoadToken(ctx, c.env.Cwd)
 	}
@@ -71,8 +69,6 @@ func (c *ctxt) changeSet(ctx context.Context, pid project.ID, pf planFlags, ops 
 func runInit(ctx context.Context, c *ctxt, args []string) error {
 	name := c.fs.String("name", "", "display name (default: directory name)")
 	path := c.fs.String("path", "", "directory to register (default: current directory)")
-	noInstructions := c.fs.Bool("no-instructions", false, "do not write AGENTS.md / CLAUDE.md")
-	claude := c.fs.Bool("claude", false, "optional: install only the Claude Code SessionStart hook (current claim, not the board). Does not install edit or stop guards.")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -95,21 +91,11 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 		ClaudeHooks  string             `json:"claude_hooks,omitempty"`
 	}
 	o := out{InitResult: res}
-	if !*noInstructions {
-		ir, err := app.InstallInstructions(p.RootPath)
-		if err != nil {
-			return err
-		}
-		o.Instructions = &ir
+	ir, err := app.InstallInstructions(p.RootPath)
+	if err != nil {
+		return err
 	}
-	hooksChanged := false
-	if *claude {
-		path, changed, err := app.InstallClaudeHooks(p.RootPath)
-		if err != nil {
-			return err
-		}
-		o.ClaudeHooks, hooksChanged = path, changed
-	}
+	o.Instructions = &ir
 	return c.emit(o, func(w io.Writer) {
 		if res.Existing {
 			fmt.Fprintf(w, "✓ Project %s · %s (already registered)\n", p.ID, p.Name)
@@ -136,13 +122,6 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 				fmt.Fprintf(w, "Agents:      refreshed the at block in %s\n", ir.AgentsMD)
 			default:
 				fmt.Fprintf(w, "Agents:      %s is current\n", ir.AgentsMD)
-			}
-		}
-		if o.ClaudeHooks != "" {
-			if hooksChanged {
-				fmt.Fprintf(w, "Claude Code: hooks installed in %s\n", o.ClaudeHooks)
-			} else {
-				fmt.Fprintf(w, "Claude Code: hooks already in %s\n", o.ClaudeHooks)
 			}
 		}
 		if len(p.Regression) == 0 {
@@ -319,7 +298,7 @@ func refs(raw stringList) []plan.Ref {
 
 func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	var pf planFlags
-	c.bindPlanFlags(&pf)
+	c.bindPlanFlags(&pf, false)
 	key := c.fs.String("key", "", "stable project-local key")
 	group := c.fs.Bool("group", false, "create an organizational group instead of a task")
 	parent := c.fs.String("parent", "", "enclosing group (id or key)")
@@ -334,7 +313,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable)")
 	c.fs.Var(&requires, "requires", "hard prerequisite (id or key, repeatable)")
 	c.fs.Var(&blocks, "blocks", "existing task that will require the new one (repeatable)")
-	policyJSON := c.fs.String("policy-json", "", "task checks as JSON ({\"task_checks\": [...]})")
+	onCompleteJSON := c.fs.String("on-complete-json", "", "on_complete actions as a JSON array of ActionSpec")
 	file := c.fs.String("f", "", "plan file (JSON or YAML; '-' for stdin): one item, a list, or {tasks: [...]}; applied atomically")
 	inline := c.fs.String("plan", "", "inline JSON plan (same shape as -f)")
 	claim := c.fs.Bool("claim", false, "claim the task just added and print its session (single task only)")
@@ -356,7 +335,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
-		if len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" {
+		if len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *onCompleteJSON != "" {
 			return usage("--group takes --key, --parent, --check (the epic's own checks, run on the target once every member is complete) and --size; prerequisites, blockers, cohort, outcome, acceptance and pins belong to tasks")
 		}
 		g := plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent), Size: *size}
@@ -377,27 +356,24 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		op = g
 	} else {
 		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort, Pins: pins, Size: *size}
-		if *policyJSON != "" {
-			var pol verification.Policy
-			if err := json.Unmarshal([]byte(*policyJSON), &pol); err != nil {
-				return usage("--policy-json: %v", err)
+		if *onCompleteJSON != "" {
+			if err := json.Unmarshal([]byte(*onCompleteJSON), new([]map[string]any)); err != nil {
+				return usage("--on-complete-json: %v", err)
 			}
-			t.TaskChecks = pol.TaskChecks
-		} else {
-			for i, raw := range checks {
-				cs, err := parseCheck(raw, i+1, true)
-				if err != nil {
-					return err
-				}
-				t.TaskChecks = append(t.TaskChecks, cs)
+		}
+		for i, raw := range checks {
+			cs, err := parseCheck(raw, i+1, true)
+			if err != nil {
+				return err
 			}
-			for i, raw := range optionalChecks {
-				cs, err := parseCheck(raw, len(checks)+i+1, false)
-				if err != nil {
-					return err
-				}
-				t.TaskChecks = append(t.TaskChecks, cs)
+			t.TaskChecks = append(t.TaskChecks, cs)
+		}
+		for i, raw := range optionalChecks {
+			cs, err := parseCheck(raw, len(checks)+i+1, false)
+			if err != nil {
+				return err
 			}
+			t.TaskChecks = append(t.TaskChecks, cs)
 		}
 		op = t
 	}
@@ -536,8 +512,7 @@ func (c *ctxt) addFromPlan(ctx context.Context, pf planFlags, file, inline strin
 
 func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	var pf planFlags
-	c.bindPlanFlags(&pf)
-	title := c.fs.String("title", "", "new title")
+	c.bindPlanFlags(&pf, true)
 	outcome := c.fs.String("outcome", "", "new outcome")
 	parent := c.fs.String("parent", "\x00", "move into a group (id or key); empty string clears")
 	cohort := c.fs.String("cohort", "\x00", "set cohort; empty string clears")
@@ -554,7 +529,6 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	archive := c.fs.Bool("archive", false, "archive (soft-delete) the task or group; needs --reason")
 	reason := c.fs.String("reason", "", "why the item is archived (recorded; required with --archive)")
 	reset := c.fs.Bool("reset-attempts", false, "clear failure bookkeeping so the task can be claimed again")
-	withdraw := c.fs.Bool("withdraw-submission", false, "withdraw a cohort member's submission that awaits its peers so its contract can change (with --planner)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -571,15 +545,12 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
 		}
-		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *size != "" || *reset || *withdraw {
+		if *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *size != "" || *reset {
 			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
 	} else {
-		u := plan.UpdateTask{Target: target, ResetAttempts: *reset, WithdrawSubmission: *withdraw}
-		if *title != "" {
-			u.Title = title
-		}
+		u := plan.UpdateTask{Target: target, ResetAttempts: *reset}
 		if *outcome != "" {
 			u.Outcome = outcome
 		}
