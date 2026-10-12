@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Shared loop for the per-harness host scripts: claim, hand the task
-# current claim (`atask show`) to the agent command on stdin inside the workspace, release
+# Shared loop for the per-harness host scripts: claim, hand the worker
+# handoff (`atask context ID`) to the agent command on stdin inside the workspace, release
 # with a note if the agent exits without completing. Several copies run
 # in parallel. Requires: atask on PATH, ATASK_DB/ATASK_PROJECT as for any
 # atask command, and run_agent() defined by the caller (reads the prompt on
@@ -33,7 +33,7 @@ while :; do
 	echo "== $task in $workspace"
 	(
 		cd "$workspace"
-		atask show --output text | run_agent
+		atask context "$task" --output text | run_agent
 	) || true
 	status=$(atask show "$task" | json 'd["result"]["status"]')
 	if [ "$status" = "complete" ]; then

@@ -219,6 +219,17 @@ func renderContext(c Context) string {
 	var w strings.Builder
 	v := *c.Task
 	fmt.Fprintf(&w, "# Task %s: %s\n\n", v.ID, v.Title)
+	if v.Status == task.StatusComplete {
+		fmt.Fprintf(&w, "This task is complete")
+		if v.CompletedRevision != "" {
+			fmt.Fprintf(&w, " (revision %s)", short(v.CompletedRevision))
+		}
+		w.WriteString(". Nothing is left to do; do not implement or commit further work.\n")
+		if v.Outcome != "" && v.Outcome != v.Title {
+			fmt.Fprintf(&w, "\nOutcome: %s\n", v.Outcome)
+		}
+		return w.String()
+	}
 	if v.Outcome != "" && v.Outcome != v.Title {
 		fmt.Fprintf(&w, "Outcome: %s\n\n", v.Outcome)
 	}
@@ -276,10 +287,10 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	if len(c.Siblings) > 0 {
-		w.WriteString("Other open tasks (other workers' work; not yours to implement):\n")
-		for _, s := range c.Siblings {
-			fmt.Fprintf(&w, "- %s %s [%s]\n", s.ID, s.Title, s.Status)
+	if len(v.Blocks) > 0 {
+		w.WriteString("Blocks:\n")
+		for _, r := range v.Blocks {
+			fmt.Fprintf(&w, "- %s %s [%s]\n", r.ID, r.Title, r.Status)
 		}
 		w.WriteString("\n")
 	}
@@ -374,9 +385,8 @@ func shellJoin(argv []string) string {
 	return strings.Join(parts, " ")
 }
 
-// Rules is the agent execution contract, the same text as the
-// "Agent execution contract" section of AGENTS.md (a test keeps them in
-// sync), for hosts whose agent does not read that file.
+// Rules is the long execution contract for hosts that pass withRules to
+// Engine.Context. The installed AGENTS.md block is Instructions(), not this.
 const Rules = `## Agent execution contract
 
 Complete one independently verifiable task at a time.

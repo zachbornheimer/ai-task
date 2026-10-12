@@ -321,6 +321,7 @@ func (c *ctxt) printHelp(w io.Writer) {
 	fmt.Fprintln(w, "       no command lists every non-archived task (same as atask list)")
 	fmt.Fprintln(w, `
 atask context                         operating contract for agents (no project or database)
+atask context ID                      worker handoff for that task
 atask help [command]                  this reference, or one command's flags
 atask version                         build version
 

@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import [--no-instructions] [--claude: Claude Code hooks]; re-run to refresh", runInit)
+	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import [--no-instructions] [--claude: optional SessionStart only]; re-run to refresh", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --regression-check, --integration, --target-branch, budgets", runProject)
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
@@ -72,7 +72,7 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 	name := c.fs.String("name", "", "display name (default: directory name)")
 	path := c.fs.String("path", "", "directory to register (default: current directory)")
 	noInstructions := c.fs.Bool("no-instructions", false, "do not write AGENTS.md / CLAUDE.md")
-	claude := c.fs.Bool("claude", false, "also install the Claude Code hooks (.claude/settings.json: context at session start, edits kept in task worktrees, no stopping with an unfinished claim)")
+	claude := c.fs.Bool("claude", false, "optional: install only the Claude Code SessionStart hook (current claim, not the board). Does not install edit or stop guards.")
 	if err := c.parse(args); err != nil {
 		return err
 	}

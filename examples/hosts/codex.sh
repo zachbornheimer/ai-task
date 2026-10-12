@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Codex CLI as the worker: reads AGENTS.md itself; atask show is the prompt.
+# Codex CLI as the worker: reads AGENTS.md itself; atask context ID is the prompt.
 run_agent() { codex exec --full-auto "${CODEX_ARGS:-}" "$(cat)"; }
 set -eu
 export ATASK_OUTPUT=json
@@ -29,7 +29,7 @@ while :; do
 	echo "== $task in $workspace"
 	(
 		cd "$workspace"
-		atask show --output text | run_agent
+		atask context "$task" --output text | run_agent
 	) || true
 	status=$(atask show "$task" | json 'd["result"]["status"]')
 	if [ "$status" = "complete" ]; then

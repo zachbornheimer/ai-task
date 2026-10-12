@@ -354,18 +354,41 @@ func (c *ctxt) verifyGroups(ctx context.Context, args []string) error {
 	return runErr
 }
 
-func runContext(_ context.Context, c *ctxt, args []string) error {
+func runContext(ctx context.Context, c *ctxt, args []string) error {
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	if len(c.args) > 0 {
-		return usage("context takes no arguments; use atask show [ID] for a task")
+	if len(c.args) == 0 {
+		return c.emit(map[string]string{"prompt": AgentContract}, func(w io.Writer) {
+			_, _ = io.WriteString(w, AgentContract)
+		})
 	}
-	return c.emit(map[string]string{"prompt": AgentContract}, func(w io.Writer) {
-		_, _ = io.WriteString(w, AgentContract)
+	if len(c.args) != 1 {
+		return usage("context takes no arguments, or one task id")
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	ref := c.args[0]
+	var cx app.Context
+	if task.IsID(ref) {
+		cx, err = e.Context(ctx, "", ref, "", false)
+	} else {
+		id, rerr := c.resolveProject(ctx)
+		if rerr != nil {
+			return rerr
+		}
+		cx, err = e.Context(ctx, id, ref, "", false)
+	}
+	if err != nil {
+		return err
+	}
+	return c.emit(cx, func(w io.Writer) {
+		_, _ = io.WriteString(w, cx.Prompt)
 	})
 }
 
 func init() {
-	register("context", "operating contract for agents (no project or database)", runContext)
+	register("context", "operating contract, or worker handoff for a task id", runContext)
 }
