@@ -25,6 +25,7 @@ const (
 func Instructions() string {
 	return `
 **Track verifiable objectives with ` + "`atask`" + `.** An objective is work with a specific outcome and meaningful completion criteria. Run ` + "`atask context`" + ` to learn the workflow. Ensure an objective has a task before doing or delegating its work. The worker claims the task, follows its handoff (` + "`atask context ID`" + `), and requests verification with ` + "`atask verify complete`" + `. The engine determines whether completion requirements are satisfied.
+
 `
 }
 
