@@ -2,7 +2,7 @@
 # Prove an unscoped worker receives ATASK_SESSION and can verify complete
 # without a git worktree token stash.
 set -eu
-root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+root=$(CDPATH="" cd -- "$(dirname "$0")/../.." && pwd)
 d=$(mktemp -d "${TMPDIR:-/tmp}/atask-unscoped-host.XXXXXX")
 cleanup() { rm -rf "$d"; }
 trap cleanup EXIT

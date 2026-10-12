@@ -25,6 +25,10 @@ import (
 	"time"
 
 	at "github.com/zachbornheimer/ai-task"
+	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/plan"
+	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
 func main() {
@@ -55,7 +59,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 		}
 		db = filepath.Join(dir, "at.db")
 	}
-	eng, err := at.Open(ctx, at.Config{Path: db, PollInterval: 200 * time.Millisecond})
+	eng, err := app.Open(ctx, app.Config{Path: db, PollInterval: 200 * time.Millisecond})
 	if err != nil {
 		return err
 	}
@@ -74,7 +78,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	// Step A: propose and apply atomically.
 	prompt := "Build the OAuth token endpoint with a Postgres token store and scope enforcement, then verify the flow end to end."
 	proposal := fakePlanner(prompt)
-	snap, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.ListAll})
+	snap, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.FilterAll})
 	if err != nil {
 		return err
 	}
@@ -86,7 +90,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	const maxReviewRounds = 6
 	stable := false
 	for round := 0; round < maxReviewRounds; round++ {
-		current, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.ListAll})
+		current, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.FilterAll})
 		if err != nil {
 			return err
 		}
@@ -139,17 +143,17 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	return nil
 }
 
-func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out *os.File) error {
+func worker(ctx context.Context, eng *app.Engine, project at.ProjectID, n int, out *os.File) error {
 	for {
 		session, err := eng.Claim(ctx, at.ClaimRequest{ProjectID: project, Wait: true})
 		switch {
-		case errors.Is(err, at.ErrDone):
+		case errors.Is(err, app.ErrDone):
 			return nil
-		case errors.Is(err, at.ErrStalled):
+		case errors.Is(err, app.ErrStalled):
 			// A stall is a human's problem: say why, and show the plan.
-			var fe *at.Error
+			var fe *fault.Error
 			if errors.As(err, &fe) {
-				if sum, ok := fe.Details.(at.Summary); ok {
+				if sum, ok := fe.Details.(app.Summary); ok {
 					fmt.Fprintf(out, "worker %d: stalled: %v\n", n, sum.Reasons)
 				}
 			}
@@ -165,7 +169,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 			// ours, so release it for the next attempt.
 			fmt.Fprintf(out, "worker %d: %s agent error: %v\n", n, session.Task.ID, err)
 			_, _ = eng.Log(ctx, session.Token, at.LogEntry{Note: "agent error: " + err.Error()})
-			_, _ = eng.Release(ctx, session.Token, at.ReleaseOptions{Note: "released after agent error", Failed: true})
+			_, _ = eng.Release(ctx, session.Token, app.ReleaseOptions{Note: "released after agent error", Failed: true})
 		}
 	}
 }
@@ -173,7 +177,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 // runOneAgent is the fake coding agent. A real host would render a prompt
 // from session.Task and session.Handoff, start the model in
 // session.Workspace with ATASK_SESSION set, and keep renewing the lease.
-func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *os.File) error {
+func runOneAgent(ctx context.Context, eng *app.Engine, s at.Session, n int, out *os.File) error {
 	stop := heartbeat(ctx, eng, s.Token)
 	defer stop()
 	fmt.Fprintf(out, "worker %d: claimed %s (%s)\n", n, s.Task.ID, s.Task.Title)
@@ -198,7 +202,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	// Iterate with provisional checks (a failure here is information for
 	// the agent, not an error: cohort members cannot pass their end-to-end
 	// check alone), then establish completion.
-	if diag, err := eng.Verify(ctx, s.Token, at.VerifyTask); err != nil && at.ErrorCode(err) != "VERIFICATION_FAILED" {
+	if diag, err := eng.Verify(ctx, s.Token, at.VerifyTask); err != nil && fault.CodeOf(err) != "VERIFICATION_FAILED" {
 		return err
 	} else if !diag.Passed {
 		_, _ = eng.Log(ctx, s.Token, at.LogEntry{Note: "provisional task checks: " + diag.Summary})
@@ -216,7 +220,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	return nil
 }
 
-func heartbeat(ctx context.Context, eng *at.Store, tok at.SessionToken) func() {
+func heartbeat(ctx context.Context, eng *app.Engine, tok at.SessionToken) func() {
 	hctx, cancel := context.WithCancel(ctx)
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
@@ -242,13 +246,13 @@ func fakePlanner(prompt string) []at.Change {
 		return []at.CheckSpec{{ID: "unit-" + key, Command: []string{"test", "-f", key + ".txt"}, Required: true}}
 	}
 	return []at.Change{
-		at.AddGroup{Key: "identity", Title: "Identity Core"},
-		at.AddTask{Key: "compat", Title: "Confirm OAuth API compatibility", Parent: "identity", TaskChecks: check("compat")},
-		at.AddTask{Key: "store", Title: "Implement PostgreSQL token store", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("store")},
-		at.AddTask{Key: "scopes", Title: "Implement scope enforcement", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("scopes")},
-		at.AddTask{Key: "e2e", Title: "Verify end-to-end OAuth flow", Parent: "identity", Requires: []at.Ref{"store", "scopes"}, TaskChecks: check("e2e")},
-		at.AddTask{Key: "api", Title: "OAuth API side", Cohort: "oauth-flow", TaskChecks: []at.CheckSpec{{ID: "unit-api", Command: []string{"test", "-f", "api.txt"}, Required: true}, {ID: "flow", Command: []string{"sh", "-c", "test -f api.txt && test -f ui.txt"}, Required: true}}},
-		at.AddTask{Key: "ui", Title: "OAuth UI side", Cohort: "oauth-flow", TaskChecks: check("ui")},
+		plan.AddGroup{Key: "identity", Title: "Identity Core"},
+		plan.AddTask{Key: "compat", Title: "Confirm OAuth API compatibility", Parent: "identity", TaskChecks: check("compat")},
+		plan.AddTask{Key: "store", Title: "Implement PostgreSQL token store", Parent: "identity", Requires: []plan.Ref{"compat"}, TaskChecks: check("store")},
+		plan.AddTask{Key: "scopes", Title: "Implement scope enforcement", Parent: "identity", Requires: []plan.Ref{"compat"}, TaskChecks: check("scopes")},
+		plan.AddTask{Key: "e2e", Title: "Verify end-to-end OAuth flow", Parent: "identity", Requires: []plan.Ref{"store", "scopes"}, TaskChecks: check("e2e")},
+		plan.AddTask{Key: "api", Title: "OAuth API side", Cohort: "oauth-flow", TaskChecks: []at.CheckSpec{{ID: "unit-api", Command: []string{"test", "-f", "api.txt"}, Required: true}, {ID: "flow", Command: []string{"sh", "-c", "test -f api.txt && test -f ui.txt"}, Required: true}}},
+		plan.AddTask{Key: "ui", Title: "OAuth UI side", Cohort: "oauth-flow", TaskChecks: check("ui")},
 	}
 }
 
@@ -262,12 +266,12 @@ func fakeReviewer(current at.PlanSnapshot) []at.Change {
 		}
 	}
 	return []at.Change{
-		at.AddTask{Key: "rotate", Title: "Rotate leaked credentials", Blocks: []at.Ref{"store"}, TaskChecks: []at.CheckSpec{{ID: "unit-rotate", Command: []string{"test", "-f", "rotate.txt"}, Required: true}}},
+		plan.AddTask{Key: "rotate", Title: "Rotate leaked credentials", Blocks: []plan.Ref{"store"}, TaskChecks: []at.CheckSpec{{ID: "unit-rotate", Command: []string{"test", "-f", "rotate.txt"}, Required: true}}},
 	}
 }
 
-func printPlan(ctx context.Context, eng *at.Store, project at.ProjectID, out *os.File) {
-	snap, err := eng.List(ctx, at.ListQuery{ProjectID: project, Filter: at.ListAll})
+func printPlan(ctx context.Context, eng *app.Engine, project at.ProjectID, out *os.File) {
+	snap, err := eng.List(ctx, at.ListQuery{ProjectID: project, Filter: at.FilterAll})
 	if err != nil {
 		fmt.Fprintln(out, err)
 		return
@@ -276,7 +280,7 @@ func printPlan(ctx context.Context, eng *at.Store, project at.ProjectID, out *os
 		fmt.Fprintf(out, "  group %s %s (%d/%d)\n", g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
 	}
 	for _, t := range snap.Tasks {
-		fmt.Fprintf(out, "  %s %s  %s [%s]", at.Glyph(t.Status, t.Started), t.ID, t.Title, t.Status)
+		fmt.Fprintf(out, "  %s %s  %s [%s]", task.Glyph(t.Status, t.Started), t.ID, t.Title, t.Status)
 		if r := t.Verification.Complete; r != nil && r.Summary != "" {
 			fmt.Fprintf(out, " — %s: %s", r.Status, r.Summary)
 		}
