@@ -1,8 +1,9 @@
 # Agent contract: `atask` CLI and JSON
 
-Seven everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
-`list`. Project bootstrap (`init`, `project`, `projects`), `status`,
-`whoami`, `version` and `help` exist outside the agent's instruction set.
+Nine everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
+`list`, `help`, `version`. `atask context` is the operating contract (no
+project or database). Project bootstrap (`init`, `project`, `projects`),
+`status`, `doctor`, `prune` and `hook` exist outside that set.
 The CLI is a thin adapter over the Go engine; both apply the same rules.
 
 ## Output and exit codes
@@ -151,7 +152,8 @@ stale `--expect-rev`), a different request under the same key is
 ## Execution (session authority)
 ```
 
-atask context [REF] [--with-rules] a task's working context as one prompt (no REF: this session's task)
+atask context operating contract (no project or database)
+atask show [REF] current claim, or a particular task
 atask claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
 atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
 atask claim release [token|-] [--note ..] [--failed]
@@ -217,22 +219,10 @@ released. Only a run charged against its attempt derives to
 is refused with `VERIFICATION_RUNNING`; after completion it returns the
 stored acknowledgement.
 
-**Context.** `atask context` prints the working context of a task as one
-block of text an agent can take as its prompt, and in JSON mode the same
-text as `prompt` beside the task view: title, outcome, constraints,
-acceptance criteria, what "done" means, the task checks and regression
-checks verbatim, the target branch, prerequisites, the project's other
-open tasks (not yours), the workspace, branch and lease, files the branch
-already changed, uncommitted changes left by an earlier attempt, and the
-handoff, and the commit and rebase steps to use: `wt step commit` and
-`wt step rebase` when Worktrunk's `wt` is on PATH (`worktrunk: true` in
-JSON), plain git otherwise. With no task in hand at all (no reference, no
-token anywhere) it describes the plan instead: counts, what is claimable,
-and whether to claim or to plan (`summary` and `claimable` in JSON, no
-`task`). Without a reference it describes the current session's task
-(worktree token, `ATASK_SESSION`, or a token argument); with one it
-describes that task for anyone, read-only. `--with-rules` appends the
-rules of the road for an agent that does not read AGENTS.md.
+**Context.** `atask context` prints the agent operating contract as one
+block of text (JSON: `prompt`). It needs no project, database, or session.
+Discover work with `atask list`; inspect a task with `atask show` (no
+argument: the current claim).
 
 **Installing the instructions.** `atask init` registers the repository and
 installs the project instruction block (`app.Instructions`: how work gets
@@ -257,9 +247,9 @@ the third: (1) a bootstrap system prompt, set by the host where the
 harness allows it (Claude Code `-p --append-system-prompt`, a bare model's
 system message; Codex has none and relies on AGENTS.md); (2) the project
 instruction file, AGENTS.md (or a CLAUDE.md that imports it), holding the
-agent execution contract; (3) the task turn, `atask context`, which carries
-only task facts and never repeats the contract. `--with-rules` appends
-the contract for an agent that gets no project file. The bootstrap is:
+agent execution contract; (3) the task turn, `atask show` for the current
+claim and `atask list` for the plan. `atask context` is the operating
+contract and does not dump tasks. The bootstrap is:
 ```
 
 You are a coding agent responsible for one task in an isolated Git worktree.

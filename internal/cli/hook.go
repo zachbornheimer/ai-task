@@ -61,7 +61,7 @@ func runHook(ctx context.Context, c *ctxt, args []string) error {
 }
 
 // hookSessionStart injects the open board (the bd-prime analog) so a
-// session starts knowing the work. A live claim also injects whoami.
+// session starts knowing the work. A live claim also injects the current task.
 // The body is hookSpecificOutput.additionalContext: Grok ignores
 // SessionStart stdout, and Claude's bd prime --hook-json uses this envelope.
 func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
@@ -81,14 +81,14 @@ func (c *ctxt) hookSessionStart(ctx context.Context, cwd string) error {
 			}
 		}
 	}
-	snap, err := e.List(ctx, app.ListQuery{Filter: app.FilterOpen})
+	snap, err := e.List(ctx, app.ListQuery{Filter: app.FilterAll})
 	if err != nil {
 		return c.emitSessionStart(body.String())
 	}
 	if len(snap.Tasks) == 0 && len(snap.Groups) == 0 {
 		body.WriteString("no tasks registered.")
 	} else {
-		renderList(&body, snap, app.FilterOpen)
+		renderList(&body, snap, app.FilterAll, painter{})
 	}
 	return c.emitSessionStart(body.String())
 }

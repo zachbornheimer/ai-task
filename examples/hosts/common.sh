@@ -33,7 +33,7 @@ while :; do
 	echo "== $task in $workspace"
 	(
 		cd "$workspace"
-		atask context --output text | run_agent
+		atask show --output text | run_agent
 	) || true
 	status=$(atask show "$task" | json 'd["result"]["status"]')
 	if [ "$status" = "complete" ]; then

@@ -10,7 +10,7 @@ import (
 
 // TestAgentsMDIsTheInstalledBlock keeps this repository's AGENTS.md
 // identical to what `atask init` installs (between the markers) and the
-// rules an agent gets from `atask context --with-rules`.
+// rules an agent gets from the installed AGENTS.md block.
 func TestAgentsMDIsTheInstalledBlock(t *testing.T) {
 	b, err := os.ReadFile("../../AGENTS.md")
 	if err != nil {

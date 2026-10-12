@@ -186,21 +186,13 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(ws, "", nil, "log", "--note", "worktree token works"); r.code != 0 {
 		t.Fatalf("worktree token: %s %s", r.stdout, r.stderr)
 	}
-	if r := e.runIn(ws, "", nil, "whoami"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
-		t.Fatalf("whoami in worktree: %s %s", r.stdout, r.stderr)
+	if r := e.runIn(ws, "", nil, "show"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
+		t.Fatalf("show in worktree: %s %s", r.stdout, r.stderr)
 	}
-	// The working context: resolved from the worktree, or by reference
-	// from anywhere; the human form is the prompt itself.
-	if r := e.runIn(ws, "", nil, "context"); r.code != 0 || !strings.Contains(r.env["result"].(map[string]any)["prompt"].(string), "# Task "+a) {
-		t.Fatalf("context in worktree: %s %s", r.stdout, r.stderr)
+	if cx := e.ok("context"); !strings.Contains(cx["prompt"].(string), "atask is the task engine") {
+		t.Fatalf("context contract: %v", cx)
 	}
-	if cx := e.ok("context", b, "--with-rules"); !strings.Contains(cx["prompt"].(string), "Agent execution contract") || cx["workspace"] != nil {
-		t.Fatalf("context by id: %v", cx)
-	}
-	if cx := e.ok("context"); cx["task"] != nil || cx["summary"] == nil || !strings.Contains(cx["prompt"].(string), "no task in hand") {
-		t.Fatalf("project context: %v", cx)
-	}
-	if r := e.runIn(ws, "", []string{"ATASK_OUTPUT="}, "context"); r.code != 0 || !strings.HasPrefix(r.stdout, "# Task "+a) {
+	if r := e.runIn(ws, "", []string{"ATASK_OUTPUT="}, "context"); r.code != 0 || !strings.Contains(r.stdout, "verify complete") {
 		t.Fatalf("human context: %s %s", r.stdout, r.stderr)
 	}
 	if !strings.HasSuffix(sess["branch"].(string), "/"+a) || !strings.HasPrefix(sess["branch"].(string), "atask/") {

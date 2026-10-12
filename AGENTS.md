@@ -14,8 +14,8 @@ command prints one JSON envelope when `ATASK_OUTPUT=json` is set; read
 Everything that changes this repository goes through `atask`.
 
 - A question, an explanation, or a review is not a task: answer it.
-- Anything else starts with the plan: `atask context` (or `atask status` and
-  `atask list`). If a task already covers the request, claim it. Otherwise
+- Anything else starts with `atask context` (the operating contract), then
+  `atask list` and `atask show`. If a task already covers the request, claim it. Otherwise
   add tasks, each with a check that proves it, then claim one:
   `atask add "title" --check "id: cmd"`, several at once with
   `atask add -f plan.yaml`, and `atask add "title" --check "..." --claim` for
@@ -40,7 +40,8 @@ Everything that changes this repository goes through `atask`.
 ## Verbs
 
 ```text
-atask context                                           your task: outcome, checks, workspace, state, handoff (or the plan, with no task in hand)
+atask context                                           operating contract (no project or database)
+atask list / atask show [ID]                            discover the plan; show with no ID is the current claim
 atask claim [REF] [--wait]                              one leased task, its worktree on atask/<id>; the token is stored there
 atask log --done "..." --next "..." --learned "..."     record progress; next is what the next attempt reads first
 atask verify task                                       run this task's checks (diagnostic, repeatable)
@@ -57,7 +58,7 @@ Complete one independently verifiable task at a time.
 
 Start
 
-- Run `atask context` before working. Review the handoff, the existing changes and `git status` before editing; preserve useful prior work.
+- Run `atask context` once for the operating contract. `atask show` is the current claim; `atask list` is the plan. Review the handoff, the existing changes and `git status` before editing; preserve useful prior work.
 - Work only in the assigned workspace. The session token is stored there, so `atask` commands run there need no token.
 - Do not implement other tasks.
 

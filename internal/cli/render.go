@@ -32,28 +32,31 @@ func stateLabel(s task.Status) string {
 }
 
 // line renders one compact list row.
-func line(v app.TaskView) string {
-	s := fmt.Sprintf("%s %s  %s", task.Glyph(v.Status, v.Started), v.ID, v.Title)
+func line(v app.TaskView, p painter) string {
+	s := fmt.Sprintf("%s %s  %s", p.glyph(v.Status, v.Started), v.ID, v.Title)
 	if a := v.Status.Annotation(); a != "" {
 		s += " " + a
 	}
 	if v.Project != "" {
-		s += "  " + v.Project
+		s += p.dim("  [project: " + v.Project + "]")
 	}
 	return s
 }
 
-// groupLine: ● when every executable member is complete (and there is
-// one), ◐ when any member was ever started or completed, ○ otherwise.
-func groupLine(g app.GroupView) string {
-	glyph := "○"
+func groupGlyph(g app.GroupView) string {
 	switch {
 	case g.Complete:
-		glyph = "●"
+		return "●"
 	case g.Progress.Started > 0 || g.Progress.Complete > 0:
-		glyph = "◐"
+		return "◐"
 	}
-	s := fmt.Sprintf("%s %s  %s (%d/%d complete)", glyph, g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
+	return "○"
+}
+
+// groupLine: ● when every executable member is complete (and there is
+// one), ◐ when any member was ever started or completed, ○ otherwise.
+func groupLine(g app.GroupView, p painter) string {
+	s := fmt.Sprintf("%s %s  %s (%d/%d complete)", p.glyphRaw(groupGlyph(g)), g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
 	if gv := g.Verification; gv != nil && gv.Status != "" && gv.Status != "passed" {
 		s += fmt.Sprintf(" [epic checks %s]", gv.Status)
 	}
@@ -63,11 +66,13 @@ func groupLine(g app.GroupView) string {
 	return s
 }
 
+func branch(p painter, s string) string { return p.dim(s) }
+
 // renderList prints the hierarchy (list) or a flat filtered list.
-func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter) {
-	if filter == app.FilterReady || filter == app.FilterBlocked || filter == app.FilterArchived {
+func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter, p painter) {
+	if filter == app.FilterReady || filter == app.FilterBlocked || filter == app.FilterArchived || filter == app.FilterComplete {
 		for _, t := range snap.Tasks {
-			fmt.Fprintln(w, line(t))
+			fmt.Fprintln(w, line(t, p))
 			if filter == app.FilterBlocked {
 				fmt.Fprintf(w, "    requires: %s\n", requiresText(t, true))
 			}
@@ -99,7 +104,7 @@ func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter) {
 		}
 	}
 	for _, t := range top {
-		fmt.Fprintln(w, line(t))
+		fmt.Fprintln(w, line(t, p))
 		if t.Status == task.StatusBlocked {
 			fmt.Fprintf(w, "    requires: %s\n", requiresText(t, false))
 		}
@@ -108,22 +113,21 @@ func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		renderGroup(w, g, byGroup, children, "", "")
+		renderGroup(w, g, byGroup, children, "", "", p)
 	}
 }
 
 // renderGroup prints a group line prefixed by linePrefix (the tree branch
 // of a nested group) and its members indented by indent.
-func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskView, children map[task.ID][]app.GroupView, linePrefix, indent string) {
-	fmt.Fprintln(w, linePrefix+groupLine(g))
+func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskView, children map[task.ID][]app.GroupView, linePrefix, indent string, p painter) {
+	fmt.Fprintln(w, linePrefix+groupLine(g, p))
 	type row struct {
-		text   string
-		extra  string
-		isLast bool
+		text  string
+		extra string
 	}
 	var rows []row
 	for _, t := range byGroup[g.ID] {
-		r := row{text: line(t)}
+		r := row{text: line(t, p)}
 		if t.Status == task.StatusBlocked {
 			r.extra = "requires: " + requiresText(t, false)
 		}
@@ -132,21 +136,21 @@ func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskVie
 	subs := children[g.ID]
 	total := len(rows) + len(subs)
 	for i, r := range rows {
-		branch := "├── "
+		b := "├── "
 		if i == total-1 {
-			branch = "└── "
+			b = "└── "
 		}
-		fmt.Fprintln(w, indent+branch+r.text)
+		fmt.Fprintln(w, indent+branch(p, b)+r.text)
 		if r.extra != "" {
 			fmt.Fprintln(w, indent+"        "+r.extra)
 		}
 	}
 	for i, sg := range subs {
-		branch, next := "├── ", "│   "
+		b, next := "├── ", "│   "
 		if len(rows)+i == total-1 {
-			branch, next = "└── ", "    "
+			b, next = "└── ", "    "
 		}
-		renderGroup(w, sg, byGroup, children, indent+branch, indent+next)
+		renderGroup(w, sg, byGroup, children, indent+branch(p, b), indent+branch(p, next), p)
 	}
 }
 
@@ -206,19 +210,47 @@ func capitalise(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+func kindLabel(k task.Kind) string {
+	if k == task.KindGroup {
+		return "group"
+	}
+	return "task"
+}
+
+func showKindTag(k task.Kind) string {
+	if k == task.KindGroup {
+		return "GROUP"
+	}
+	return "TASK"
+}
+
+func updatedAt(v app.TaskView) time.Time {
+	if !v.UpdatedAt.IsZero() {
+		return v.UpdatedAt
+	}
+	return v.CreatedAt
+}
+
+func writeWrapped(w io.Writer, s string) {
+	for line := range strings.SplitSeq(s, "\n") {
+		fmt.Fprintf(w, "  %s\n", line)
+	}
+}
+
 // renderShow prints the annotated detail view.
-func renderShow(w io.Writer, v app.TaskView, full bool) {
-	fmt.Fprintf(w, "%s %s · %s\n", task.Glyph(v.Status, v.Started), v.ID, v.Title)
-	fmt.Fprintf(w, "[%s]\n", stateLabel(v.Status))
-	fmt.Fprintf(w, "Created: %s\n", v.CreatedAt.Format("2006-01-02 15:04"))
+func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
+	fmt.Fprintf(w, "%s %s [%s] · %s   [%s]\n", p.glyph(v.Status, v.Started), v.ID, showKindTag(v.Kind), v.Title, stateLabel(v.Status))
+	if v.Creator != "" {
+		fmt.Fprintf(w, "Created by: %s · Type: %s\n", v.Creator, kindLabel(v.Kind))
+	} else {
+		fmt.Fprintf(w, "Type: %s\n", kindLabel(v.Kind))
+	}
+	fmt.Fprintf(w, "Created: %s · Updated: %s\n", v.CreatedAt.Format("2006-01-02"), updatedAt(v).Format("2006-01-02"))
 	if v.Project != "" {
 		fmt.Fprintf(w, "Project: %s\n", v.Project)
 	}
 	if v.Key != "" {
 		fmt.Fprintf(w, "Key: %s\n", v.Key)
-	}
-	if v.Group != nil {
-		fmt.Fprintf(w, "Group: %s\n", v.Group.Title)
 	}
 	if v.Cohort != "" {
 		fmt.Fprintf(w, "Cohort: %s\n", v.Cohort)
@@ -230,10 +262,16 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 		if v.Progress != nil {
 			fmt.Fprintf(w, "Progress: %d/%d complete\n", v.Progress.Complete, v.Progress.Total)
 		}
+		fmt.Fprintf(w, "\nDESCRIPTION\n")
+		writeWrapped(w, v.Title)
+		if v.Outcome != "" && v.Outcome != v.Title {
+			fmt.Fprintln(w, "\nOUTCOME")
+			writeWrapped(w, v.Outcome)
+		}
 		if len(v.Checks) > 0 {
 			fmt.Fprintf(w, "\nEPIC CHECKS (size %s; run on the target once every member is complete)\n", v.Size)
 			for _, ch := range v.Checks {
-				fmt.Fprintf(w, "• %s: %s\n", ch.ID, app.ShellJoin(ch.Command))
+				fmt.Fprintf(w, "  • %s: %s\n", ch.ID, app.ShellJoin(ch.Command))
 			}
 			if gv := v.GroupVerification; gv != nil {
 				status := gv.Status
@@ -251,45 +289,51 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 			}
 		}
 		if len(v.Children) > 0 {
-			fmt.Fprintln(w, "\nMEMBERS")
+			fmt.Fprintln(w, "\nCHILDREN")
 			for _, c := range v.Children {
-				fmt.Fprintf(w, "%s %s %s\n", c.Status.Glyph(), c.ID, c.Title)
+				fmt.Fprintf(w, "  ↳ %s %s: %s\n", p.glyph(c.Status, false), c.ID, c.Title)
 			}
 		}
 		return
 	}
-	fmt.Fprintf(w, "\nDESCRIPTION\n%s\n", v.Title)
+	fmt.Fprintln(w, "\nDESCRIPTION")
+	writeWrapped(w, v.Title)
 	if v.Outcome != "" && v.Outcome != v.Title {
-		fmt.Fprintf(w, "\nOUTCOME\n%s\n", v.Outcome)
+		fmt.Fprintln(w, "\nOUTCOME")
+		writeWrapped(w, v.Outcome)
 	}
 	if len(v.Constraints) > 0 {
 		fmt.Fprintln(w, "\nCONSTRAINTS")
 		for _, c := range v.Constraints {
-			fmt.Fprintf(w, "• %s\n", c)
+			fmt.Fprintf(w, "  • %s\n", c)
 		}
 	}
 	if len(v.Acceptance) > 0 {
 		fmt.Fprintln(w, "\nACCEPTANCE CRITERIA")
 		for _, a := range v.Acceptance {
-			fmt.Fprintf(w, "• %s\n", a.Description)
+			fmt.Fprintf(w, "  • %s\n", a.Description)
 		}
+	}
+	if v.Group != nil {
+		fmt.Fprintln(w, "\nPARENT")
+		fmt.Fprintf(w, "  ↑ %s %s: %s\n", p.glyph(v.Group.Status, false), v.Group.ID, v.Group.Title)
 	}
 	if len(v.Requires) > 0 {
 		fmt.Fprintln(w, "\nREQUIRES")
 		for _, r := range v.Requires {
-			fmt.Fprintf(w, "%s %s %s\n", r.Status.Glyph(), r.ID, r.Title)
+			fmt.Fprintf(w, "  %s %s: %s\n", p.glyph(r.Status, false), r.ID, r.Title)
 		}
 	}
 	if len(v.Blocks) > 0 {
 		fmt.Fprintln(w, "\nBLOCKS")
 		for _, r := range v.Blocks {
-			fmt.Fprintf(w, "%s %s %s\n", r.Status.Glyph(), r.ID, r.Title)
+			fmt.Fprintf(w, "  ↳ %s %s: %s\n", p.glyph(r.Status, false), r.ID, r.Title)
 		}
 	}
 	if len(v.Pins) > 0 {
 		fmt.Fprintln(w, "\nPINNED (must not change)")
-		for _, p := range v.Pins {
-			fmt.Fprintf(w, "• %s\n", p)
+		for _, pin := range v.Pins {
+			fmt.Fprintf(w, "  • %s\n", pin)
 		}
 	}
 	if len(v.Checks) > 0 {
@@ -299,14 +343,14 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 			if !ch.Required {
 				kind = "optional"
 			}
-			fmt.Fprintf(w, "• %s (%s): %s\n", ch.ID, kind, app.ShellJoin(ch.Command))
+			fmt.Fprintf(w, "  • %s (%s): %s\n", ch.ID, kind, app.ShellJoin(ch.Command))
 		}
 	}
 	fmt.Fprintln(w, "\nVERIFICATION")
-	fmt.Fprintf(w, "Task:        %s\n", runText(v.Verification.Task))
-	fmt.Fprintf(w, "Regression:  %s\n", runText(v.Verification.Regression))
+	fmt.Fprintf(w, "  Task:        %s\n", runText(v.Verification.Task))
+	fmt.Fprintf(w, "  Regression:  %s\n", runText(v.Verification.Regression))
 	if v.Verification.Complete != nil {
-		fmt.Fprintf(w, "Complete:    %s\n", runText(v.Verification.Complete))
+		fmt.Fprintf(w, "  Complete:    %s\n", runText(v.Verification.Complete))
 	}
 	if a := v.Attempt; a != nil {
 		state := "lease expired"
@@ -315,29 +359,29 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 		} else if a.EndedAt != nil {
 			state = string(a.EndReason)
 		}
-		fmt.Fprintf(w, "\nATTEMPT\n#%d (%s)\n", a.Seq, state)
+		fmt.Fprintf(w, "\nATTEMPT\n  #%d (%s)\n", a.Seq, state)
 		if a.Workspace != "" {
-			fmt.Fprintf(w, "Workspace: %s (%s)\n", a.Workspace, a.Branch)
+			fmt.Fprintf(w, "  Workspace: %s (%s)\n", a.Workspace, a.Branch)
 		}
 	}
 	if s := v.Submission; s != nil {
-		fmt.Fprintf(w, "\nSUBMISSION\n#%d from attempt %d, revision %s, verification %s\n", s.ID, s.AttemptSeq, orDash(s.Revision), s.Verification)
+		fmt.Fprintf(w, "\nSUBMISSION\n  #%d from attempt %d, revision %s, verification %s\n", s.ID, s.AttemptSeq, orDash(s.Revision), s.Verification)
 	}
 	if v.CompletedAt != nil {
-		fmt.Fprintf(w, "\nCOMPLETED\n%s", v.CompletedAt.Format("2006-01-02 15:04"))
+		fmt.Fprintf(w, "\nCOMPLETED\n  %s", v.CompletedAt.Format("2006-01-02 15:04"))
 		if v.CompletedRevision != "" {
 			fmt.Fprintf(w, " at revision %s", v.CompletedRevision)
 		}
 		fmt.Fprintln(w)
 	}
 	if v.AttentionReason != "" {
-		fmt.Fprintf(w, "\nATTENTION\n%s\n", v.AttentionReason)
+		fmt.Fprintf(w, "\nATTENTION\n  %s\n", v.AttentionReason)
 	}
 	if v.LastError != "" {
-		fmt.Fprintf(w, "\nLAST ERROR (not counted as a failure)\n%s\n", v.LastError)
+		fmt.Fprintf(w, "\nLAST ERROR (not counted as a failure)\n  %s\n", v.LastError)
 	}
 	if v.Failures > 0 {
-		fmt.Fprintf(w, "\nRETRIES\n%d failed attempt(s)", v.Failures)
+		fmt.Fprintf(w, "\nRETRIES\n  %d failed attempt(s)", v.Failures)
 		if v.NextEligibleAt != nil {
 			fmt.Fprintf(w, "; claimable after %s", v.NextEligibleAt.Format(time.RFC3339))
 		}
@@ -347,24 +391,43 @@ func renderShow(w io.Writer, v app.TaskView, full bool) {
 		fmt.Fprintln(w)
 		renderHandoff(w, *v.Handoff)
 	}
-	fmt.Fprintf(w, "\nHISTORY\n%s — Task defined.\n", v.CreatedAt.Format("15:04"))
+	renderComments(w, v)
 	if full && v.History != nil {
+		fmt.Fprintln(w, "\nHISTORY")
 		for _, a := range v.History.Attempts {
 			end := "open"
 			if a.EndedAt != nil {
 				end = string(a.EndReason)
 			}
-			fmt.Fprintf(w, "%s — Attempt #%d started (%s).\n", a.StartedAt.Format("15:04"), a.Seq, end)
-		}
-		for _, l := range v.History.Logs {
-			renderLog(w, l)
+			fmt.Fprintf(w, "  %s — Attempt #%d started (%s).\n", a.StartedAt.Format("15:04"), a.Seq, end)
 		}
 		for _, r := range v.History.Runs {
-			fmt.Fprintf(w, "run %d %s %s %s\n", r.ID, r.Mode, r.Status, r.Summary)
+			fmt.Fprintf(w, "  run %d %s %s %s\n", r.ID, r.Mode, r.Status, r.Summary)
 			renderEvidence(w, r.Evidence, true)
 		}
 		for _, i := range v.History.Integrations {
-			fmt.Fprintf(w, "%s — Promoted %s to %s as %s.\n", i.CreatedAt.Format("15:04"), short(i.SourceRevision), i.TargetBranch, short(i.ResultRevision))
+			fmt.Fprintf(w, "  %s — Promoted %s to %s as %s.\n", i.CreatedAt.Format("15:04"), short(i.SourceRevision), i.TargetBranch, short(i.ResultRevision))
+		}
+	}
+}
+
+func renderComments(w io.Writer, v app.TaskView) {
+	var logs []execution.RecordedLog
+	if v.History != nil && len(v.History.Logs) > 0 {
+		logs = v.History.Logs
+	} else if v.Handoff != nil {
+		logs = v.Handoff.RecentLogs
+	}
+	if len(logs) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nCOMMENTS")
+	for _, l := range logs {
+		fmt.Fprintf(w, "  %s\n", l.At.Format("2006-01-02 15:04"))
+		for _, kv := range []struct{ k, v string }{{"done", l.Done}, {"next", l.Next}, {"learned", l.Learned}, {"note", l.Note}} {
+			if kv.v != "" {
+				fmt.Fprintf(w, "      %s: %s\n", kv.k, kv.v)
+			}
 		}
 	}
 }
@@ -430,12 +493,6 @@ func renderHandoff(w io.Writer, h execution.Handoff) {
 			if c.Log != "" {
 				fmt.Fprintf(w, "      full output: %s\n", c.Log)
 			}
-		}
-	}
-	if h.TotalLogs > 0 {
-		fmt.Fprintf(w, "Recent log (%d of %d, newest first):\n", len(h.RecentLogs), h.TotalLogs)
-		for _, l := range h.RecentLogs {
-			renderLog(w, l)
 		}
 	}
 	for _, wn := range h.Warnings {

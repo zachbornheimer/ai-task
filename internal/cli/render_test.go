@@ -61,19 +61,19 @@ func withGroup(v app.TaskView, g *app.Rel) app.TaskView { v.Group = g; return v 
 
 func TestListLineTagsProject(t *testing.T) {
 	v := tv("at-a91", "Rotate leaked credentials", task.StatusReady)
-	if strings.Contains(line(v), "ai-task") {
-		t.Fatalf("unscoped row must stay compact: %q", line(v))
+	if strings.Contains(line(v, painter{}), "ai-task") {
+		t.Fatalf("unscoped row must stay compact: %q", line(v, painter{}))
 	}
 	v.Project = "ai-task"
-	got := line(v)
-	if !strings.Contains(got, "ai-task") {
+	got := line(v, painter{})
+	if !strings.Contains(got, "[project: ai-task]") {
 		t.Fatalf("mixed list must tag the project: %q", got)
 	}
 }
 
 func TestListGolden(t *testing.T) {
 	var b bytes.Buffer
-	renderList(&b, snapshot(), app.FilterOpen)
+	renderList(&b, snapshot(), app.FilterOpen, painter{})
 	golden(t, "list.txt", b.String())
 
 	ready := snapshot()
@@ -85,13 +85,13 @@ func TestListGolden(t *testing.T) {
 	}
 	ready.Tasks = only
 	b.Reset()
-	renderList(&b, ready, app.FilterReady)
+	renderList(&b, ready, app.FilterReady, painter{})
 	golden(t, "list_ready.txt", b.String())
 
 	blocked := snapshot()
 	blocked.Tasks = []app.TaskView{blocked.Tasks[4]}
 	b.Reset()
-	renderList(&b, blocked, app.FilterBlocked)
+	renderList(&b, blocked, app.FilterBlocked, painter{})
 	golden(t, "list_blocked.txt", b.String())
 
 	// Glyph rules: ● only for complete; ◐ for anything started but not
@@ -116,7 +116,7 @@ func TestListGolden(t *testing.T) {
 		{ID: "at-g05", Title: "Partly started", Progress: app.Progress{Total: 3, Started: 1}},
 	}}
 	b.Reset()
-	renderList(&b, mixed, app.FilterAll)
+	renderList(&b, mixed, app.FilterAll, painter{})
 	golden(t, "list_glyphs.txt", b.String())
 
 	// Nested groups: a subgroup line carries exactly one tree prefix and
@@ -132,7 +132,7 @@ func TestListGolden(t *testing.T) {
 		{ID: "at-i01", Title: "Inner", ParentID: "at-o01", Progress: app.Progress{Total: 1}},
 	}}
 	b.Reset()
-	renderList(&b, nested, app.FilterOpen)
+	renderList(&b, nested, app.FilterOpen, painter{})
 	golden(t, "list_nested.txt", b.String())
 }
 
@@ -145,7 +145,7 @@ func TestShowGolden(t *testing.T) {
 	v.Requires = []app.Rel{{ID: "at-c17", Title: "Confirm OAuth API compatibility", Status: task.StatusComplete}}
 	v.Blocks = []app.Rel{{ID: "at-f16", Title: "Verify end-to-end OAuth flow", Status: task.StatusBlocked}}
 	var b bytes.Buffer
-	renderShow(&b, v, false)
+	renderShow(&b, v, false, painter{})
 	golden(t, "show.txt", b.String())
 
 	// A claimed task with handoff and attempt details; no token anywhere.
@@ -154,7 +154,7 @@ func TestShowGolden(t *testing.T) {
 	c.Attempt = &app.AttemptView{Seq: 2, StartedAt: exp.Add(-time.Hour), LeaseExpiresAt: exp, LeaseActive: true, Workspace: "/ws/at-d83-2", Branch: "atask/at-d83"}
 	c.Handoff = &execution.Handoff{LatestNext: "wire the migration", Learnings: []string{"pool size matters"}, TotalLogs: 1, RecentLogs: []execution.RecordedLog{{Seq: 4, AttemptSeq: 1, At: exp.Add(-2 * time.Hour), LogEntry: execution.LogEntry{Done: "schema drafted", Next: "wire the migration", Learned: "pool size matters"}}}}
 	b.Reset()
-	renderShow(&b, c, false)
+	renderShow(&b, c, false, painter{})
 	golden(t, "show_claimed.txt", b.String())
 	if bytes.Contains(b.Bytes(), []byte("sess-")) {
 		t.Fatal("token rendered")

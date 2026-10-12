@@ -383,7 +383,7 @@ Complete one independently verifiable task at a time.
 
 Start
 
-- Run ` + "`atask context`" + ` before working. Review the handoff, the existing changes and ` + "`git status`" + ` before editing; preserve useful prior work.
+- Run ` + "`atask context`" + ` once for the operating contract. ` + "`atask show`" + ` is the current claim; ` + "`atask list`" + ` is the plan. Review the handoff, the existing changes and ` + "`git status`" + ` before editing; preserve useful prior work.
 - Work only in the assigned workspace. The session token is stored there, so ` + "`atask`" + ` commands run there need no token.
 - Do not implement other tasks.
 

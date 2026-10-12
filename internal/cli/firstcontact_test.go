@@ -33,7 +33,7 @@ func TestTopLevelHelp(t *testing.T) {
 	if code, out, _ := runAt(t, "help"); code != ExitOK || !strings.Contains(out, "Commands:") {
 		t.Fatalf("at help: exit %d\n%s", code, out)
 	}
-	// A bare `atask` lists the open board (empty here).
+	// A bare `atask` lists every non-archived task (empty here).
 	if code, out, errOut := runAt(t); code != ExitOK || !strings.Contains(out, "no tasks registered") {
 		t.Fatalf("bare atask: exit %d stdout %q stderr %q", code, out, errOut)
 	}

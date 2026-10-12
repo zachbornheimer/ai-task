@@ -26,6 +26,8 @@ const (
 	FilterBlocked Filter = "blocked"
 	// FilterAll: everything live, complete included.
 	FilterAll Filter = "all"
+	// FilterComplete: completed live tasks and groups.
+	FilterComplete Filter = "complete"
 	// FilterArchived: archived tasks only.
 	FilterArchived Filter = "archived"
 )
@@ -116,6 +118,9 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				if q.Filter == FilterOpen && g.Complete {
 					continue
 				}
+				if q.Filter == FilterComplete && !g.Complete {
+					continue
+				}
 				snap.Groups = append(snap.Groups, g)
 				continue
 			}
@@ -130,6 +135,10 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				}
 			case FilterBlocked:
 				if st != task.StatusBlocked {
+					continue
+				}
+			case FilterComplete:
+				if st != task.StatusComplete {
 					continue
 				}
 			case FilterArchived:

@@ -66,7 +66,7 @@ prompt. For any other harness, `examples/hosts/custom.sh` takes
 `AGENT_CMD`: the command receives the task context on stdin with
 `ATASK_SESSION` exported and must work in the printed workspace. For a bare
 model behind an API, send the bootstrap as the system message and `atask
-context --with-rules` as the first user message.
+context` as the first user message.
 
 ## Planners
 

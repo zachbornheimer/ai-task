@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -26,8 +27,8 @@ func init() {
 	register("project", "show or configure the current project (trusted): --regression-check, --integration, --target-branch, budgets", runProject)
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
 	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
-	register("show", "show a task or group: atask show REF [--full]", runShow)
-	register("list", "list open tasks: atask list [<project>] [ready|blocked|all|archived]", runList)
+	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
+	register("list", "list non-archived tasks: atask list [<project>] [ready|blocked|complete|archived|open]", runList)
 	register("status", "board-wide counts, or one project with --project", runStatus)
 	register("prune", "remove worktrees of complete/archived tasks and quarantined directories of idle tasks", runPrune)
 }
@@ -679,8 +680,11 @@ func runShow(ctx context.Context, c *ctxt, args []string) error {
 	if err := c.parse(args); err != nil {
 		return err
 	}
+	if len(c.args) == 0 {
+		return c.showCurrent(ctx, *full)
+	}
 	if len(c.args) != 1 {
-		return usage("show needs exactly one task id or key")
+		return usage("show takes a task id, or none to show the current claim")
 	}
 	e, err := c.engine(ctx)
 	if err != nil {
@@ -696,7 +700,32 @@ func runShow(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.emit(v, func(w io.Writer) { renderShow(w, v, *full) })
+	p := c.painter()
+	return c.emit(v, func(w io.Writer) { renderShow(w, v, *full, p) })
+}
+
+func (c *ctxt) showCurrent(ctx context.Context, full bool) error {
+	raw := c.env.Getenv("ATASK_SESSION")
+	if strings.TrimSpace(raw) == "" {
+		raw = workspace.LoadToken(ctx, c.env.Cwd)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return usage("a task ID is required outside an active claim")
+	}
+	tok, err := execution.ParseToken(raw)
+	if err != nil {
+		return err
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	v, err := e.Whoami(ctx, tok)
+	if err != nil {
+		return err
+	}
+	p := c.painter()
+	return c.emit(v, func(w io.Writer) { renderShow(w, v, full, p) })
 }
 
 func renderProjects(w io.Writer, ps []project.Project) error {
@@ -714,7 +743,7 @@ func renderProjects(w io.Writer, ps []project.Project) error {
 
 func listFilter(s string) (app.Filter, bool) {
 	switch s {
-	case "ready", "blocked", "all", "archived", "open":
+	case "ready", "blocked", "complete", "archived", "open", "all":
 		return app.Filter(s), true
 	}
 	return "", false
@@ -728,18 +757,18 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	filter := app.FilterOpen
+	filter := app.FilterAll
 	var pid project.ID
 	if len(c.args) == 0 {
-		// Global board: every open task. Filter with a project name or --project.
+		// Global board: every non-archived task, complete included.
 	} else if f, ok := listFilter(c.args[0]); ok {
 		if len(c.args) > 1 {
-			return usage("list takes a project and an optional filter: ready, blocked, all, archived")
+			return usage("list takes a project and an optional filter: ready, blocked, complete, archived, open")
 		}
 		filter = f
 	} else {
 		if len(c.args) > 2 {
-			return usage("list takes a project and an optional filter: ready, blocked, all, archived")
+			return usage("list takes a project and an optional filter: ready, blocked, complete, archived, open")
 		}
 		p, err := e.ResolveProject(ctx, c.args[0], "")
 		if err != nil {
@@ -749,7 +778,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		if len(c.args) == 2 {
 			f, ok := listFilter(c.args[1])
 			if !ok {
-				return usage("unknown list filter %q (ready, blocked, all, archived)", c.args[1])
+				return usage("unknown list filter %q (ready, blocked, complete, archived, open)", c.args[1])
 			}
 			filter = f
 		}
@@ -758,6 +787,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
+	p := c.painter()
 	return c.emit(snap, func(w io.Writer) {
 		if len(snap.Tasks) == 0 && len(snap.Groups) == 0 {
 			if pid == "" {
@@ -771,7 +801,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 			_, _ = fmt.Fprintf(w, "no tasks registered in %s.\n", name)
 			return
 		}
-		renderList(w, snap, filter)
+		renderList(w, snap, filter, p)
 	})
 }
 
