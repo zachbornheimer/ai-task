@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Shared loop for the per-harness host scripts: claim, hand the task
-# context to the agent command on stdin inside the workspace, release
+# current claim (`atask show`) to the agent command on stdin inside the workspace, release
 # with a note if the agent exits without completing. Several copies run
 # in parallel. Requires: atask on PATH, ATASK_DB/ATASK_PROJECT as for any
 # atask command, and run_agent() defined by the caller (reads the prompt on

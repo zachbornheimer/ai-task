@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# OpenCode as the worker: reads AGENTS.md itself; the context is the prompt.
+# OpenCode as the worker: reads AGENTS.md itself; atask show is the prompt.
 run_agent() { opencode run "${OPENCODE_ARGS:-}" "$(cat)"; }
 set -eu
 export ATASK_OUTPUT=json

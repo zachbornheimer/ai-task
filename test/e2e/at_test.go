@@ -259,7 +259,7 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 		t.Fatalf("list glyphs:\n%s", h.stdout)
 	}
 	hs := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "show", "reject")
-	if !strings.Contains(hs.stdout, "◐ "+b+" · Reject expired access tokens") || !strings.Contains(hs.stdout, "REQUIRES\n● "+a) {
+	if !strings.Contains(hs.stdout, "◐ "+b+" [TASK] · Reject expired access tokens   [OPEN]") || !strings.Contains(hs.stdout, "REQUIRES\n  ● "+a+": Parse tokens") {
 		t.Fatalf("show:\n%s", hs.stdout)
 	}
 	st := e.ok("status")
@@ -525,8 +525,9 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 	if pins := pinned["task"].(map[string]any)["pins"].([]any); len(pins) != 2 || pins[0] != "checks" {
 		t.Fatalf("pins: %v", pinned)
 	}
-	if !strings.Contains(e.ok("context", "pinned")["prompt"].(string), "Pinned (this task may not change them") {
-		t.Fatal("context lacks pins")
+	pinShow := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "show", "pinned")
+	if pinShow.code != 0 || !strings.Contains(pinShow.stdout, "PINNED (must not change)") || !strings.Contains(pinShow.stdout, "checks") {
+		t.Fatalf("show lacks pins:\n%s", pinShow.stdout)
 	}
 	e.ok("update", "pinned", "--pin", "", "--planner")
 	if e.ok("show", "pinned")["pins"] != nil {
@@ -674,9 +675,9 @@ func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("plan file size: %s", r.stdout)
 	}
-	cx := e.ok("context", "big")["prompt"].(string)
-	if !strings.Contains(cx, "task checks 5m0s (size medium), regression 2m0s") {
-		t.Fatalf("context budgets: %s", cx)
+	cx := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "show", "big")
+	if cx.code != 0 || !strings.Contains(cx.stdout, "task checks 5m0s (size medium), regression 2m0s") {
+		t.Fatalf("show budgets: %s", cx.stdout)
 	}
 	proj := e.ok("project", "--budget-small", "45s", "--regression-budget", "none")
 	b := proj["budgets"].(map[string]any)

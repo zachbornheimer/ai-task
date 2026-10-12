@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Codex CLI as the worker: reads AGENTS.md itself; the context is the prompt.
+# Codex CLI as the worker: reads AGENTS.md itself; atask show is the prompt.
 run_agent() { codex exec --full-auto "${CODEX_ARGS:-}" "$(cat)"; }
 set -eu
 export ATASK_OUTPUT=json

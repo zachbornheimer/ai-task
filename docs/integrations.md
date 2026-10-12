@@ -12,7 +12,7 @@ calls a model; the harness does.
 | -------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bootstrap            | identity, the `atask` CLI, JSON envelopes, stop on lost authority   | the harness's system prompt where it can be set (`claude -p --append-system-prompt`, a bare model's system message); text in `docs/agent-contract.md` |
 | Project instructions | how work gets done here, the verbs, the execution contract          | `AGENTS.md` block installed by `atask init`; `CLAUDE.md` imports it                                                                                   |
-| Task turn            | outcome, constraints, acceptance, checks, workspace, state, handoff | `atask context`, generated per task                                                                                                                   |
+| Task turn            | outcome, constraints, acceptance, checks, workspace, state, handoff | `atask show` (current claim, or `atask show ID`); `atask list` for the plan                                                                           |
 
 The project file is the lever: it says that any change starts with the
 plan, that questions are not tasks, and that the target branch is never
@@ -34,13 +34,13 @@ Interactive: open the repository; the session-start hook prints the plan
 or the task in hand, the instructions route requests through `atask`, the
 edit guard refuses changes outside a task worktree, and the stop hook
 refuses to end a turn with an unfinished claim. The agent runs `atask
-context`, plans or claims, `cd`s into the workspace, works, commits,
+context` once for the contract, then `atask list` / `atask show`, plans or claims, `cd`s into the workspace, works, commits,
 `atask verify complete`.
 
 Headless, one worker:
 
 ```sh
-examples/hosts/claude-code.sh        # loops: claim --wait, context | claude -p, release if not completed
+examples/hosts/claude-code.sh        # loops: claim --wait, show | claude -p, release if not completed
 ```
 
 The script passes `--append-system-prompt` with the bootstrap and allows
@@ -54,19 +54,19 @@ engine serialises claims and promotion.
 Codex reads `AGENTS.md` natively and has no system-prompt flag, so the
 project instructions are the whole contract. Interactive sessions behave
 as above without hooks. Headless: `examples/hosts/codex.sh` (`codex exec
---full-auto` with the context as the prompt). Commit messages: Worktrunk's
+--full-auto` with `atask show` as the prompt). Commit messages: Worktrunk's
 `wt step commit` if installed, else git.
 
 ## OpenCode, Grok, anything with a shell
 
 OpenCode reads `AGENTS.md`; `examples/hosts/opencode.sh` drives `opencode
 run`. Grok reads `AGENTS.md`; `examples/hosts/grok.sh` drives
-`grok --always-approve --output-format text` with the context as the
+`grok --always-approve --output-format text` with `atask show` as the
 prompt. For any other harness, `examples/hosts/custom.sh` takes
-`AGENT_CMD`: the command receives the task context on stdin with
+`AGENT_CMD`: the command receives the current claim (`atask show`) on stdin with
 `ATASK_SESSION` exported and must work in the printed workspace. For a bare
-model behind an API, send the bootstrap as the system message and `atask
-context` as the first user message.
+model behind an API, send the bootstrap as the system message, `atask
+context` as the operating contract, and `atask show` as the task turn.
 
 ## Planners
 

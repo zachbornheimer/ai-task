@@ -138,7 +138,7 @@ func (c *ctxt) hookGuardEdit(ctx context.Context, cwd string, in hookInput) erro
 	if err != nil {
 		return nil // not an atask project
 	}
-	reason := fmt.Sprintf("%s is on branch %q of project %s, not in a task worktree. Work goes through atask: `atask context` to see the plan, `atask claim <task>` (or `atask add \"...\" --check \"...\" --claim` for a new change), then edit inside the workspace the claim prints. Set ATASK_ALLOW_DIRECT=1 to bypass deliberately.", path, branch, p.Name)
+	reason := fmt.Sprintf("%s is on branch %q of project %s, not in a task worktree. Work goes through atask: `atask list` to see the plan, `atask claim <task>` (or `atask add \"...\" --check \"...\" --claim` for a new change), then edit inside the workspace the claim prints. Set ATASK_ALLOW_DIRECT=1 to bypass deliberately.", path, branch, p.Name)
 	return c.encoder().Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
 }
 

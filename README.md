@@ -47,7 +47,8 @@ atask add "Confirm OAuth API compatibility" --key compat --parent identity --che
 atask add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
 atask list                                                # ○ ◐ ● hierarchy
 cd "$(atask claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on atask/<id>, token stored inside
-atask context                                             # the task as one prompt: contract, checks, workspace, handoff, sibling tasks
+atask context                                             # operating contract for agents (no project or database)
+atask show                                                # the current claim (pins, budgets, handoff); atask show ID for any task
 atask log --done "..." --next "..."                       # inside the worktree no token is needed; every command renews the lease
 atask verify task                                         # diagnostic
 # commit in the worktree, then:

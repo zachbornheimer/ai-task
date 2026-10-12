@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Grok as the worker: reads AGENTS.md itself; the context is the prompt.
+# Grok as the worker: reads AGENTS.md itself; atask show is the prompt.
 run_agent() { grok --always-approve --output-format text "${GROK_ARGS:-}" "$(cat)"; }
 set -eu
 export ATASK_OUTPUT=json

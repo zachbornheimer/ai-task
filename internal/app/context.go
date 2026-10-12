@@ -204,7 +204,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `atask claim --wait` blocks until something is.\n")
 	}
 	if proj.TargetBranch != "" {
-		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask context` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask show` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
 	} else {
 		w.WriteString("\nClaim with `atask claim <id>`. Unscoped work completes without git.\n")
 	}
