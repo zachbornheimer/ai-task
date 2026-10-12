@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -49,6 +50,10 @@ type CheckSpec struct {
 	// Required checks must pass for the task to be verified. Optional checks
 	// are recorded as evidence but never compensate for a failed required one.
 	Required bool
+	// Size is the time budget for this check (small, medium, large). Empty
+	// means inherit the task size (completion) or the project's regression
+	// budget (legacy project-level regression).
+	Size string
 }
 
 // checkJSON is the durable wire form. Timeout is an integer millisecond count
@@ -63,7 +68,8 @@ type checkJSON struct {
 	// Required is a pointer so that an absent field in hand-written JSON
 	// means "required": a check someone wrote down is a gate unless they
 	// said otherwise. Stored policies always carry it explicitly.
-	Required *bool `json:"required"`
+	Required *bool  `json:"required"`
+	Size     string `json:"size,omitempty"`
 }
 
 // MarshalJSON writes the durable form.
@@ -71,7 +77,7 @@ func (c CheckSpec) MarshalJSON() ([]byte, error) {
 	required := c.Required
 	return json.Marshal(checkJSON{
 		ID: c.ID, Version: c.Version, Command: c.Command, Dir: c.Dir,
-		TimeoutMS: c.Timeout.Milliseconds(), Required: &required,
+		TimeoutMS: c.Timeout.Milliseconds(), Required: &required, Size: c.Size,
 	})
 }
 
@@ -87,7 +93,7 @@ func (c *CheckSpec) UnmarshalJSON(b []byte) error {
 	}
 	*c = CheckSpec{
 		ID: w.ID, Version: w.Version, Command: w.Command, Dir: w.Dir,
-		Timeout: time.Duration(w.TimeoutMS) * time.Millisecond, Required: required,
+		Timeout: time.Duration(w.TimeoutMS) * time.Millisecond, Required: required, Size: w.Size,
 	}
 	return nil
 }
@@ -218,10 +224,28 @@ func Parse(b []byte) (Policy, error) {
 // separate namespaces: a task check whose ID matches a regression check is
 // rejected at definition time (see Collides), never allowed to shadow it.
 func Merge(task Policy, projectRegression []CheckSpec) Policy {
+	reg := task.Regression
+	if len(reg) == 0 {
+		reg = projectRegression
+	}
 	return Policy{
 		TaskChecks: append([]CheckSpec(nil), task.TaskChecks...),
-		Regression: append([]CheckSpec(nil), projectRegression...),
+		Regression: append([]CheckSpec(nil), reg...),
 	}
+}
+
+// WithSize copies checks and fills empty Size from size.
+func WithSize(checks []CheckSpec, size string) []CheckSpec {
+	out := append([]CheckSpec(nil), checks...)
+	if strings.TrimSpace(size) == "" {
+		return out
+	}
+	for i := range out {
+		if strings.TrimSpace(out[i].Size) == "" {
+			out[i].Size = size
+		}
+	}
+	return out
 }
 
 // Collides returns the first task check ID that also names a regression

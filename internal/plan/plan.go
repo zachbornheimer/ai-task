@@ -50,6 +50,10 @@ type AddTask struct {
 	Blocks      []Ref // existing tasks that will require the new one
 	Cohort      string
 	TaskChecks  []verification.CheckSpec
+	// Regression is the required regression category on the task.
+	Regression []verification.CheckSpec
+	// RegressionSize fills empty CheckSpec.Size on Regression.
+	RegressionSize string
 	// Pins are paths the task's branch must leave untouched.
 	Pins []string
 	// Size: small (default), medium or large; caps the task checks' time.
@@ -68,6 +72,8 @@ type UpdateTask struct {
 	Acceptance     Patch[string]
 	Cohort         *string
 	TaskChecks     Patch[verification.CheckSpec]
+	Regression     Patch[verification.CheckSpec]
+	RegressionSize *string
 	Pins           Patch[string]
 	Size           *string
 	Requires       Patch[Ref] // replace the whole prerequisite set
@@ -159,9 +165,6 @@ func (cs ChangeSet) Digest() string {
 // Validate checks each change structurally. Reference existence and graph
 // rules are checked by Apply against the store.
 func (cs ChangeSet) Validate() error {
-	if cs.ProjectID == "" {
-		return fault.New(fault.CodeInvalidInput, "change set needs a project")
-	}
 	if len(cs.Operations) == 0 {
 		return fault.New(fault.CodeInvalidInput, "change set has no operations")
 	}

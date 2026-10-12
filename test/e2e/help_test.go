@@ -24,7 +24,7 @@ func TestSubcommandHelpListsFlags(t *testing.T) {
 	} {
 		// Text mode (ATASK_OUTPUT unset): plain help on stdout, nothing on stderr.
 		r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, tc.args...)
-		if r.code != 0 || strings.TrimSpace(r.stderr) != "" || !strings.Contains(r.stdout, "Usage: ") || !strings.Contains(r.stdout, "at "+tc.args[0]) {
+		if r.code != 0 || strings.TrimSpace(r.stderr) != "" || !strings.Contains(r.stdout, "Usage: ") || !strings.Contains(r.stdout, "atask "+tc.args[0]) {
 			t.Fatalf("%v: code=%d stdout=%q stderr=%q", tc.args, r.code, r.stdout, r.stderr)
 		}
 		for _, want := range tc.flags {

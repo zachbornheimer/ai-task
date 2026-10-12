@@ -35,16 +35,23 @@ func TestEmptyChecksFailClosed(t *testing.T) {
 	a := f.add("a")
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{})}}})
 	wantCode(t, err, fault.CodeMissingVerification)
-	// A project without regression checks hands out no work.
+	// A task without regression checks cannot be planned; clearing the
+	// legacy project suite does not revoke a task that already carries its own.
 	f.setRegression()
-	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Regression: plan.Replace([]verification.CheckSpec{})}}})
 	wantCode(t, err, fault.CodeMissingVerification)
-	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeMissingVerification)
-	// Regression checks removed under a live claim: verification still fails
-	// closed and the claim survives.
+	// Clearing the stored task regression under a live claim still fails closed.
 	f.setRegression(check("regress", "true", true))
 	sa := f.claim(string(a))
+	db, err := sql.Open("sqlite", f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	emptyPol, _ := json.Marshal(verification.Policy{TaskChecks: okChecks()})
+	if _, err := db.Exec(`UPDATE tasks SET policy_json = ? WHERE id = ?`, string(emptyPol), a); err != nil {
+		t.Fatal(err)
+	}
 	f.setRegression()
 	f.commit(sa.Workspace, "a.txt", "a")
 	_, err = f.e.Verify(f.ctx, sa.Token, verification.ModeComplete)
@@ -212,7 +219,7 @@ func TestLateBlockerPreventsCompletion(t *testing.T) {
 	a := f.add("a")
 	s := f.claim(string(a))
 	// Discovered blocker added by the holder while working.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: []verification.CheckSpec{check("u", "true", true)}}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: []verification.CheckSpec{check("u", "true", true)}, Regression: okReg()}}}); err != nil {
 		t.Fatal(err)
 	}
 	f.commit(s.Workspace, "a.txt", "a")
@@ -241,7 +248,7 @@ func TestCompletedContractsCannotChangeSilently(t *testing.T) {
 	// A hard requirement on a complete task is rejected.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{plan.Ref(b)}}}})
 	wantCode(t, err, fault.CodePlanConflict)
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks(), Regression: okReg()}}})
 	wantCode(t, err, fault.CodePlanConflict)
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Title: strptr("renamed")}}})
 	wantCode(t, err, fault.CodePlanConflict)
@@ -414,7 +421,8 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	regOpt, _ := json.Marshal(verification.Policy{Regression: []verification.CheckSpec{opt("r")}})
+	regOpt, _ := json.Marshal(verification.Policy{TaskChecks: okChecks(), Regression: []verification.CheckSpec{opt("r")}})
+	setPolicy(a, string(regOpt))
 	setRegression(string(regOpt))
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
 	wantCode(t, err, fault.CodeMissingVerification)

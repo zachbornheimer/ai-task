@@ -86,7 +86,7 @@ func TestIntegrationIntentCrashRecovery(t *testing.T) {
 				wantCode(t, err, fault.CodePlanConflict)
 				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a), Reason: "x"}}})
 				wantCode(t, err, fault.CodePlanConflict)
-				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}})
+				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks(), Regression: okReg()}}})
 				wantCode(t, err, fault.CodePlanConflict)
 			case "final:after-complete":
 				if v.Status != task.StatusComplete {

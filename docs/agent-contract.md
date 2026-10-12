@@ -1,8 +1,10 @@
-# Agent contract: `at` CLI and JSON
+# Agent contract: `atask` CLI and JSON
 
-Seven everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
-`list`. Project bootstrap (`init`, `project`, `projects`), `status`,
-`whoami`, `version` and `help` exist outside the agent's instruction set.
+Nine everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
+`list`, `help`, `version`. `atask context` with no arguments is the
+operating contract (no project or database). `atask context ID` is the
+worker handoff for that task. Project bootstrap (`init`, `project`,
+`projects`), `status`, `doctor`, `prune` and `hook` exist outside that set.
 The CLI is a thin adapter over the Go engine; both apply the same rules.
 
 ## Output and exit codes
@@ -53,11 +55,11 @@ stdout (an envelope in JSON mode) and exits `0`.
 ## Planning (planner authority)
 ````
 
-at add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
+atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
 [--outcome ..] [--constraint ..]*[--accept ..]* [--check "[id:] cmd"]*[--optional-check ..]*
 [--pin PATH]*[--claim]
 [--expect-rev N] [--idempotency-key K] [--planner]
-at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
+atask update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 [--requires REF]* [--remove-requires REF]*[--set-requires REF]*
 [--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
 [--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
@@ -67,7 +69,7 @@ at update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 plan revision; the Go `Apply` takes a whole batch; a batch that changes
 nothing is not a revision. `atask add -f plan.yaml` (or `.json`, or `-` for
 stdin) and `atask add --plan '…'` apply a whole plan in one revision: one
-item, a list, or `{tasks: [...]}`, each item with the field names `at
+item, a list, or `{tasks: [...]}`, each item with the field names `atask
 show` prints (`kind` task|group, `key`, `title`, `outcome`, `parent`,
 `cohort`, `constraints`, `acceptance`, `requires`, `blocks`, `checks`,
 `optional_checks`; a check is `"[id:] cmd args"` or `{id, command (string
@@ -101,7 +103,8 @@ stale `--expect-rev`), a different request under the same key is
   --budget-small 45s --regression-budget 3m`, `none` for no cap). The
   whole suite shares the budget: a check that would start after it is
   spent is recorded as `timed_out` without running. A small task whose
-  check runs the whole module gets a planning warning. `verify` results
+  check is `go test` without `-run` is rejected (`INVALID_INPUT`);
+  narrow with `-run` or set `--size medium|large`. `verify` results
   carry `warnings` for checks that passed using more than half their
   budget. Checks run with `ATASK_CHANGED_FILES` (a file listing the paths the
   candidate changed against the target) and `ATASK_TARGET_BRANCH`, so a
@@ -150,12 +153,14 @@ stale `--expect-rev`), a different request under the same key is
 ## Execution (session authority)
 ```
 
-at context [REF] [--with-rules] a task's working context as one prompt (no REF: this session's task)
-at claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
-at claim renew [token|-] extend the lease (inside the worktree no token is needed)
-at claim release [token|-] [--note ..] [--failed]
-at log --done .. --next .. --learned .. --note .. (token: see Token transport)
-at verify task | regression | complete (same token sources)
+atask context operating contract (no project or database)
+atask context ID worker handoff for that task
+atask show [REF] current claim, or a particular task
+atask claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
+atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
+atask claim release [token|-] [--note ..] [--failed]
+atask log --done .. --next .. --learned .. --note .. (token: see Token transport)
+atask verify task | regression | complete (same token sources)
 
 ```text
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;
@@ -216,49 +221,43 @@ released. Only a run charged against its attempt derives to
 is refused with `VERIFICATION_RUNNING`; after completion it returns the
 stored acknowledgement.
 
-**Context.** `atask context` prints the working context of a task as one
-block of text an agent can take as its prompt, and in JSON mode the same
-text as `prompt` beside the task view: title, outcome, constraints,
-acceptance criteria, what "done" means, the task checks and regression
-checks verbatim, the target branch, prerequisites, the project's other
-open tasks (not yours), the workspace, branch and lease, files the branch
-already changed, uncommitted changes left by an earlier attempt, and the
-handoff, and the commit and rebase steps to use: `wt step commit` and
-`wt step rebase` when Worktrunk's `wt` is on PATH (`worktrunk: true` in
-JSON), plain git otherwise. With no task in hand at all (no reference, no
-token anywhere) it describes the plan instead: counts, what is claimable,
-and whether to claim or to plan (`summary` and `claimable` in JSON, no
-`task`). Without a reference it describes the current session's task
-(worktree token, `ATASK_SESSION`, or a token argument); with one it
-describes that task for anyone, read-only. `--with-rules` appends the
-rules of the road for an agent that does not read AGENTS.md.
+**Context.** `atask context` with no arguments prints the agent operating
+contract as one block of text (JSON: `prompt`). It needs no project,
+database, or session. `atask context ID` is the worker handoff for that
+task: objective, acceptance, checks, blockers, worktree, and how
+completion is decided. A completed task's handoff reports that it is
+done and issues no new work. Discover work with `atask list`; inspect a
+task with `atask show` (no argument: the current claim).
 
 **Installing the instructions.** `atask init` registers the repository and
-installs the project instruction block (`app.Instructions`: how work gets
-done through `atask`, the verbs, the execution contract) into `AGENTS.md`
+installs the project instruction block (`app.Instructions`: one paragraph
+that points agents at `atask context`) into `AGENTS.md`
 between `<!-- atask:begin -->` and `<!-- atask:end -->`, creating the file with a
 default engineering-guidelines section when absent and refreshing only
 the block on re-runs; it also makes sure `CLAUDE.md` imports it
 (`@AGENTS.md`). When `init` creates the repository in a directory that
 already has files, they stay untracked (init never commits them); the
 result carries `untracked_files` and a `warning` that they must be
-committed before the baseline can pass. `--no-instructions` skips that. `atask init --claude` merges
-three hooks into `.claude/settings.json`, each calling `atask hook <event>`
-with the hook's JSON on stdin: `session-start` prints the plan or task
-context; `guard-edit` denies an Edit/Write to a file inside a registered
-project that is not in a task worktree (`ATASK_ALLOW_DIRECT=1` bypasses);
-`stop` refuses to end a turn while the session's worktree (or
-`ATASK_SESSION`) holds a live claim that is neither verified nor released.
-An `at` failure inside a hook never blocks the harness.
+committed before the baseline can pass. `--no-instructions` skips that.
+`atask init --claude` is optional and reversible: it merges only the
+SessionStart hook into `.claude/settings.json` (`atask hook session-start`),
+which injects the current claim when one exists and writes nothing
+otherwise. It does not install `guard-edit` or `stop`. `atask hook
+guard-edit` remains callable for a host that opts in; it only sees
+Edit/Write/NotebookEdit and does not catch shell writes.
+`atask hook stop` is a no-op: an open claim is not a reason to block
+ending a turn. An `atask` failure inside a hook never blocks the harness.
+Init never rewrites personal `AGENTS.md`/`CLAUDE.md` or global host
+hooks; it only writes under the registered repository root.
 
-**Prompt layers.** An agent runs under three layers and `at` supplies
+**Prompt layers.** An agent runs under three layers and `atask` supplies
 the third: (1) a bootstrap system prompt, set by the host where the
 harness allows it (Claude Code `-p --append-system-prompt`, a bare model's
 system message; Codex has none and relies on AGENTS.md); (2) the project
 instruction file, AGENTS.md (or a CLAUDE.md that imports it), holding the
-agent execution contract; (3) the task turn, `atask context`, which carries
-only task facts and never repeats the contract. `--with-rules` appends
-the contract for an agent that gets no project file. The bootstrap is:
+short atask paragraph; (3) the task turn, `atask context ID` as the
+worker handoff and `atask list` for the plan. `atask context` with no
+arguments is the operating contract and does not dump tasks. The bootstrap is:
 ```
 
 You are a coding agent responsible for one task in an isolated Git worktree.
@@ -327,16 +326,16 @@ token after a committed completion returns the stored result.
 ## Reading
 ```
 
-at show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
+atask show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
 TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
-at list hierarchy of open work (groups indented; blocked tasks show requires:)
-at list ready | blocked | all | archived
-at status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
-at prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks
+atask list hierarchy of open work (groups indented; blocked tasks show requires:)
+atask list ready | blocked | all | archived
+atask status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
+atask prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks
 
 ```text
-`ATASK_OUTPUT=json at help` prints an envelope listing the commands; a bare
-`at` in JSON mode prints an `INVALID_INPUT` envelope (exit 2).
+`ATASK_OUTPUT=json atask help` prints an envelope listing the commands; a bare
+`atask` in JSON mode prints an `INVALID_INPUT` envelope (exit 2).
 
 Glyphs are progress, not liveness: `○` never started (ready or blocked
 work with no attempt yet), `◐` started but not complete (claimed,

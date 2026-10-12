@@ -146,12 +146,15 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 // projectContext is what a session with no task in hand gets: the state
 // of the plan and what to do next (claim, or plan).
 func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules bool) (Context, error) {
-	if pid == "" {
-		return Context{}, fault.New(fault.CodeNoProject, "no project here: run `atask init` in the repository, or pass --project")
-	}
-	proj, err := e.Project(ctx, pid)
-	if err != nil {
-		return Context{}, err
+	var proj project.Project
+	if pid != "" {
+		p, err := e.Project(ctx, pid)
+		if err != nil {
+			return Context{}, err
+		}
+		proj = p
+	} else {
+		proj = project.Project{ID: project.UnscopedID, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
 	}
 	sum, err := e.Summary(ctx, pid)
 	if err != nil {
@@ -168,7 +171,11 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	_, wtErr := exec.LookPath("wt")
 	c.Worktrunk = wtErr == nil
 	var w strings.Builder
-	fmt.Fprintf(&w, "# Project %s: no task in hand\n\n", proj.Name)
+	if proj.Unscoped() {
+		w.WriteString("# Board: no task in hand\n\n")
+	} else {
+		fmt.Fprintf(&w, "# Project %s: no task in hand\n\n", proj.Name)
+	}
 	fmt.Fprintf(&w, "Plan: %d task(s), %d open, %d claimable, %d active", sum.Total, sum.Open, sum.Claimable, sum.Active)
 	if sum.Cooling > 0 {
 		fmt.Fprintf(&w, ", %d cooling down", sum.Cooling)
@@ -176,7 +183,11 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	w.WriteString(".\n")
 	switch {
 	case sum.Total == 0:
-		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`atask add \"title\" --check \"id: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step. Run `atask doctor` first in a repository you have not worked in.\n")
+		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`atask add \"title\" --check \"id: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step.")
+		if !proj.Unscoped() {
+			w.WriteString(" Run `atask doctor` first in a repository you have not worked in.")
+		}
+		w.WriteByte('\n')
 	case sum.Done:
 		w.WriteString("Every task is complete. New work needs new tasks (`atask add`).\n")
 	case len(c.Claimable) > 0:
@@ -192,7 +203,11 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	default:
 		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `atask claim --wait` blocks until something is.\n")
 	}
-	fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask context` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+	if proj.TargetBranch != "" {
+		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask show` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+	} else {
+		w.WriteString("\nClaim with `atask claim <id>`. Unscoped work completes without git.\n")
+	}
 	c.Prompt = w.String()
 	if withRules {
 		c.Prompt += "\n" + Rules
@@ -204,6 +219,17 @@ func renderContext(c Context) string {
 	var w strings.Builder
 	v := *c.Task
 	fmt.Fprintf(&w, "# Task %s: %s\n\n", v.ID, v.Title)
+	if v.Status == task.StatusComplete {
+		fmt.Fprintf(&w, "This task is complete")
+		if v.CompletedRevision != "" {
+			fmt.Fprintf(&w, " (revision %s)", short(v.CompletedRevision))
+		}
+		w.WriteString(". Nothing is left to do; do not implement or commit further work.\n")
+		if v.Outcome != "" && v.Outcome != v.Title {
+			fmt.Fprintf(&w, "\nOutcome: %s\n", v.Outcome)
+		}
+		return w.String()
+	}
 	if v.Outcome != "" && v.Outcome != v.Title {
 		fmt.Fprintf(&w, "Outcome: %s\n\n", v.Outcome)
 	}
@@ -261,10 +287,10 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	if len(c.Siblings) > 0 {
-		w.WriteString("Other open tasks (other workers' work; not yours to implement):\n")
-		for _, s := range c.Siblings {
-			fmt.Fprintf(&w, "- %s %s [%s]\n", s.ID, s.Title, s.Status)
+	if len(v.Blocks) > 0 {
+		w.WriteString("Blocks:\n")
+		for _, r := range v.Blocks {
+			fmt.Fprintf(&w, "- %s %s [%s]\n", r.ID, r.Title, r.Status)
 		}
 		w.WriteString("\n")
 	}
@@ -359,17 +385,16 @@ func shellJoin(argv []string) string {
 	return strings.Join(parts, " ")
 }
 
-// Rules is the agent execution contract, the same text as the
-// "Agent execution contract" section of AGENTS.md (a test keeps them in
-// sync), for hosts whose agent does not read that file.
+// Rules is the long execution contract for hosts that pass withRules to
+// Engine.Context. The installed AGENTS.md block is Instructions(), not this.
 const Rules = `## Agent execution contract
 
 Complete one independently verifiable task at a time.
 
 Start
 
-- Run ` + "`atask context`" + ` before working. Review the handoff, the existing changes and ` + "`git status`" + ` before editing; preserve useful prior work.
-- Work only in the assigned workspace. The session token is stored there, so ` + "`at`" + ` commands run there need no token.
+- Run ` + "`atask context`" + ` once for the operating contract. ` + "`atask show`" + ` is the current claim; ` + "`atask list`" + ` is the plan. Review the handoff, the existing changes and ` + "`git status`" + ` before editing; preserve useful prior work.
+- Work only in the assigned workspace. The session token is stored there, so ` + "`atask`" + ` commands run there need no token.
 - Do not implement other tasks.
 
 Execute
@@ -378,7 +403,7 @@ Execute
 - The checks are the contract: never weaken, skip or bypass a check or the tests it runs.
 - Iterate with ` + "`atask verify task`" + ` and ` + "`atask verify regression`" + ` (diagnostic; they never complete anything).
 - Record progress with ` + "`atask log --done \"...\" --next \"...\" --learned \"...\"`" + `; ` + "`--next`" + ` is what the next attempt reads first.
-- The lease lasts 30 minutes and every ` + "`at`" + ` command renews it; log before it runs out.
+- The lease lasts 30 minutes and every ` + "`atask`" + ` command renews it; log before it runs out.
 - On LEASE_EXPIRED or SESSION_SUPERSEDED, stop editing immediately. The next ` + "`atask claim <task>`" + ` returns your handoff.
 
 Complete
@@ -393,6 +418,7 @@ Exit
 
 - ` + "`atask claim --wait`" + ` ends with DONE (everything is complete) or STALLED (a planner is needed); both are normal exits for a worker loop.
 - Never claim success without a passing final verification.
+
 `
 
 func budgetLabelFor(d time.Duration) string {

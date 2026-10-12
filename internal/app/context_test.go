@@ -59,7 +59,6 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 		"## Current state (attempt 2)",
 		"unit-store failed",
 		"Files this branch has changed: store.go",
-		string(b) + " other", // sibling, not yours
 		"Uncommitted changes in the workspace (review before editing): store.go\n",
 		"Commit with `wt step commit`",
 		"`wt step rebase main`",
@@ -73,6 +72,9 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	}
 	if strings.Contains(cx.Prompt, "Agent execution contract") || cx.LeaseUntil == nil || len(cx.ChangedFiles) != 1 || len(cx.Siblings) != 1 || cx.Siblings[0].ID != b || !cx.Worktrunk {
 		t.Fatalf("%+v", cx)
+	}
+	if strings.Contains(cx.Prompt, string(b)+" other") {
+		t.Fatalf("worker handoff must not dump sibling tasks:\n%s", cx.Prompt)
 	}
 
 	// Groups are never siblings; a group is not a task.
@@ -93,6 +95,30 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	}
 }
 
+func TestCompletedTaskContextIssuesNoWork(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("done-work")
+	s := f.claim(string(a))
+	f.complete(s)
+	cx, err := f.e.Context(f.ctx, f.proj.ID, string(a), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cx.Prompt, "This task is complete") {
+		t.Fatalf("complete handoff:\n%s", cx.Prompt)
+	}
+	for _, banned := range []string{
+		"Nobody holds this task",
+		"atask claim " + string(a),
+		"Done when `atask verify complete`",
+		"Commit with",
+	} {
+		if strings.Contains(cx.Prompt, banned) {
+			t.Fatalf("completed handoff must not instruct more work (%q):\n%s", banned, cx.Prompt)
+		}
+	}
+}
+
 func TestProjectContextSaysWhatToDoNext(t *testing.T) {
 	f := newGitFixture(t)
 	empty, err := f.e.Context(f.ctx, f.proj.ID, "", "", false)
@@ -104,7 +130,8 @@ func TestProjectContextSaysWhatToDoNext(t *testing.T) {
 	if err != nil || len(ready.Claimable) != 1 || ready.Claimable[0].ID != a || !strings.Contains(ready.Prompt, "Claimable now") || !strings.Contains(ready.Prompt, "## Agent execution contract") {
 		t.Fatalf("%v %s", err, ready.Prompt)
 	}
-	if _, err := f.e.Context(f.ctx, "", "", "", false); fault.CodeOf(err) != fault.CodeNoProject {
-		t.Fatalf("no project: %v", err)
+	board, err := f.e.Context(f.ctx, "", "", "", false)
+	if err != nil || board.Summary == nil || !strings.Contains(board.Prompt, "# Board") {
+		t.Fatalf("empty pid is the board: %v %s", err, board.Prompt)
 	}
 }

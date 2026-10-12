@@ -33,9 +33,12 @@ func TestTopLevelHelp(t *testing.T) {
 	if code, out, _ := runAt(t, "help"); code != ExitOK || !strings.Contains(out, "Commands:") {
 		t.Fatalf("at help: exit %d\n%s", code, out)
 	}
-	// A bare `at` is a usage error: the list goes to stderr, exit 2.
-	if code, out, errOut := runAt(t); code != ExitUsage || out != "" || !strings.Contains(errOut, "Commands:") {
-		t.Fatalf("bare at: exit %d stdout %q", code, out)
+	// A bare `atask` lists every non-archived task (empty here).
+	if code, out, errOut := runAt(t); code != ExitOK || !strings.Contains(out, "no tasks registered") {
+		t.Fatalf("bare atask: exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	if code, out, _ := runAt(t, "--json"); code != ExitOK || !strings.HasPrefix(out, `{"ok":true`) {
+		t.Fatalf("atask --json: exit %d %s", code, out)
 	}
 	// JSON mode answers --help with an envelope.
 	if code, out, _ := runAt(t, "--json", "--help"); code != ExitOK || !strings.HasPrefix(out, `{"ok":true`) {

@@ -375,7 +375,7 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	wantCode(t, err, fault.CodeSessionSuperseded)
 	_, err = f.e.Release(f.ctx, sA.Token, app.ReleaseOptions{})
 	wantCode(t, err, fault.CodeSessionSuperseded)
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sA.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}}); err == nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sA.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks(), Regression: okReg()}}}); err == nil {
 		t.Fatal("stale session could add a blocker")
 	}
 	// B is untouched: same lease, still claimed, and it completes normally.

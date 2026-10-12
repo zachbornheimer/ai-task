@@ -129,7 +129,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	archived := f.add("archived")
 	f.apply(plan.ArchiveTask{Target: plan.Ref(archived), Reason: "test"})
 	// cohort member awaiting verification
-	cm := f.apply(plan.AddTask{Key: "cm", Title: "cm", Cohort: "c", TaskChecks: okChecks()}, plan.AddTask{Key: "cm2", Title: "cm2", Cohort: "c", TaskChecks: okChecks()}).Created["cm"]
+	cm := f.apply(plan.AddTask{Key: "cm", Title: "cm", Cohort: "c", TaskChecks: okChecks(), Regression: okReg()}, plan.AddTask{Key: "cm2", Title: "cm2", Cohort: "c", TaskChecks: okChecks(), Regression: okReg()}).Created["cm"]
 	scm := f.claim(string(cm))
 	f.commit(scm.Workspace, "cm.txt", "cm")
 	if _, err := f.e.Verify(f.ctx, scm.Token, verification.ModeComplete); err != nil {

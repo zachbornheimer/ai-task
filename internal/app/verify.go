@@ -181,17 +181,25 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // task check failed, in which case the regression rows are recorded as
 // skipped) the regression checks on a fresh snapshot. Nothing a task check
 // leaves behind can be the reason a regression check passes.
-func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project) ([]verification.Evidence, error) {
+func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project, workDir string) ([]verification.Evidence, error) {
 	var out []verification.Evidence
-	changed, _ := workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
+	inPlace := proj.Unscoped() || proj.RootPath == ""
+	var changed []string
+	if !inPlace {
+		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
+	}
 	taskOpts, regOpts := suiteOpts(t, proj, changed)
 	logDir := e.runLogDir(proj.ID, runID)
 	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	taskPolicy := verification.Policy{TaskChecks: policy.TaskChecks}
 	if len(taskPolicy.TaskChecks) > 0 {
-		dir, cleanup, err := mgr.Snapshot(ctx, revision)
-		if err != nil {
-			return nil, err
+		dir, cleanup := workDir, func() {}
+		if !inPlace {
+			var err error
+			dir, cleanup, err = mgr.Snapshot(ctx, revision)
+			if err != nil {
+				return nil, err
+			}
 		}
 		ev, err := e.runChecks(ctx, dir, taskPolicy, runID, revision, fence, taskOpts)
 		cleanup()
@@ -212,6 +220,10 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 	regPolicy := verification.Policy{Regression: policy.Regression}
 	if requiredTaskFailed {
 		ev, err := e.runChecksSkipping(ctx, regPolicy, runID, revision, policy.Digest(), fence)
+		return append(out, ev...), err
+	}
+	if inPlace {
+		ev, err := e.runChecks(ctx, workDir, regPolicy, runID, revision, fence, regOpts)
 		return append(out, ev...), err
 	}
 	dir, cleanup, err := mgr.Snapshot(ctx, revision)
@@ -265,7 +277,11 @@ func suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, r
 		size = task.SizeSmall
 	}
 	taskOpts = runOpts{budget: proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch}
-	regOpts = runOpts{budget: proj.Budgets.RegressionBudget(), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch}
+	regBudget := proj.Budgets.RegressionBudget()
+	if len(t.Verification.Regression) > 0 && t.Verification.Regression[0].Size != "" {
+		regBudget = proj.Budgets.ForSize(t.Verification.Regression[0].Size)
+	}
+	regOpts = runOpts{budget: regBudget, budgetName: "the regression budget", changed: changed, target: proj.TargetBranch}
 	return taskOpts, regOpts
 }
 
@@ -482,17 +498,24 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 	if p.rec.Task.Kind != task.KindTask {
 		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s is a group", p.rec.Task.ID)
 	}
-	if missing := p.policy.MissingCategory(); missing != "" {
-		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
+	if p.proj.Integration == project.IntegrationPromote {
+		if missing := p.policy.MissingCategory(); missing != "" {
+			return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
+		}
+	} else if !verification.HasRequired(p.policy.TaskChecks) {
+		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no required task checks are defined (completion fails closed)", p.rec.Task.ID)
 	}
 	if p.rec.UnmetRequires > 0 {
 		return VerifyResult{}, fault.New(fault.CodeTaskBlocked, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
 	}
-	st, err := workspace.RequireClean(ctx, p.dir)
-	if err != nil {
-		return VerifyResult{}, err
+	revision := "unscoped"
+	if !p.proj.Unscoped() && p.proj.RootPath != "" {
+		st, err := workspace.RequireClean(ctx, p.dir)
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		revision = st.Revision
 	}
-	revision := st.Revision
 	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.proj.Regression}).Digest()}
 	if p.rec.Task.Cohort != "" {
 		return e.submitForCohort(ctx, fr)
@@ -607,7 +630,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	}
 	// Pinned paths are part of the contract: a submission that changed one
 	// fails as the attempt's own failure, before any check runs.
-	if len(fr.rec.Task.Pins) > 0 {
+	if len(fr.rec.Task.Pins) > 0 && !fr.proj.Unscoped() && fr.proj.RootPath != "" {
 		changed, err := workspace.ChangedBetween(ctx, fr.proj.RootPath, "refs/heads/"+fr.proj.TargetBranch, fr.revision)
 		if err != nil {
 			return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, "list changed files: "+fault.MessageOf(err), nil)
@@ -636,7 +659,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	}
 	// Immutable inputs: detached snapshots of the submitted revision, one
 	// per check category.
-	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj)
+	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, fr.attempt.WorkspacePath)
 	if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(evidence) == 0 {
 		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
 	}
@@ -649,7 +672,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	taskBudget, regBudget := fr.proj.Budgets.ForSize(fr.rec.Task.Size), fr.proj.Budgets.RegressionBudget()
 	if len(verdict.TimedOut) > 0 {
 		res.Message = timeoutMessage(verdict, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
-		return fail(sqlite.RunFailed, fault.CodeVerificationTimeout, verdict.Summary, evidence)
+		return fail(sqlite.RunFailed, fault.CodeVerificationTimeout, verdict.Summary+"; "+res.Message, evidence)
 	}
 	if !verdict.Passed {
 		return fail(sqlite.RunFailed, fault.CodeVerificationFailed, verdict.Summary, evidence)
@@ -722,7 +745,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		final := fr.revision
 		if cand.Revision != fr.revision {
-			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj)
+			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, "")
 			if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(more) == 0 {
 				cand.Cleanup()
 				return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
@@ -736,11 +759,13 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			if v := verification.Judge(fr.policy, more); !v.Passed {
 				cand.Cleanup()
 				code := fault.CodeVerificationFailed
+				summary := "integrated candidate " + short(cand.Revision) + ": " + v.Summary
 				if len(v.TimedOut) > 0 {
 					code = fault.CodeVerificationTimeout
 					res.Message = timeoutMessage(v, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
+					summary += "; " + res.Message
 				}
-				return fail(sqlite.RunFailed, code, "integrated candidate "+short(cand.Revision)+": "+v.Summary, evidence)
+				return fail(sqlite.RunFailed, code, summary, evidence)
 			}
 			final = cand.Revision
 		}
@@ -945,7 +970,7 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudg
 	}
 	var parts []string
 	if len(taskIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task, or the code it runs hangs; make the check prove only this outcome, or make it fast first as its own task (`atask add \"fast check for ...\" --blocks <task> --check ...`, then `atask claim release`) so the slow proof never lands, or have the planner set a larger --size", strings.Join(taskIDs, ", "), size, taskBudget))
+		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task; narrow with -run so it proves only this outcome, or set --size medium|large", strings.Join(taskIDs, ", "), size, taskBudget))
 	}
 	if len(regIDs) > 0 {
 		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (ATASK_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))

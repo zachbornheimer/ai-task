@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -35,11 +34,15 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 		t.Fatalf("diagnostic: %v %+v", err, r)
 	}
 	r, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeVerificationTimeout || !strings.Contains(r.Message, "built too slow") || !strings.Contains(r.Summary, "timed out: unit-slow") {
+	if fault.CodeOf(err) != fault.CodeVerificationTimeout || !strings.Contains(r.Message, "built too slow") || !strings.Contains(r.Message, "-run") || !strings.Contains(r.Message, "--size") || !strings.Contains(r.Summary, "timed out: unit-slow") {
 		t.Fatalf("complete: %v %+v", err, r)
 	}
-	if v := f.show(string(a)); v.Failures != 0 || !strings.Contains(v.LastError, "VERIFICATION_TIMEOUT") {
+	v := f.show(string(a))
+	if v.Failures != 0 || !strings.Contains(v.LastError, "VERIFICATION_TIMEOUT") {
 		t.Fatalf("a timeout must not be a strike: failures=%d last_error=%q", v.Failures, v.LastError)
+	}
+	if !strings.Contains(v.LastError, "-run") || !strings.Contains(v.LastError, "--size") {
+		t.Fatalf("timeout last_error must name -run and --size: %q", v.LastError)
 	}
 	// The planner declares a larger size: same check, now within budget,
 	// and the warning says it used more than half of a small budget only
@@ -102,17 +105,19 @@ func TestChangedFilesReachChecks(t *testing.T) {
 	f.complete(s)
 }
 
-// TestPlanWarnsOnWholeSuiteSmallTask: a small task whose check runs the
-// whole module is warned about at planning time.
-func TestPlanWarnsOnWholeSuiteSmallTask(t *testing.T) {
+// TestSmallSizeRejectsGoTestWithoutRun: a small task whose check is go
+// test without -run cannot be filed; -run or a larger size is required.
+func TestSmallSizeRejectsGoTestWithoutRun(t *testing.T) {
 	f := newGitFixture(t)
-	res := f.apply(plan.AddTask{Key: "w", Title: "w", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}})
-	if w := res.Warnings["w"]; len(w) == 0 || !strings.Contains(w[0], "whole-suite") {
-		t.Fatalf("warnings: %v", res.Warnings)
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
+		plan.AddTask{Key: "w", Title: "w", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}, Regression: okReg()},
+	}})
+	if fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "-run") || !strings.Contains(err.Error(), "--size") {
+		t.Fatalf("unbounded go test on small: %v", err)
 	}
-	res = f.apply(plan.AddTask{Key: "l", Title: "l", Size: "large", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}})
-	if len(res.Warnings["l"]) != 0 {
-		t.Fatalf("large must not warn: %v", res.Warnings)
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
+		plan.AddTask{Key: "l", Title: "l", Size: "large", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}, Regression: okReg()},
+	}}); err != nil {
+		t.Fatalf("large: %v", err)
 	}
-	_ = app.DefaultGuidelines
 }

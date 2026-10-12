@@ -226,7 +226,7 @@ func TestCohortLateConflictBlamesOnlyThatMember(t *testing.T) {
 	if _, err := f.e.Verify(f.ctx, sa.Token, verification.ModeComplete); err != nil {
 		t.Fatal(err)
 	}
-	pre := f.apply(plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(api)}, TaskChecks: okChecks()}).Created["pre"]
+	pre := f.apply(plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(api)}, TaskChecks: okChecks(), Regression: okReg()}).Created["pre"]
 	res, err := f.e.Verify(f.ctx, su.Token, verification.ModeComplete)
 	if err != nil && fault.CodeOf(err) == fault.CodeInternal {
 		t.Fatal(err)

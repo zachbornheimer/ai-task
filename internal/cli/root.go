@@ -93,11 +93,7 @@ func Main(env Env) int {
 	}
 	rest := top.Args()
 	if len(rest) == 0 {
-		if c.jsonOut() {
-			return c.usageError(errors.New("a command is required; `atask help` lists them"))
-		}
-		c.printHelp(c.env.Stderr)
-		return ExitUsage
+		rest = []string{"list"}
 	}
 	name, args := rest[0], rest[1:]
 	cmd, ok := commands[name]
@@ -201,7 +197,7 @@ func (c *ctxt) printCommandHelp(cmd command) error {
 		h.Flags = append(h.Flags, flagHelp{f.Name, f.Usage, f.DefValue})
 	})
 	return c.emit(h, func(w io.Writer) {
-		fmt.Fprintf(w, "Usage: at %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
+		fmt.Fprintf(w, "Usage: atask %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
 		c.fs.SetOutput(w)
 		c.fs.PrintDefaults()
 	})
@@ -218,7 +214,11 @@ func (c *ctxt) engine(ctx context.Context) (*app.Engine, error) {
 	if c.eng != nil {
 		return c.eng, nil
 	}
-	e, err := app.Open(ctx, app.Config{Path: c.g.db})
+	actor := c.env.Getenv("ATASK_ACTOR")
+	if actor == "" {
+		actor = c.env.Getenv("USER")
+	}
+	e, err := app.Open(ctx, app.Config{Path: c.g.db, Actor: actor, Cwd: c.env.Cwd})
 	if err != nil {
 		return nil, err
 	}
@@ -317,8 +317,25 @@ func (c *ctxt) usageError(err error) int {
 
 func (c *ctxt) printHelp(w io.Writer) {
 	fmt.Fprintln(w, "atask - agent task engine: atomic plans, leased claims, verified completion")
-	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]")
-	fmt.Fprintln(w, "\nCommands:")
+	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [--pretty] [command [args]]")
+	fmt.Fprintln(w, "       no command lists every non-archived task (same as atask list)")
+	fmt.Fprintln(w, `
+atask context                         operating contract for agents (no project or database)
+atask context ID                      worker handoff for that task
+atask help [command]                  this reference, or one command's flags
+atask version                         build version
+
+atask add "title" --check "id: cmd" [--claim] [--parent ID] [--requires ID] [--group]
+atask update ID [--title ...] [--check ...] [--archive --reason ...]
+atask list [project] [ready|blocked|complete|archived|open]
+atask show [ID] [--full]
+atask claim [ID] [--wait]
+atask claim renew [token]
+atask claim release [token] [--note ...] [--failed]
+atask log --done ... --next ... --learned ... --note ...
+atask verify task|regression|complete
+
+Commands:`)
 	names := make([]string, 0, len(commands))
 	for n := range commands {
 		names = append(names, n)
@@ -328,7 +345,6 @@ func (c *ctxt) printHelp(w io.Writer) {
 		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
 	}
 	fmt.Fprintln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
-	fmt.Fprintln(w, "Agent verbs: claim, log, verify task|regression|complete, claim release|renew. Planning: add, update, show, list.")
 }
 
 var commands = map[string]command{}
@@ -358,7 +374,7 @@ func init() {
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		h := help{Usage: "at [--db PATH] [--project ID|NAME] [--json] [--pretty] <command> [args]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
+		h := help{Usage: "atask [--db PATH] [--project ID|NAME] [--json] [--pretty] [command [args]]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
 		for _, n := range names {
 			h.Commands = append(h.Commands, cmd{n, commands[n].summary})
 		}

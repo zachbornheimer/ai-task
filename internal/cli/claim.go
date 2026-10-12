@@ -11,17 +11,15 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
-	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 func init() {
-	register("claim", "claim work: at claim [REF] [--wait] | at claim renew [token|-] | at claim release [token|-] [--note ..] [--failed]", runClaim)
-	register("log", "record progress under the current session: at log --done .. --next .. --learned .. --note ..", runLog)
-	register("verify", "run checks under the current session: at verify task|regression|complete | at verify groups [REF]", runVerify)
-	register("whoami", "show the task of the current session token", runWhoami)
+	register("claim", "claim work: atask claim [REF] [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
+	register("log", "record progress under the current session: atask log --done .. --next .. --learned .. --note ..", runLog)
+	register("verify", "run checks under the current session: atask verify task|regression|complete | atask verify groups [REF]", runVerify)
 }
 
 // token resolves a REQUIRED session token: a positional argument, "-" for
@@ -200,7 +198,7 @@ func renderSession(w io.Writer, s app.Session) {
 	}
 	fmt.Fprintf(w, "Token:     %s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
 	fmt.Fprintln(w)
-	renderShow(w, s.Task, false)
+	renderShow(w, s.Task, false, painter{})
 	renderHandoff(w, s.Handoff)
 }
 
@@ -345,7 +343,7 @@ func (c *ctxt) verifyGroups(ctx context.Context, args []string) error {
 			fmt.Fprintln(w, "No epic was ready to verify.")
 		}
 		for _, g := range o.Groups {
-			fmt.Fprintln(w, groupLine(g))
+			fmt.Fprintln(w, groupLine(g, c.painter()))
 			if g.Verification != nil && g.Verification.Summary != "" {
 				fmt.Fprintf(w, "    %s\n", g.Verification.Summary)
 			}
@@ -357,68 +355,40 @@ func (c *ctxt) verifyGroups(ctx context.Context, args []string) error {
 }
 
 func runContext(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
-	withRules := c.fs.Bool("with-rules", false, "append the standing rules (AGENTS.md) for an agent that does not read that file")
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if len(c.args) == 0 {
+		return c.emit(map[string]string{"prompt": AgentContract}, func(w io.Writer) {
+			_, _ = io.WriteString(w, AgentContract)
+		})
+	}
+	if len(c.args) != 1 {
+		return usage("context takes no arguments, or one task id")
 	}
 	e, err := c.engine(ctx)
 	if err != nil {
 		return err
 	}
-	var (
-		ref string
-		tok execution.Token
-	)
-	switch {
-	case len(c.args) > 1:
-		return usage("context takes at most one task reference")
-	case len(c.args) == 1 && c.args[0] != "-" && !strings.HasPrefix(c.args[0], "sess-"):
-		ref = c.args[0]
-	case len(c.args) == 0 && *session == "" && c.env.Getenv("ATASK_SESSION") == "" && workspace.LoadToken(ctx, c.env.Cwd) == "":
-		// No task in hand anywhere: the project's context.
-	default:
-		// The session's own task: the worktree's stored token, ATASK_SESSION,
-		// a positional token, '-' for stdin, or --session.
-		if tok, err = c.token(ctx, c.args, *session); err != nil {
-			return err
+	ref := c.args[0]
+	var cx app.Context
+	if task.IsID(ref) {
+		cx, err = e.Context(ctx, "", ref, "", false)
+	} else {
+		id, rerr := c.resolveProject(ctx)
+		if rerr != nil {
+			return rerr
 		}
+		cx, err = e.Context(ctx, id, ref, "", false)
 	}
-	pid := project.ID("")
-	if (ref != "" && !task.IsID(ref)) || (ref == "" && tok == "") {
-		if pid, err = c.resolveProject(ctx); err != nil {
-			return err
-		}
-	}
-	cx, err := e.Context(ctx, pid, ref, tok, *withRules)
 	if err != nil {
 		return err
 	}
-	return c.emit(cx, func(w io.Writer) { io.WriteString(w, cx.Prompt) })
+	return c.emit(cx, func(w io.Writer) {
+		_, _ = io.WriteString(w, cx.Prompt)
+	})
 }
-
-func runWhoami(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
-	if err := c.parse(args); err != nil {
-		return err
-	}
-	tok, err := c.token(ctx, c.args, *session)
-	if err != nil {
-		return err
-	}
-	e, err := c.engine(ctx)
-	if err != nil {
-		return err
-	}
-	v, err := e.Whoami(ctx, tok)
-	if err != nil {
-		return err
-	}
-	return c.emit(v, func(w io.Writer) { renderShow(w, v, false) })
-}
-
-var _ = project.ID("")
 
 func init() {
-	register("context", "working context for a coding agent: at context [REF] [--with-rules] (no REF: this session's task, or the plan when none is in hand)", runContext)
+	register("context", "operating contract, or worker handoff for a task id", runContext)
 }

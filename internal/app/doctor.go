@@ -117,7 +117,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 	// Regression suite defined.
 	regression := verification.Policy{Regression: p.Regression}
 	if err := verification.RequireGate(p.Regression, "regression checks"); err != nil {
-		add("regression_checks", false, "error", "the project has no required regression check; no task can be claimed", "at project --regression-check \"test: <command>\"")
+		add("regression_checks", false, "error", "the project has no required regression check; no task can be claimed", "atask project --regression-check \"test: <command>\"")
 	} else {
 		add("regression_checks", true, "info", fmt.Sprintf("%d regression check(s)", len(p.Regression)), "")
 	}
@@ -176,7 +176,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 
 	// Stale quarantined worktrees.
 	if stale, _ := filepath.Glob(filepath.Join(root, "*.stale-*")); len(stale) > 0 {
-		add("stale_workspaces", false, "warning", fmt.Sprintf("%d quarantined worktree(s) from attempts that never ended", len(stale)), "at prune")
+		add("stale_workspaces", false, "warning", fmt.Sprintf("%d quarantined worktree(s) from attempts that never ended", len(stale)), "atask prune")
 	} else {
 		add("stale_workspaces", true, "info", "no quarantined worktrees", "")
 	}
@@ -198,7 +198,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 				ids = append(ids, fmt.Sprintf("%s (%s)", t.ID, t.AttentionReason))
 			}
 		}
-		add("needs_attention", false, "warning", fmt.Sprintf("%d task(s) need a planner: %s", n, strings.Join(ids, "; ")), "at update <task> --reset-attempts --planner, or at claim <task> to retry its worktree")
+		add("needs_attention", false, "warning", fmt.Sprintf("%d task(s) need a planner: %s", n, strings.Join(ids, "; ")), "atask update <task> --reset-attempts --planner, or atask claim <task> to retry its worktree")
 	} else {
 		add("needs_attention", true, "info", "no task needs attention", "")
 	}

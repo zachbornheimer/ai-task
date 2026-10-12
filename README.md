@@ -47,7 +47,8 @@ atask add "Confirm OAuth API compatibility" --key compat --parent identity --che
 atask add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
 atask list                                                # ○ ◐ ● hierarchy
 cd "$(atask claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on atask/<id>, token stored inside
-atask context                                             # the task as one prompt: contract, checks, workspace, handoff, sibling tasks
+atask context                                             # operating contract; atask context ID is the worker handoff
+atask show                                                # the current claim (pins, budgets, handoff); atask show ID for any task
 atask log --done "..." --next "..."                       # inside the worktree no token is needed; every command renews the lease
 atask verify task                                         # diagnostic
 # commit in the worktree, then:
@@ -94,10 +95,9 @@ workers.
 Codex, OpenCode and current Claude Code) and a CLAUDE.md that imports it,
 so every request an agent receives in that repository is routed through
 `at`: plan with checks, claim, work in the task worktree, `atask verify
-complete`. `atask init --claude` adds the Claude Code hooks that make it hold
-when instructions fade: the plan or task context at session start, edits
-refused outside task worktrees, and no ending a turn with a claimed task
-neither verified nor released. `docs/integrations.md` has the recipe per
+complete`. `atask init --claude` optionally installs SessionStart only
+(current claim, never the board). It does not install edit or stop
+guards. `docs/integrations.md` has the recipe per
 harness, headless and interactive, and `examples/hosts/` the worker
 loops.
 

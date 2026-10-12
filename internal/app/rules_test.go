@@ -10,7 +10,7 @@ import (
 
 // TestAgentsMDIsTheInstalledBlock keeps this repository's AGENTS.md
 // identical to what `atask init` installs (between the markers) and the
-// rules an agent gets from `atask context --with-rules`.
+// rules an agent gets from the installed AGENTS.md block.
 func TestAgentsMDIsTheInstalledBlock(t *testing.T) {
 	b, err := os.ReadFile("../../AGENTS.md")
 	if err != nil {
@@ -21,7 +21,17 @@ func TestAgentsMDIsTheInstalledBlock(t *testing.T) {
 	if !strings.Contains(s, block) {
 		t.Fatalf("AGENTS.md does not hold the installed block verbatim; run `atask init --path .` to refresh it")
 	}
-	if !strings.Contains(app.Instructions(), app.Rules) {
-		t.Fatal("the instruction block must contain the execution contract")
+	for _, want := range []string{
+		"Track verifiable objectives",
+		"atask context",
+		"atask context ID",
+		"atask verify complete",
+	} {
+		if !strings.Contains(app.Instructions(), want) {
+			t.Fatalf("instruction block lacks %q:\n%s", want, app.Instructions())
+		}
+	}
+	if strings.Contains(app.Instructions(), app.Rules) {
+		t.Fatal("AGENTS.md must not duplicate the long execution contract; that lives in atask context")
 	}
 }

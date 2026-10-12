@@ -26,6 +26,8 @@ const (
 	FilterBlocked Filter = "blocked"
 	// FilterAll: everything live, complete included.
 	FilterAll Filter = "all"
+	// FilterComplete: completed live tasks and groups.
+	FilterComplete Filter = "complete"
 	// FilterArchived: archived tasks only.
 	FilterArchived Filter = "archived"
 )
@@ -45,14 +47,37 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		return PlanSnapshot{}, err
 	}
 	now := e.now()
-	head := e.resolveTargetHead(ctx, q.ProjectID)
+	heads := map[project.ID]targetHead{}
+	if q.ProjectID != "" {
+		heads[q.ProjectID] = e.resolveTargetHead(ctx, q.ProjectID)
+	} else {
+		var err error
+		heads, err = e.projectHeads(ctx)
+		if err != nil {
+			return PlanSnapshot{}, err
+		}
+	}
 	var snap PlanSnapshot
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
-		proj, err := tx.GetProject(q.ProjectID)
-		if err != nil {
-			return err
+		var proj project.Project
+		byID := map[project.ID]project.Project{}
+		if q.ProjectID != "" {
+			p, err := tx.GetProject(q.ProjectID)
+			if err != nil {
+				return err
+			}
+			proj = p
+			snap.Revision = proj.PlanRev
+		} else {
+			proj = project.Project{MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+			ps, err := tx.ListProjects()
+			if err != nil {
+				return err
+			}
+			for i := range ps {
+				byID[ps[i].ID] = ps[i]
+			}
 		}
-		snap.Revision = proj.PlanRev
 		scope := sqlite.ScopeLive
 		if q.Filter == FilterArchived {
 			scope = sqlite.ScopeAll
@@ -63,18 +88,27 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		}
 		snap.Tasks, snap.Groups = []TaskView{}, []GroupView{}
 		for _, r := range records {
-			st := r.Status(now, proj.MaxAttempts)
+			rp := proj
+			if q.ProjectID == "" {
+				if p, ok := byID[r.Task.ProjectID]; ok {
+					rp = p
+				}
+				if rp.MaxAttempts == 0 {
+					rp.MaxAttempts = project.DefaultMaxAttempts
+				}
+			}
+			st := r.Status(now, rp.MaxAttempts)
 			if r.Task.Kind == task.KindGroup {
 				if (q.Filter == FilterArchived) != r.Task.Archived() {
 					continue
 				}
-				prog, err := e.groupProgress(tx, r.Task.ID, proj, now)
+				prog, err := e.groupProgress(tx, r.Task.ID, rp, now)
 				if err != nil {
 					return err
 				}
 				g := GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt, LastError: r.LastError}
 				if verification.HasRequired(r.Task.Verification.TaskChecks) {
-					gv, err := e.groupVerification(tx, r, proj, now, head)
+					gv, err := e.groupVerification(tx, r, rp, now, heads[rp.ID])
 					if err != nil {
 						return err
 					}
@@ -82,6 +116,9 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					g.Complete = r.CompletedAt != nil
 				}
 				if q.Filter == FilterOpen && g.Complete {
+					continue
+				}
+				if q.Filter == FilterComplete && !g.Complete {
 					continue
 				}
 				snap.Groups = append(snap.Groups, g)
@@ -100,18 +137,25 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				if st != task.StatusBlocked {
 					continue
 				}
+			case FilterComplete:
+				if st != task.StatusComplete {
+					continue
+				}
 			case FilterArchived:
 				if st != task.StatusArchived {
 					continue
 				}
 			}
-			v, err := e.buildViewDepth(tx, r, proj, now, viewList, head)
+			v, err := e.buildViewDepth(tx, r, rp, now, viewList, heads[rp.ID])
 			if err != nil {
 				return err
 			}
 			snap.Tasks = append(snap.Tasks, v)
 		}
-		snap.Summary, err = e.summaryIn(tx, proj, now, head)
+		if q.ProjectID == "" {
+			return nil
+		}
+		snap.Summary, err = e.summaryIn(tx, proj, now, heads, nil)
 		return err
 	})
 	return snap, err
@@ -166,26 +210,50 @@ func (e *Engine) lookup(tx *sqlite.Tx, pid project.ID, ref string) (sqlite.Recor
 	return r, nil
 }
 
-// Summary computes the project status.
+// Summary computes status. An empty pid is the whole board.
 func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 	if err := e.reconcile(ctx); err != nil {
 		return Summary{}, err
 	}
 	now := e.now()
-	head := e.resolveTargetHead(ctx, pid)
+	heads := map[project.ID]targetHead{}
+	if pid != "" {
+		heads[pid] = e.resolveTargetHead(ctx, pid)
+	} else {
+		var err error
+		heads, err = e.projectHeads(ctx)
+		if err != nil {
+			return Summary{}, err
+		}
+	}
 	var s Summary
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
-		proj, err := tx.GetProject(pid)
-		if err != nil {
-			return err
+		var proj project.Project
+		var byID map[project.ID]project.Project
+		var err error
+		if pid == "" {
+			proj = project.Project{ID: project.UnscopedID, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+			ps, err := tx.ListProjects()
+			if err != nil {
+				return err
+			}
+			byID = map[project.ID]project.Project{}
+			for i := range ps {
+				byID[ps[i].ID] = ps[i]
+			}
+		} else {
+			proj, err = tx.GetProject(pid)
+			if err != nil {
+				return err
+			}
 		}
-		s, err = e.summaryIn(tx, proj, now, head)
+		s, err = e.summaryIn(tx, proj, now, heads, byID)
 		return err
 	})
 	return s, err
 }
 
-func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ IsZero() bool }, head targetHead) (Summary, error) {
+func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ IsZero() bool }, heads map[project.ID]targetHead, byID map[project.ID]project.Project) (Summary, error) {
 	n := e.now()
 	s := Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}
 	records, err := tx.ListRecords(proj.ID, sqlite.ScopeLive, n, proj.MaxAttempts)
@@ -230,7 +298,11 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	var epicErrors []string
 	for _, r := range records {
 		if r.Task.Kind == task.KindGroup && verification.HasRequired(r.Task.Verification.TaskChecks) && r.CompletedAt == nil {
-			gv, err := e.groupVerification(tx, r, proj, n, head)
+			rp := proj
+			if p, ok := byID[r.Task.ProjectID]; ok {
+				rp = p
+			}
+			gv, err := e.groupVerification(tx, r, rp, n, heads[rp.ID])
 			if err != nil {
 				return s, err
 			}

@@ -136,8 +136,25 @@ func effective(v, def time.Duration) time.Duration {
 // DefaultMaxAttempts applies to new projects.
 const DefaultMaxAttempts = 5
 
+// UnscopedID is the default board: a project whose id is empty. Tasks
+// filed outside an enrolled repo land here. Attaching a named project is
+// recommended so claim can use a worktree.
+const UnscopedID ID = ""
+
+// Unscoped reports whether p is the default board.
+func (p Project) Unscoped() bool { return p.ID == UnscopedID }
+
 // Validate enforces structural rules on a project record.
 func (p Project) Validate() error {
+	if p.Unscoped() {
+		if p.Integration != IntegrationNone {
+			return fault.New(fault.CodeInvalidInput, "unscoped board must use integration none")
+		}
+		if p.RootPath != "" {
+			return fault.New(fault.CodeInvalidInput, "unscoped board must not have a root path")
+		}
+		return nil
+	}
 	if strings.TrimSpace(p.Name) == "" {
 		return fault.New(fault.CodeInvalidInput, "project name must not be empty")
 	}
@@ -276,8 +293,36 @@ func randomBase32(r io.Reader, n int) string {
 	return string(out)
 }
 
+// EncodeBase32 writes src as Crockford base32 (no padding). A 16-byte
+// UUID encodes to 26 characters.
+func EncodeBase32(src []byte) string {
+	var n uint64
+	var nbits int
+	out := make([]byte, 0, (len(src)*8+4)/5)
+	for _, b := range src {
+		n = n<<8 | uint64(b)
+		nbits += 8
+		for nbits >= 5 {
+			nbits -= 5
+			out = append(out, base32Alphabet[(n>>nbits)&31])
+			n &= (1 << nbits) - 1
+		}
+	}
+	if nbits > 0 {
+		out = append(out, base32Alphabet[(n<<(5-nbits))&31])
+	}
+	return string(out)
+}
+
 func validBase32(s string, n int) bool {
 	if len(s) != n {
+		return false
+	}
+	return validBase32Alphabet(s)
+}
+
+func validBase32Alphabet(s string) bool {
+	if s == "" {
 		return false
 	}
 	for _, c := range []byte(s) {
@@ -292,6 +337,9 @@ func validBase32(s string, n int) bool {
 // (task IDs, session tokens) so that one alphabet is defined once.
 func RandomBase32(n int) string        { return randomBase32(rand.Reader, n) }
 func ValidBase32(s string, n int) bool { return validBase32(s, n) }
+
+// ValidBase32Alphabet reports whether s is nonempty Crockford base32.
+func ValidBase32Alphabet(s string) bool { return validBase32Alphabet(s) }
 
 // MarshalJSON writes budgets in milliseconds, matching the field names;
 // Unlimited is -1.

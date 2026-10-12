@@ -1,28 +1,27 @@
-○ at-e29 · Implement scope enforcement
-[OPEN]
-Created: 2026-10-09 09:12
+○ at-e29 [TASK] · Implement scope enforcement   [OPEN]
+Type: task
+Created: 2026-10-09 · Updated: 2026-10-09
 Project: identity-service
-Group: Identity Core
 
 DESCRIPTION
-Implement scope enforcement
+  Implement scope enforcement
 
 OUTCOME
-Requests cannot exercise scopes they were not granted.
+  Requests cannot exercise scopes they were not granted.
 
 ACCEPTANCE CRITERIA
-• Allowed scopes work.
-• Escalated scopes fail.
+  • Allowed scopes work.
+  • Escalated scopes fail.
+
+PARENT
+  ↑ ○ at-g01: Identity Core
 
 REQUIRES
-● at-c17 Confirm OAuth API compatibility
+  ● at-c17: Confirm OAuth API compatibility
 
 BLOCKS
-○ at-f16 Verify end-to-end OAuth flow
+  ↳ ○ at-f16: Verify end-to-end OAuth flow
 
 VERIFICATION
-Task:        not run
-Regression:  not run
-
-HISTORY
-09:12 — Task defined.
+  Task:        not run
+  Regression:  not run

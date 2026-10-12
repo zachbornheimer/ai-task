@@ -154,7 +154,8 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
-       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.pins_json, t.size
+       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.pins_json, t.size,
+       t.creator, t.created_cwd
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
 LEFT JOIN submissions s ON s.id = t.latest_submission_id
@@ -182,7 +183,8 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch, &aLease,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
-		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &pins, &r.Task.Size)
+		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &pins, &r.Task.Size,
+		&r.Task.Creator, &r.Task.CreatedCwd)
 	if err != nil {
 		return r, err
 	}
@@ -275,9 +277,9 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if size == "" {
 		size = task.SizeSmall
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at, pins_json, size)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins), size)
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at, pins_json, size, creator, created_cwd)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins), size, tk.Creator, tk.CreatedCwd)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return err // caller distinguishes id vs key collisions
@@ -408,6 +410,16 @@ func (t *Tx) GetByKey(pid project.ID, key string) (Record, bool, error) {
 	return r, err == nil, wrapInternal(err, "get task by key")
 }
 
+// GetOpenByTitle loads the oldest live open task with this exact title.
+func (t *Tx) GetOpenByTitle(title string) (Record, bool, error) {
+	row := t.tx.QueryRowContext(t.ctx, recordSelect+` WHERE t.kind = 'task' AND t.description = ? AND t.archived_at IS NULL AND t.completed_at IS NULL ORDER BY t.created_at, t.id LIMIT 1`, title)
+	r, err := scanRecord(row)
+	if isNoRows(err) {
+		return r, false, nil
+	}
+	return r, err == nil, wrapInternal(err, "get open task by title")
+}
+
 // LoadAcceptance fills in the acceptance criteria of a task.
 func (t *Tx) LoadAcceptance(tk *task.Task) error {
 	rows, err := t.tx.QueryContext(t.ctx, `SELECT description FROM acceptance_criteria WHERE task_id = ? ORDER BY position`, tk.ID)
@@ -464,8 +476,12 @@ func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time, maxAtte
 }
 
 func scopeWhere(pid project.ID, scope ListScope, now time.Time, maxAttempts int) (string, []any) {
-	where := ` WHERE t.project_id = ?`
-	args := []any{pid}
+	where := ` WHERE 1=1`
+	var args []any
+	if pid != "" {
+		where = ` WHERE t.project_id = ?`
+		args = []any{pid}
+	}
 	switch scope {
 	case ScopeLive:
 		where += ` AND t.archived_at IS NULL`

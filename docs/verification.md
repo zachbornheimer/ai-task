@@ -158,10 +158,12 @@ shares the cap: a check that would start after it is spent is recorded as
 code, `VERIFICATION_TIMEOUT`, and is never counted against the attempt:
 it says the verification was built too slow for the task's size (or the
 code hangs), not that the software is wrong. The message says which
-budget and whose problem: a task-check timeout is the agent's to fix
-(prove only this outcome, split the task) or the planner's (raise the
-size); a regression timeout is the planner's (narrow the gate, raise
-`--regression-budget`). Checks that pass using more than half their
+budget and whose problem: a task-check timeout names the two fixes
+(narrow with `-run` so the check proves only this outcome, or set
+`--size medium|large`); a regression timeout is the planner's (narrow
+the gate, raise `--regression-budget`). A small task whose check is
+`go test` without `-run` is rejected at add/update, because a package
+suite routinely outruns the 30s budget. Checks that pass using more than half their
 budget are reported as warnings, because CI machines are slower. `at
 doctor` times the regression suite on the target branch against the
 budget. Checks receive `ATASK_CHANGED_FILES`, a file listing the paths the

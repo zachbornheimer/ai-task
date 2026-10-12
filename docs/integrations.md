@@ -1,4 +1,4 @@
-# Using `at` from AI systems
+# Using `atask` from AI systems
 
 The goal: every request an agent receives in a repository is routed
 through `atask`, so work is planned with checks, done in isolated worktrees,
@@ -10,9 +10,9 @@ calls a model; the harness does.
 
 | Layer                | Holds                                                               | Where it lives                                                                                                                                        |
 | -------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bootstrap            | identity, the `at` CLI, JSON envelopes, stop on lost authority      | the harness's system prompt where it can be set (`claude -p --append-system-prompt`, a bare model's system message); text in `docs/agent-contract.md` |
+| Bootstrap            | identity, the `atask` CLI, JSON envelopes, stop on lost authority   | the harness's system prompt where it can be set (`claude -p --append-system-prompt`, a bare model's system message); text in `docs/agent-contract.md` |
 | Project instructions | how work gets done here, the verbs, the execution contract          | `AGENTS.md` block installed by `atask init`; `CLAUDE.md` imports it                                                                                   |
-| Task turn            | outcome, constraints, acceptance, checks, workspace, state, handoff | `atask context`, generated per task                                                                                                                   |
+| Task turn            | outcome, constraints, acceptance, checks, workspace, state, handoff | `atask context ID` (worker handoff); `atask show` for the current claim; `atask list` for the plan                                                    |
 
 The project file is the lever: it says that any change starts with the
 plan, that questions are not tasks, and that the target branch is never
@@ -22,29 +22,29 @@ edited directly. Hooks make it hold when a long session forgets.
 
 ```sh
 cd repo
-at init --claude                                  # instructions + Claude Code hooks (omit --claude elsewhere)
-at project --regression-check "test: go test ./..." --regression-check "vet: go vet ./..."
-at doctor                                         # repository, target, identity, suite green on the target
-git add AGENTS.md CLAUDE.md .claude && git commit -m "Route agent work through at"
+atask init --claude                                  # instructions + optional SessionStart hook only (omit --claude elsewhere)
+atask project --regression-check "test: go test ./..." --regression-check "vet: go vet ./..."
+atask doctor                                         # repository, target, identity, suite green on the target
+git add AGENTS.md CLAUDE.md .claude && git commit -m "Route agent work through atask"
 ```
 
 ## Claude Code
 
-Interactive: open the repository; the session-start hook prints the plan
-or the task in hand, the instructions route requests through `atask`, the
-edit guard refuses changes outside a task worktree, and the stop hook
-refuses to end a turn with an unfinished claim. The agent runs `at
-context`, plans or claims, `cd`s into the workspace, works, commits,
-`atask verify complete`.
+Interactive: open the repository; with `--claude`, SessionStart injects
+the current claim when one exists and writes nothing otherwise. It does
+not dump the board, does not install an edit guard, and does not block
+ending a turn because a claim is open. The agent runs `atask context`
+once for the contract, then `atask list` / `atask context ID`, claims,
+works in the workspace, commits, `atask verify complete`.
 
 Headless, one worker:
 
 ```sh
-examples/hosts/claude-code.sh        # loops: claim --wait, context | claude -p, release if not completed
+examples/hosts/claude-code.sh        # loops: claim --wait, context ID | claude -p, release if not completed
 ```
 
 The script passes `--append-system-prompt` with the bootstrap and allows
-`Bash(at *)`, `Bash(git *)` and the project's own build commands; widen
+`Bash(atask *)`, `Bash(git *)` and the project's own build commands; widen
 the allow list for the repository's tools or run in a sandbox with
 `--dangerously-skip-permissions`. Several copies run in parallel; the
 engine serialises claims and promotion.
@@ -54,17 +54,19 @@ engine serialises claims and promotion.
 Codex reads `AGENTS.md` natively and has no system-prompt flag, so the
 project instructions are the whole contract. Interactive sessions behave
 as above without hooks. Headless: `examples/hosts/codex.sh` (`codex exec
---full-auto` with the context as the prompt). Commit messages: Worktrunk's
+--full-auto` with `atask context ID` as the prompt). Commit messages: Worktrunk's
 `wt step commit` if installed, else git.
 
 ## OpenCode, Grok, anything with a shell
 
 OpenCode reads `AGENTS.md`; `examples/hosts/opencode.sh` drives `opencode
-run`. For any other harness, `examples/hosts/custom.sh` takes
-`AGENT_CMD`: the command receives the task context on stdin with
+run`. Grok reads `AGENTS.md`; `examples/hosts/grok.sh` drives
+`grok --always-approve --output-format text` with `atask context ID` as the
+prompt. For any other harness, `examples/hosts/custom.sh` takes
+`AGENT_CMD`: the command receives the worker handoff (`atask context ID`) on stdin with
 `ATASK_SESSION` exported and must work in the printed workspace. For a bare
-model behind an API, send the bootstrap as the system message and `at
-context --with-rules` as the first user message.
+model behind an API, send the bootstrap as the system message, `atask
+context` as the operating contract, and `atask context ID` as the task turn.
 
 ## Planners
 
