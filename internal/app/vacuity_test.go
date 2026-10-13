@@ -21,7 +21,7 @@ func TestVacuityRejectsOnAddAndUpdate(t *testing.T) {
 		t.Fatalf("add: want INVALID_INPUT naming no-op, got %v", err)
 	}
 	f.apply(plan.AddTask{Key: "b", Title: "b", TaskChecks: okChecks()})
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.UpdateTask{Target: plan.Ref("b"), TaskChecks: plan.Patch[verification.CheckSpec]{Set: true, Value: vacuous}},
 	}})
 	if fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "no-op") {

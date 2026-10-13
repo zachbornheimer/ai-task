@@ -21,7 +21,7 @@ func TestPlannerAuthorityIsNoToken(t *testing.T) {
 	sa := f.claim(string(a))
 	sb := f.claim(string(b))
 	edit := func(session string, id string) error {
-		_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: session, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(id), TaskChecks: plan.Replace([]verification.CheckSpec{check("u", "true", true)})}}})
+		_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: session, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(id), TaskChecks: plan.Replace([]verification.CheckSpec{check("u", "test -d .", true)})}}})
 		return err
 	}
 	if err := edit("", string(a)); err != nil {
