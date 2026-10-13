@@ -35,15 +35,8 @@ func TestEmptyChecksFailClosed(t *testing.T) {
 	a := f.add("a")
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{})}}})
 	wantCode(t, err, fault.CodeInvalidInput)
-	// A project without regression checks hands out no work.
-	f.setRegression()
-	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeInvalidInput)
-	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeInvalidInput)
 	// Regression checks removed under a live claim: verification still fails
 	// closed and the claim survives.
-	f.setRegression(check("regress", "test -d .", true))
 	sa := f.claim(string(a))
 	f.setRegression()
 	f.commit(sa.Workspace, "a.txt", "a")
@@ -392,10 +385,6 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	a := f.add("a")
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{opt("o2")})}}})
 	wantCode(t, err, fault.CodeInvalidInput)
-	// Project boundary.
-	p, _ := f.e.Project(f.ctx, f.proj.ID)
-	p.Regression = []verification.CheckSpec{opt("r")}
-	wantCode(t, f.e.UpdateProject(f.ctx, p), fault.CodeInvalidInput)
 	// Legacy rows that bypassed the rule: never handed out, never completed.
 	db, err := sql.Open("sqlite", f.path)
 	if err != nil {
@@ -408,19 +397,6 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	setRegression := func(body string) {
-		t.Helper()
-		if _, err := db.Exec(`UPDATE projects SET regression_json = ? WHERE id = ?`, body, f.proj.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	regOpt, _ := json.Marshal(verification.Policy{Regression: []verification.CheckSpec{opt("r")}})
-	setRegression(string(regOpt))
-	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeInvalidInput)
-	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeInvalidInput)
-	f.setRegression(check("regress", "test -d .", true))
 	setPolicy(a, optJSON("o3"))
 	if st := f.status(string(a)); st != task.StatusNeedsAttention {
 		t.Fatalf("vacuous task status %s", st)
@@ -446,7 +422,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	wantCode(t, err, fault.CodeInvalidInput)
 	good, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("u", "test -d .", true)}})
 	setPolicy(b, string(good))
-	setRegression(string(regOpt))
+	f.setRegression(opt("r"))
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeRegression)

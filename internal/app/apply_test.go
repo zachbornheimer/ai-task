@@ -176,17 +176,6 @@ func TestGroupsAreOrganizationalOnly(t *testing.T) {
 
 func refptr(s string) *plan.Ref { r := plan.Ref(s); return &r }
 
-func TestRegressionNamespaceIsSeparate(t *testing.T) {
-	f := newFixture(t)
-	f.setRegression(check("lint", "test -d .", true))
-	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", TaskChecks: []verification.CheckSpec{check("lint", "exit 1", true)}}}})
-	wantCode(t, err, fault.CodeInvalidInput)
-	f.add("ok")
-	p, _ := f.e.Project(f.ctx, f.proj.ID)
-	p.Regression = []verification.CheckSpec{check("unit-ok", "test -d .", true)}
-	wantCode(t, f.e.UpdateProject(f.ctx, p), fault.CodeInvalidInput)
-}
-
 func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 	f := newFixture(t)
 	c := f.add("c")

@@ -156,7 +156,7 @@ func (e *Engine) Reverify(ctx context.Context, token execution.Token) (VerifyRes
 	if !inPlace {
 		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+c.proj.TargetBranch, c.revision)
 	}
-	taskOpts, regOpts := suiteOpts(c.rec.Task, c.proj, changed)
+	taskOpts, regOpts := e.suiteOpts(c.rec.Task, c.proj, changed)
 	for _, mode := range []verification.Mode{verification.ModeProof, verification.ModeRegression} {
 		policy := c.policy.Subset(mode)
 		opts := taskOpts

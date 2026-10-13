@@ -9,9 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
-	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
@@ -43,20 +41,13 @@ type DoctorReport struct {
 	Summary        *Summary      `json:"summary,omitempty"`
 }
 
-// DoctorOptions tunes Doctor.
-type DoctorOptions struct {
-	// SkipBaseline skips running the regression checks on the target
-	// branch (the one expensive step).
-	SkipBaseline bool
-}
-
 // Doctor inspects a project the way a planner should before adding tasks
 // and a host should before starting workers: the repository and target
 // branch resolve, a Git identity exists for the agents' commits, the
 // regression suite is defined and passes on the target branch, the
 // workspace root is writable, and no task is waiting on a planner.
 // Nothing is written to the database or the repository.
-func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions) (DoctorReport, error) {
+func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, error) {
 	p, err := e.Project(ctx, pid)
 	if err != nil {
 		return DoctorReport{}, err
@@ -115,14 +106,6 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 		add("git_identity", true, "info", "commits and integration merges as "+ident, "")
 	}
 
-	// Regression suite defined.
-	regression := verification.Policy{Regression: p.Regression}
-	if err := verification.RequireGate(p.Regression, "regression checks"); err != nil {
-		add("regression_checks", false, "error", "the project has no required regression check; no task can be claimed", "atask project --regression-check \"test: <command>\"")
-	} else {
-		add("regression_checks", true, "info", fmt.Sprintf("%d regression check(s)", len(p.Regression)), "")
-	}
-
 	// Workspace root writable.
 	root := mgr.Root
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -133,46 +116,6 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 		f.Close()
 		os.Remove(f.Name())
 		add("workspace_root", true, "info", fmt.Sprintf("worktrees under %s", root), "")
-	}
-
-	// Baseline: the regression suite must pass on the target before any
-	// task is claimed, or the first claimant pays for the planner's debt.
-	if rep.Healthy && !opts.SkipBaseline && rep.TargetRevision != "" {
-		dir, cleanup, err := mgr.Snapshot(ctx, rep.TargetRevision)
-		if err != nil {
-			add("baseline", false, "error", fmt.Sprintf("cannot snapshot %s: %v", p.TargetBranch, fault.MessageOf(err)), "")
-		} else {
-			var failed []verification.Evidence
-			started := time.Now()
-			for _, step := range verification.Plan(regression) {
-				ev := e.execStep(ctx, dir, step, 0, rep.TargetRevision, regression.Digest(), false, stepRun{runner: e.runner(), size: proof.SizeLarge})
-				if ev.Required && ev.Outcome != verification.OutcomePassed {
-					failed = append(failed, ev)
-				}
-			}
-			took := time.Since(started).Round(time.Millisecond)
-			cleanup()
-			budget := p.Budgets.RegressionBudget()
-			switch {
-			case len(failed) > 0:
-			case budget > 0 && took > budget:
-				add("regression_budget", false, "error", fmt.Sprintf("the regression suite took %s on %s, over the %s budget; `verify complete` would time out for every task", took, p.TargetBranch, budget), "narrow the gate to affected tests (checks get ATASK_CHANGED_FILES), move the full suite to CI or an epic check, or raise `atask project --regression-budget`")
-			case budget > 0 && took*2 > budget:
-				add("regression_budget", false, "warning", fmt.Sprintf("the regression suite took %s, more than half of the %s budget; CI machines are slower", took, budget), "speed the gate up before it starts timing out")
-			default:
-				add("regression_budget", true, "info", fmt.Sprintf("regression suite ran in %s (budget %s)", took, budgetLabel(budget)), "")
-			}
-			if len(failed) > 0 {
-				ids := make([]string, 0, len(failed))
-				for _, ev := range failed {
-					ids = append(ids, ev.CheckID)
-				}
-				c := add("baseline", false, "error", fmt.Sprintf("regression checks fail on %s at %s: %s; the first agent to claim would be charged for it", p.TargetBranch, short(rev), strings.Join(ids, ", ")), "make the regression suite pass on the target branch before adding tasks (or fix the checks)")
-				c.Evidence = failed
-			} else {
-				add("baseline", true, "info", fmt.Sprintf("regression checks pass on %s at %s", p.TargetBranch, short(rev)), "")
-			}
-		}
 	}
 
 	// Stale quarantined worktrees.

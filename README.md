@@ -37,9 +37,8 @@ with an `At-Task:` trailer.
 export ATASK_OUTPUT=json
 cd my-repo && atask init --claude                         # register the repo, install AGENTS.md + CLAUDE.md, and (--claude) the Claude Code hooks
 git add AGENTS.md CLAUDE.md .claude && git commit -m "Install atask"   # worktrees and checks see only committed files
-atask project --regression-check 'test: go test ./...' \
-           --regression-check 'fmt: sh -c "test -z \"$(gofmt -l .)\""'   # trusted gate, required before any claim; checks run without a shell, so shell syntax goes in sh -c
-atask doctor                                              # repository, target, identity, regression suite green on the target, worktrees
+atask project --target-branch main --attempts 3           # a project holds a name, path, target branch and attempt budget, no checks
+atask doctor                                              # repository, target, identity, worktrees
 atask add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
 atask add "Fix the typo" --proof "run: go test ./..." --regression "run: go test ./..." --claim   # one small change: add and claim in one step
 atask add "Identity Core" --group --key identity

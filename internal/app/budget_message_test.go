@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -14,10 +13,7 @@ import (
 // never started and say so, instead of claiming they were too slow.
 func TestSpentBudgetChecksSayNotRun(t *testing.T) {
 	f := newGitFixture(t)
-	f.proj.Budgets = project.Budgets{Small: 5 * time.Second, Medium: 5 * time.Second, Regression: 300 * time.Millisecond}
-	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
-		t.Fatal(err)
-	}
+	f.setProofBudget(300 * time.Millisecond)
 	f.setRegression(check("slow", "sleep 1", true), check("after", "test -d .", true), check("last", "test -d .", false))
 	a := f.add("a")
 	s := f.claim(string(a))

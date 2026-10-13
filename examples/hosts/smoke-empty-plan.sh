@@ -9,7 +9,7 @@ cleanup() { rm -rf "$d"; }
 trap cleanup EXIT
 git -C "$d" init -q
 ATASK_DB="$d/db" atask init --path "$d" --name empty-host --no-instructions --db "$d/db" >/dev/null
-ATASK_DB="$d/db" atask project --db "$d/db" --project empty-host --regression-check "true: true" >/dev/null
+ATASK_DB="$d/db" atask project --db "$d/db" --project empty-host >/dev/null
 unset ATASK_SESSION
 export ATASK_DB="$d/db" ATASK_PROJECT=empty-host
 TIMEOUT="timeout"

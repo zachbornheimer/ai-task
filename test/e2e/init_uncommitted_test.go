@@ -61,10 +61,9 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	}
 
 	// doctor warns about the untracked file, and about a modified one.
-	e.ok("project", "--regression-check", "regress: true")
 	e.git(e.cwd, "config", "user.name", "t")
 	e.git(e.cwd, "config", "user.email", "t@t")
-	rep := e.ok("doctor", "--skip-baseline")
+	rep := e.ok("doctor")
 	ch := doctorCheck(rep, "uncommitted_files")
 	if ch == nil || ch["ok"] != false || ch["severity"] != "warning" || !strings.Contains(ch["message"].(string), "main.go") {
 		t.Fatalf("doctor on untracked files: %v", ch)
@@ -74,11 +73,11 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	}
 	e.git(e.cwd, "add", "main.go")
 	e.git(e.cwd, "commit", "-q", "-m", "code")
-	if ch := doctorCheck(e.ok("doctor", "--skip-baseline"), "uncommitted_files"); ch == nil || ch["ok"] != true {
+	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != true {
 		t.Fatalf("doctor on a clean checkout: %v", ch)
 	}
 	os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n// edited\n"), 0o644)
-	if ch := doctorCheck(e.ok("doctor", "--skip-baseline"), "uncommitted_files"); ch == nil || ch["ok"] != false || !strings.Contains(ch["message"].(string), "main.go") {
+	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != false || !strings.Contains(ch["message"].(string), "main.go") {
 		t.Fatalf("doctor on a modified file: %v", ch)
 	}
 }

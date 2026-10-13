@@ -31,7 +31,7 @@ handoff. Databases created by the earlier `tasks` binary migrate in place
 | `tasks evidence <task>`                                | `atask show <task> --full`                                     |                                                                                                    |
 | `tasks status`                                         | `atask status`                                                 | `done`/`stalled` plus reasons and pending cohorts                                                  |
 | `tasks list --available/--takeable/--blocked`          | `atask list ready` / `atask list blocked` / `atask list all`   | glyph hierarchy                                                                                    |
-| `tasks project --regression-json`                      | `atask project --regression-json` or `--regression-check`      | also `--target-branch`, `--max-attempts`, `--retry-cooldown`                                       |
+| `tasks project --regression-json`                      | `atask project`                                               | `--target-branch`, `--attempts`, `--retry-cooldown`; checks live on tasks                                     |
 
 Error codes renamed: `TASK_ALREADY_TAKEN`→`ALREADY_CLAIMED`,
 `NO_AVAILABLE_TASK`→`NO_ELIGIBLE_WORK`, `TASK_AWAITING_VERIFICATION`→

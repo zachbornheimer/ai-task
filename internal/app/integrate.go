@@ -65,17 +65,13 @@ func (e *Engine) recheckForCompletion(tx *sqlite.Tx, s intentSpec, final string)
 	if err != nil {
 		return r, err
 	}
-	proj, err := tx.GetProject(r.Task.ProjectID)
-	if err != nil {
-		return r, err
-	}
 	switch {
 	case r.UnmetRequires > 0:
 		return r, fault.New(fault.CodeNotReady, "%s: a prerequisite became incomplete during verification", r.Task.ID)
 	case r.Task.ContractRev != s.contractRev:
 		return r, fault.New(fault.CodeConflict, "%s: the task contract changed during verification; verify again", r.Task.ID)
-	case (verification.Policy{Regression: proj.Regression}).Digest() != s.regression:
-		return r, fault.New(fault.CodeConflict, "%s: the project regression policy changed during verification; verify again", r.Task.ID)
+	case (verification.Policy{Regression: r.Task.Verification.Regression}).Digest() != s.regression:
+		return r, fault.New(fault.CodeConflict, "%s: the task regression policy changed during verification; verify again", r.Task.ID)
 	case r.Task.Archived():
 		return r, fault.New(fault.CodeConflict, "%s was archived during verification", r.Task.ID)
 	case r.Submission == nil || r.Submission.ID != s.submission:

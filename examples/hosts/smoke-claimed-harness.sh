@@ -12,7 +12,7 @@ cleanup() {
 trap cleanup EXIT
 git -C "$d" init -q
 ATASK_DB="$d/db" atask init --path "$d" --name claimed-host --no-instructions --db "$d/db" >/dev/null
-ATASK_DB="$d/db" atask project --db "$d/db" --project claimed-host --regression-check "true: true" >/dev/null
+ATASK_DB="$d/db" atask project --db "$d/db" --project claimed-host >/dev/null
 ATASK_DB="$d/db" atask add --db "$d/db" --project claimed-host "stub task" --outcome "stub harness is invoked" --proof "run: true" --regression "run: true" >/dev/null
 mkdir -p "$d/bin"
 cat >"$d/bin/stub" <<'EOF'

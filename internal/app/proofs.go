@@ -1,9 +1,12 @@
 package app
 
 import (
+	"time"
+
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/proof"
+	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -18,7 +21,11 @@ func applyProofs(pol *verification.Policy, proofSpec, regression *proof.ProofSpe
 		pol.Proof, pol.TaskChecks = proofSpec, []verification.CheckSpec{gate}
 	}
 	if regression != nil {
-		pol.RegressionProof = regression
+		gate, err := verification.RegressionGate(*regression)
+		if err != nil {
+			return err
+		}
+		pol.RegressionProof, pol.Regression = regression, []verification.CheckSpec{gate}
 	}
 	return nil
 }
@@ -38,4 +45,37 @@ func applyActions(pol *verification.Policy, actions plan.Patch[proof.ActionSpec]
 	}
 	pol.OnComplete = actions.Value
 	return nil
+}
+
+// sizeBudget is the wall-clock allowance of a run of the given size: the
+// proof package's contract budget, or the engine's override (tests).
+func (e *Engine) sizeBudget(size proof.Size) time.Duration {
+	if e.proofBudget > 0 {
+		return e.proofBudget
+	}
+	return size.Budget()
+}
+
+// regressionSize is the size class of a task's regression run: the size its
+// proof declares, else the task's own.
+func regressionSize(t task.Task) proof.Size {
+	if rp := t.Verification.RegressionProof; rp != nil && rp.Size != "" {
+		return rp.Size
+	}
+	if t.Size == "" {
+		return proof.SizeSmall
+	}
+	return proof.Size(t.Size)
+}
+
+// regressionChecks is the check a regression proof runs as; empty without one.
+func regressionChecks(rp *proof.ProofSpec) []verification.CheckSpec {
+	out := []verification.CheckSpec{}
+	if rp == nil {
+		return out
+	}
+	if gate, err := verification.RegressionGate(*rp); err == nil {
+		out = append(out, gate)
+	}
+	return out
 }

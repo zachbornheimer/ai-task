@@ -135,7 +135,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 			}
 		}
 	}
-	taskOpts, regOpts := suiteOpts(p.rec.Task, p.proj, changed)
+	taskOpts, regOpts := e.suiteOpts(p.rec.Task, p.proj, changed)
 	logDir := e.runLogDir(p.proj.ID, runID)
 	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	opts := taskOpts
@@ -189,7 +189,7 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 	if !inPlace {
 		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
 	}
-	taskOpts, regOpts := suiteOpts(t, proj, changed)
+	taskOpts, regOpts := e.suiteOpts(t, proj, changed)
 	logDir := e.runLogDir(proj.ID, runID)
 	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	taskPolicy := verification.Policy{TaskChecks: policy.TaskChecks}
@@ -272,15 +272,16 @@ type runOpts struct {
 	size proof.Size
 }
 
-// suiteOpts derives the task-check and regression budgets for a task
-// from its size and the project.
-func suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, regOpts runOpts) {
+// suiteOpts derives the task-check and regression allowances for a task
+// from its size and its regression proof's size.
+func (e *Engine) suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, regOpts runOpts) {
 	size := t.Size
 	if size == "" {
 		size = task.SizeSmall
 	}
-	taskOpts = runOpts{budget: proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: proof.Size(size)}
-	regOpts = runOpts{budget: proj.Budgets.RegressionBudget(), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch, size: proof.Size(size)}
+	regSize := regressionSize(t)
+	taskOpts = runOpts{budget: e.sizeBudget(proof.Size(size)), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: proof.Size(size)}
+	regOpts = runOpts{budget: e.sizeBudget(regSize), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch, size: regSize}
 	return taskOpts, regOpts
 }
 
@@ -405,7 +406,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		}
 		revision = st.Revision
 	}
-	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.proj.Regression}).Digest()}
+	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.policy.Regression}).Digest()}
 	now := e.now()
 	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if _, err := e.touch(tx, token, now); err != nil {
@@ -562,7 +563,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		return res, err
 	}
 	verdict := verification.Judge(fr.policy, evidence)
-	taskBudget, regBudget := fr.proj.Budgets.ForSize(fr.rec.Task.Size), fr.proj.Budgets.RegressionBudget()
+	taskBudget, regBudget := e.sizeBudget(proof.Size(fr.rec.Task.Size)), e.sizeBudget(regressionSize(fr.rec.Task))
 	if len(verdict.TimedOut) > 0 {
 		res.Message = timeoutMessage(verdict, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
 		return failTimeout(verdict.Summary+"; "+res.Message, evidence)

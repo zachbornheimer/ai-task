@@ -7,7 +7,6 @@ package project
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
-	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
 // ID is an opaque project identifier of the form "proj-" + 16 base32 chars.
@@ -59,10 +57,7 @@ type Project struct {
 	ID          ID                `json:"id"`
 	Name        string            `json:"name"`
 	RootPath    string            `json:"root_path,omitempty"` // canonical absolute path; "" for projects with no directory
-	Integration IntegrationPolicy `json:"integration"`
-	// Regression is the project-wide check list merged into every
-	// submission's effective policy.
-	Regression []verification.CheckSpec `json:"regression,omitempty"`
+	Integration IntegrationPolicy `json:"-"`                   // always IntegrationNone through the CLI; promotion is owned by its removal task
 	// PlanRev increments on every applied ChangeSet; callers pass the
 	// revision they planned against for optimistic concurrency.
 	PlanRev uint64 `json:"plan_rev"`
@@ -76,65 +71,12 @@ type Project struct {
 	MaxAttempts int `json:"max_attempts"`
 	// RetryCooldown delays re-claiming a task after a failed attempt.
 	RetryCooldown time.Duration `json:"retry_cooldown_ms"`
-	// Budgets cap verification time: a task's checks by its size, the
-	// regression suite by the project. Zero means the built-in default,
-	// Unlimited disables the cap.
-	Budgets   Budgets   `json:"budgets"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// Budgets are verification time caps. Stored values: 0 = built-in default,
-// Unlimited = no cap.
-type Budgets struct {
-	Small      time.Duration `json:"small_ms"`
-	Medium     time.Duration `json:"medium_ms"`
-	Large      time.Duration `json:"large_ms"`
-	Regression time.Duration `json:"regression_ms"`
-}
-
-// Unlimited marks a budget with no cap.
-const Unlimited time.Duration = -1
-
-// Built-in budgets, after Google's test sizes and Bazel's timeouts, tuned
-// for an agent's feedback loop: a small task proves itself in half a
-// minute, the regression gate in two, and anything slower is a medium or
-// large task by declaration.
-const (
-	DefaultSmallBudget      = 30 * time.Second
-	DefaultMediumBudget     = 5 * time.Minute
-	DefaultLargeBudget      = 15 * time.Minute
-	DefaultRegressionBudget = 2 * time.Minute
-)
-
-// ForSize is the effective task-check budget for a size (0 = no cap).
-func (b Budgets) ForSize(size string) time.Duration {
-	switch size {
-	case "medium":
-		return effective(b.Medium, DefaultMediumBudget)
-	case "large":
-		return effective(b.Large, DefaultLargeBudget)
-	}
-	return effective(b.Small, DefaultSmallBudget)
-}
-
-// RegressionBudget is the effective regression-suite budget (0 = no cap).
-func (b Budgets) RegressionBudget() time.Duration {
-	return effective(b.Regression, DefaultRegressionBudget)
-}
-
-func effective(v, def time.Duration) time.Duration {
-	switch {
-	case v == Unlimited:
-		return 0
-	case v <= 0:
-		return def
-	}
-	return v
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 // DefaultMaxAttempts applies to new projects.
-const DefaultMaxAttempts = 5
+const DefaultMaxAttempts = 3
 
 // GeneralName is the reserved name of the default project. Tasks filed
 // outside a registered repo land here. Attaching a named project is
@@ -175,7 +117,7 @@ func (p Project) Validate() error {
 	if p.MaxAttempts < 0 || p.RetryCooldown < 0 {
 		return fault.New(fault.CodeInvalidInput, "max attempts and retry cooldown must not be negative")
 	}
-	return (verification.Policy{Regression: p.Regression}).Validate()
+	return nil
 }
 
 // CanonicalRoot normalises a directory for registration and lookup: absolute,
@@ -340,44 +282,3 @@ func ValidBase32(s string, n int) bool { return validBase32(s, n) }
 
 // ValidBase32Alphabet reports whether s is nonempty Crockford base32.
 func ValidBase32Alphabet(s string) bool { return validBase32Alphabet(s) }
-
-// MarshalJSON writes budgets in milliseconds, matching the field names;
-// Unlimited is -1.
-func (b Budgets) MarshalJSON() ([]byte, error) {
-	type wire struct {
-		Small      int64 `json:"small_ms"`
-		Medium     int64 `json:"medium_ms"`
-		Large      int64 `json:"large_ms"`
-		Regression int64 `json:"regression_ms"`
-	}
-	return json.Marshal(wire{budgetMS(b.Small), budgetMS(b.Medium), budgetMS(b.Large), budgetMS(b.Regression)})
-}
-
-// UnmarshalJSON reads the millisecond form.
-func (b *Budgets) UnmarshalJSON(data []byte) error {
-	var w struct {
-		Small      int64 `json:"small_ms"`
-		Medium     int64 `json:"medium_ms"`
-		Large      int64 `json:"large_ms"`
-		Regression int64 `json:"regression_ms"`
-	}
-	if err := json.Unmarshal(data, &w); err != nil {
-		return err
-	}
-	*b = Budgets{Small: budgetFromMS(w.Small), Medium: budgetFromMS(w.Medium), Large: budgetFromMS(w.Large), Regression: budgetFromMS(w.Regression)}
-	return nil
-}
-
-func budgetMS(d time.Duration) int64 {
-	if d == Unlimited {
-		return -1
-	}
-	return d.Milliseconds()
-}
-
-func budgetFromMS(v int64) time.Duration {
-	if v < 0 {
-		return Unlimited
-	}
-	return time.Duration(v) * time.Millisecond
-}

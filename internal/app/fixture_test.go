@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,6 +51,9 @@ type fixture struct {
 	repo string
 	// proofBudget, when set, fixes every run's budget (app.Config.ProofBudget).
 	proofBudget time.Duration
+	// regression is stamped onto every task's own policy: a project holds
+	// no checks, so a test that wants a regression gate gives it to tasks.
+	regression []verification.CheckSpec
 }
 
 // newFixture is newGitFixture: every project is a Git project.
@@ -78,6 +83,7 @@ func newGitFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.promote()
 	f.setRegression(check("regress", "test -d .", true))
 	return f
 }
@@ -109,15 +115,74 @@ func (f *fixture) commit(dir, file, content string) string {
 
 func (f *fixture) setRegression(checks ...verification.CheckSpec) {
 	f.t.Helper()
-	p, err := f.e.Project(f.ctx, f.proj.ID)
+	f.regression = checks
+	f.stampRegression()
+}
+
+// promote switches the project to the promote integration policy, which no
+// CLI flag can set any more.
+func (f *fixture) promote() {
+	f.t.Helper()
+	f.sql(`UPDATE projects SET integration = 'promote' WHERE id = ?`, f.proj.ID)
+}
+
+func (f *fixture) sql(query string, args ...any) {
+	f.t.Helper()
+	db, err := sql.Open("sqlite", f.path)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	p.Regression = checks
-	if err := f.e.UpdateProject(f.ctx, p); err != nil {
+	defer db.Close()
+	if _, err := db.Exec(query, args...); err != nil {
 		f.t.Fatal(err)
 	}
-	f.proj = p
+}
+
+// setProofBudget reopens the engine with a fixed run budget.
+func (f *fixture) setProofBudget(d time.Duration) {
+	f.t.Helper()
+	f.proofBudget = d
+	f.e = f.open()
+}
+
+// stampRegression gives every task of the project the fixture's regression
+// checks in its own policy.
+func (f *fixture) stampRegression() {
+	f.t.Helper()
+	db, err := sql.Open("sqlite", f.path)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT id, policy_json FROM tasks WHERE project_id = ? AND kind = 'task'`, f.proj.ID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	bodies := map[string]string{}
+	for rows.Next() {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			f.t.Fatal(err)
+		}
+		bodies[id] = body
+	}
+	rows.Close()
+	for id, body := range bodies {
+		var pol verification.Policy
+		if body != "" {
+			if err := json.Unmarshal([]byte(body), &pol); err != nil {
+				f.t.Fatal(err)
+			}
+		}
+		pol.Regression = f.regression
+		out, err := json.Marshal(pol)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE tasks SET policy_json = ? WHERE id = ?`, string(out), id); err != nil {
+			f.t.Fatal(err)
+		}
+	}
 }
 
 func sh(script string) []string { return []string{"sh", "-c", script} }
@@ -133,6 +198,7 @@ func (f *fixture) apply(ops ...plan.Change) plan.Result {
 	if err != nil {
 		f.t.Fatal(err)
 	}
+	f.stampRegression()
 	return res
 }
 
@@ -168,6 +234,7 @@ func (f *fixture) claim(ref string) app.Session {
 		v := f.show(ref)
 		id = &v.ID
 	}
+	f.stampRegression()
 	s, err := f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID, TaskID: id})
 	if err != nil {
 		f.t.Fatal(err)

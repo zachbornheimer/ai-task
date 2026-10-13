@@ -7,13 +7,11 @@ completes a task; only `verify complete` can, and only with fresh evidence.
 
 - **Task checks** (`atask add --proof`, `atask update --proof`) prove the task's
   own outcome. Required unless a task is a group.
-- **Project regression checks** (`atask project --regression-check` /
-  `--regression-json`) guard the rest of the project. Trusted
-  configuration; never reachable through a session token.
+- **Regression** (`atask add --regression`, `atask update --regression`)
+  proves nothing else broke. It belongs to the task; a project holds no
+  checks (`atask project` sets only name, target branch and attempts).
 
-Check IDs are separate namespaces; a task check whose ID matches a
-regression check is rejected, and vice versa. A task missing either
-category cannot complete (`INVALID_INPUT`).
+A task missing either category cannot complete (`INVALID_INPUT`).
 
 Each check is an argv array (no shell), optional directory, optional
 timeout (stored as `timeout_ms`; it can only shorten the contract budget),
@@ -140,7 +138,7 @@ code hangs), not that the software is wrong. The message says which
 budget and whose problem: a task-check timeout names the two fixes
 (narrow with `-run` so the check proves only this outcome, or set
 `--size medium|large`); a regression timeout is the planner's (narrow
-the gate, raise `--regression-budget`). A small task whose check is
+the gate or declare a larger `--size` on its `--regression`). A small task whose check is
 `go test` without `-run` is rejected at add/update, because a package
 suite routinely outruns the 30s budget. Checks that pass using more than half their
 budget are reported as warnings, because CI machines are slower. `at

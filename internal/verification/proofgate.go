@@ -8,6 +8,16 @@ import (
 // ProofCheckID names the gate derived from a task's Proof.
 const ProofCheckID = "proof"
 
+// RegressionCheckID names the gate derived from a task's regression proof.
+const RegressionCheckID = "regression"
+
+// RegressionGate turns a task's regression proof into its required check.
+func RegressionGate(spec proof.ProofSpec) (CheckSpec, error) {
+	c, err := ProofGate(spec)
+	c.ID = RegressionCheckID
+	return c, err
+}
+
 // ProofGate turns a task's Proof into the required check verification runs.
 func ProofGate(spec proof.ProofSpec) (CheckSpec, error) {
 	preset, ok := proof.DefaultRegistry().Lookup(spec.Preset)

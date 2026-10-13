@@ -89,13 +89,13 @@ func TestDoctorGitIdentity(t *testing.T) {
 		t.Fatalf("no git_identity check in %+v", rep)
 		return app.DoctorCheck{}
 	}
-	rep, _ := f.e.Doctor(f.ctx, f.proj.ID, app.DoctorOptions{SkipBaseline: true})
+	rep, _ := f.e.Doctor(f.ctx, f.proj.ID)
 	if c := find(rep); c.OK || c.Severity != "error" || rep.Healthy {
 		t.Fatalf("missing identity must make doctor unhealthy: %+v healthy=%v", c, rep.Healthy)
 	}
 	f.git(f.repo, "config", "user.name", "Repo Owner")
 	f.git(f.repo, "config", "user.email", "owner@example.com")
-	rep, _ = f.e.Doctor(f.ctx, f.proj.ID, app.DoctorOptions{SkipBaseline: true})
+	rep, _ = f.e.Doctor(f.ctx, f.proj.ID)
 	if c := find(rep); !c.OK || !strings.Contains(c.Message, "Repo Owner <owner@example.com>") {
 		t.Fatalf("identity check: %+v", c)
 	}

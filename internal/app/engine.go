@@ -246,7 +246,7 @@ func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitR
 		return res, fault.New(fault.CodeInvalidInput, "a project needs a directory")
 	}
 	now := e.now()
-	p := project.Project{ID: project.NewID(), Name: strings.TrimSpace(name), Integration: project.IntegrationPromote, MaxAttempts: project.DefaultMaxAttempts, CreatedAt: now, UpdatedAt: now}
+	p := project.Project{ID: project.NewID(), Name: strings.TrimSpace(name), Integration: project.IntegrationNone, MaxAttempts: project.DefaultMaxAttempts, CreatedAt: now, UpdatedAt: now}
 	root, err := project.LocateRoot(dir)
 	if err != nil {
 		return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
@@ -313,7 +313,7 @@ func (e *Engine) Project(ctx context.Context, id project.ID) (project.Project, e
 }
 
 // UpdateProject rewrites a project's trusted configuration (name,
-// integration policy, target branch, regression checks, retry policy). It
+// target branch, attempt budget, retry policy). It
 // is never reachable through a session token. Regression check IDs form a
 // namespace separate from task checks: a collision with any live task's
 // checks is rejected so no task can shadow a project gate.
@@ -321,23 +321,7 @@ func (e *Engine) UpdateProject(ctx context.Context, p project.Project) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	// An empty list means "not configured yet" (no claim is possible); a
-	// non-empty list must be a gate.
-	if len(p.Regression) > 0 {
-		if err := verification.RequireGate(p.Regression, "project regression checks"); err != nil {
-			return err
-		}
-	}
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		used, err := tx.TaskCheckIDs(p.ID)
-		if err != nil {
-			return err
-		}
-		for _, c := range p.Regression {
-			if tid, ok := used[c.ID]; ok {
-				return fault.New(fault.CodeInvalidInput, "regression check id %q collides with a task check of %s; task and regression checks are separate namespaces", c.ID, tid)
-			}
-		}
 		return tx.UpdateProject(p, e.now())
 	})
 	if err == nil {
@@ -448,6 +432,6 @@ func (e *Engine) reconcile(ctx context.Context) error {
 
 // effectivePolicy merges a task's checks with the project regression
 // checks; the two namespaces never overlap by construction.
-func effectivePolicy(t task.Task, p project.Project) verification.Policy {
-	return verification.Merge(t.Verification, p.Regression)
+func effectivePolicy(t task.Task, _ project.Project) verification.Policy {
+	return verification.Merge(t.Verification, t.Verification.Regression)
 }

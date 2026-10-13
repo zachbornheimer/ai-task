@@ -161,16 +161,6 @@ func TestShowGolden(t *testing.T) {
 	}
 }
 
-func TestShowPrintsBudgets(t *testing.T) {
-	v := tv("at-e29", "Implement scope enforcement", task.StatusReady)
-	v.Size = "medium"
-	var b bytes.Buffer
-	renderShow(&b, v, false, painter{})
-	if !strings.Contains(b.String(), "Budgets: task checks 5m0s (size medium), regression 2m0s") {
-		t.Fatalf("show budgets:\n%s", b.String())
-	}
-}
-
 func TestAckAndVerifyRendering(t *testing.T) {
 	v := tv("at-b42", "Implement OAuth token endpoint", task.StatusBlocked)
 	v.Group = &app.Rel{ID: "at-g01", Title: "Identity Core", Status: task.StatusGroup}

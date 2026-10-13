@@ -125,9 +125,6 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
 				return err
 			}
-			if err := regressionGate(proj); err != nil {
-				return err
-			}
 			// An explicit claim is the retry path for a task whose worktree
 			// could not be prepared: the caller decided to try again.
 			if err := notClaimable(r, proj, now, true); err != nil {
@@ -137,9 +134,6 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			maxAttempts := project.DefaultMaxAttempts
 			if req.ProjectID != "" {
 				if proj, err = tx.GetProject(req.ProjectID); err != nil {
-					return err
-				}
-				if err := regressionGate(proj); err != nil {
 					return err
 				}
 				maxAttempts = proj.MaxAttempts
@@ -256,7 +250,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	sess.Workspace, sess.Branch, sess.WorkspaceDirty, sess.QuarantinedWorkspace = info.Path, info.Branch, info.Dirty, info.Quarantined
-	sess.TargetBranch, sess.Regression = proj.TargetBranch, proj.Regression
+	sess.TargetBranch, sess.Regression = proj.TargetBranch, regressionChecks(sess.Task.Regression)
 	if rev, err := mgr.Revision(ctx, "refs/heads/"+proj.TargetBranch); err == nil {
 		sess.TargetRevision = rev
 	}
@@ -321,18 +315,6 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 			f.Checks = append(f.Checks, execution.FailedCheck{CheckID: row.CheckID, Outcome: string(row.Outcome), Message: row.Message, StderrTail: execution.Tail(row.Stderr, execution.FailureTailBytes), StdoutTail: execution.Tail(row.Stdout, execution.FailureTailBytes), Log: row.Log})
 		}
 		h.LastFailure = f
-	}
-	return nil
-}
-
-// regressionGate refuses to hand out work in a project whose regression
-// checks cannot act as a gate: nothing claimed there could ever complete.
-func regressionGate(proj project.Project) error {
-	if proj.IsGeneral() || proj.Integration != project.IntegrationPromote {
-		return nil
-	}
-	if err := verification.RequireGate(proj.Regression, "project regression checks"); err != nil {
-		return fault.New(fault.CodeInvalidInput, "project %s: %v; define them with `atask project --regression-check` before claiming work", proj.ID, fault.MessageOf(err))
 	}
 	return nil
 }

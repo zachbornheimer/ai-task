@@ -9,7 +9,6 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
-	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -21,10 +20,7 @@ import (
 // problem; and a check near its budget earns a warning.
 func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	f := newGitFixture(t)
-	f.proj.Budgets = project.Budgets{Small: 300 * time.Millisecond, Medium: 5 * time.Second, Regression: 5 * time.Second}
-	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
-		t.Fatal(err)
-	}
+	f.setProofBudget(300 * time.Millisecond)
 	a := f.addWith("slow", "sleep 1")
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
@@ -54,17 +50,14 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	if f.show(string(a)).Size != task.SizeMedium {
 		t.Fatal("size not updated")
 	}
+	f.setProofBudget(5 * time.Second)
 	res := f.complete(s)
 	if !res.Completed || len(res.Warnings) != 0 {
 		t.Fatalf("medium: %+v", res)
 	}
 	// A slow regression gate times out as the planner's problem.
 	f.setRegression(check("regress", "sleep 1", true))
-	f.proj, _ = f.e.Project(f.ctx, f.proj.ID)
-	f.proj.Budgets.Regression = 300 * time.Millisecond
-	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
-		t.Fatal(err)
-	}
+	f.setProofBudget(300 * time.Millisecond)
 	b := f.add("b")
 	sb := f.claim(string(b))
 	f.commit(sb.Workspace, "b.txt", "b")
@@ -76,11 +69,8 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 		t.Fatal("regression timeout charged a strike")
 	}
 	// Near the budget: a passing check that used over half of it warns.
-	f.proj.Budgets.Regression = 10 * time.Second
-	f.proj.Budgets.Small = 1500 * time.Millisecond
-	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
-		t.Fatal(err)
-	}
+	f.setRegression(check("regress", "test -d .", true))
+	f.setProofBudget(1500 * time.Millisecond)
 	cTask := f.addWith("near", "sleep 1")
 	sc := f.claim(string(cTask))
 	f.commit(sc.Workspace, "c.txt", "c")

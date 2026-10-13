@@ -23,7 +23,7 @@ edited directly. Hooks make it hold when a long session forgets.
 ```sh
 cd repo
 atask init --claude                                  # instructions + optional SessionStart hook only (omit --claude elsewhere)
-atask project --regression-check "test: go test ./..." --regression-check "vet: go vet ./..."
+atask project --target-branch main
 atask doctor                                         # repository, target, identity, suite green on the target
 git add AGENTS.md CLAUDE.md .claude && git commit -m "Route agent work through atask"
 ```

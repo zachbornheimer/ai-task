@@ -255,7 +255,6 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 	}
 	if v.Size != "" && v.Kind != task.KindGroup {
 		fmt.Fprintf(w, "Size: %s\n", v.Size)
-		fmt.Fprintf(w, "Budgets: task checks %s (size %s), regression %s\n", budgetText(v.Budgets.ForSize(v.Size)), v.Size, budgetText(v.Budgets.RegressionBudget()))
 	}
 	if v.Kind == task.KindGroup {
 		if v.Progress != nil {

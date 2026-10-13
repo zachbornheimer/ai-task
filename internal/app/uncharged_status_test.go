@@ -10,7 +10,6 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
-	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -22,10 +21,7 @@ import (
 // for a run charged against the attempt.
 func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
 	f := newGitFixture(t)
-	f.proj.Budgets = project.Budgets{Small: 300 * time.Millisecond, Medium: 5 * time.Second, Regression: 5 * time.Second}
-	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
-		t.Fatal(err)
-	}
+	f.setProofBudget(300 * time.Millisecond)
 	notFailed := func(what string, id task.ID, want task.Status, errPart string) {
 		t.Helper()
 		v := f.show(string(id))

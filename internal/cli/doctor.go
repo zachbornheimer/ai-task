@@ -14,11 +14,10 @@ import (
 )
 
 func init() {
-	register("doctor", "check the project before planning or starting workers: repository, target branch, Git identity, regression suite passing on the target, workspace root, stale worktrees, tasks needing attention [--skip-baseline]", runDoctor)
+	register("doctor", "check the project before planning or starting workers: repository, target branch, Git identity, workspace root, stale worktrees, tasks needing attention", runDoctor)
 }
 
 func runDoctor(ctx context.Context, c *ctxt, args []string) error {
-	skip := c.fs.Bool("skip-baseline", false, "do not run the regression checks on the target branch")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -30,7 +29,7 @@ func runDoctor(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	rep, err := e.Doctor(ctx, pid, app.DoctorOptions{SkipBaseline: *skip})
+	rep, err := e.Doctor(ctx, pid)
 	if err != nil {
 		return err
 	}

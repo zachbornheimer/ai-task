@@ -250,9 +250,6 @@ func (s *Spec) Validate() error {
 			return fault.New(fault.CodeInvalidInput, "a group cannot pin files; pins belong to the tasks that work")
 		}
 	}
-	if len(s.Verification.Regression) > 0 {
-		return fault.New(fault.CodeInvalidInput, "regression checks are project-level; tasks define task checks only")
-	}
 	return s.Verification.Validate()
 }
 

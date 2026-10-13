@@ -3,9 +3,9 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -24,7 +24,7 @@ import (
 func init() {
 	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import [--no-instructions] [--claude: optional SessionStart only]; re-run to refresh", runInit)
 	register("projects", "list registered projects", runProjects)
-	register("project", "show or configure the current project (trusted): --regression-check, --integration, --target-branch, budgets", runProject)
+	register("project", "show or configure the current project (trusted): --name, --target-branch, --attempts", runProject)
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" [--size small|medium|large] [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
 	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--proof ..] [--regression ..] [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
@@ -124,7 +124,7 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 				fmt.Fprintf(w, "             untracked: %s\n", f)
 			}
 		}
-		fmt.Fprintf(w, "Target:      %s (integration: %s; task branches atask/<id>)\n", p.TargetBranch, p.Integration)
+		fmt.Fprintf(w, "Target:      %s (task branches atask/<id>)\n", p.TargetBranch)
 		fmt.Fprintf(w, "State:       %s\n", e.Path())
 		if ir := o.Instructions; ir != nil {
 			switch {
@@ -142,9 +142,6 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 			} else {
 				fmt.Fprintf(w, "Claude Code: hooks already in %s\n", o.ClaudeHooks)
 			}
-		}
-		if len(p.Regression) == 0 {
-			fmt.Fprintln(w, "Next:        define regression checks with `atask project --regression-check \"id: cmd\"` (required before any claim), then `atask doctor`")
 		}
 	})
 }
@@ -167,22 +164,48 @@ func runProjects(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(ps, func(w io.Writer) { _ = renderProjects(w, ps) })
 }
 
+// removedProjectFlags are the project flags that held checks, budgets or
+// integration; each now lives on the task or is gone.
+var removedProjectFlags = map[string]string{
+	"regression-check":  "a project holds no checks; give each task its own with `atask add --regression`",
+	"regression-json":   "a project holds no checks; give each task its own with `atask add --regression`",
+	"regression-file":   "a project holds no checks; give each task its own with `atask add --regression`",
+	"regression-budget": "budgets come from the proof size; set it on the task's --regression",
+	"budget-small":      "budgets come from the proof size; set it on the task's --regression",
+	"budget-medium":     "budgets come from the proof size; set it on the task's --regression",
+	"budget-large":      "budgets come from the proof size; set it on the task's --regression",
+	"integration":       "integration is not a project setting",
+}
+
+// ProjectView is what `atask project` reports: identity, location, target
+// branch and attempt budget. A project holds nothing else.
+type ProjectView struct {
+	ID           project.ID `json:"id"`
+	Name         string     `json:"name"`
+	Path         string     `json:"path"`
+	TargetBranch string     `json:"target_branch"`
+	Attempts     int        `json:"attempts"`
+}
+
 func runProject(ctx context.Context, c *ctxt, args []string) error {
 	name := c.fs.String("name", "", "rename the project")
-	integration := c.fs.String("integration", "", "integration policy: none|promote")
 	target := c.fs.String("target-branch", "", "branch verified work is promoted to")
-	regression := c.fs.String("regression-json", "", "project regression checks as a JSON array of checks")
-	regressionFile := c.fs.String("regression-file", "", "read --regression-json from a file")
-	var regChecks stringList
-	c.fs.Var(&regChecks, "regression-check", "regression check \"[id:] command args...\" (repeatable; replaces the list)")
-	maxAttempts := c.fs.Int("max-attempts", -1, "failed attempts before a task needs attention (0 = unlimited)")
-	budgetSmall := c.fs.String("budget-small", "", "task-check budget for small tasks (default 30s; 'none' = unlimited)")
-	budgetMedium := c.fs.String("budget-medium", "", "task-check budget for medium tasks (default 5m; 'none' = unlimited)")
-	budgetLarge := c.fs.String("budget-large", "", "task-check budget for large tasks (default 15m; 'none' = unlimited)")
-	regressionBudget := c.fs.String("regression-budget", "", "budget for the regression suite (default 2m; 'none' = unlimited)")
+	attempts := c.fs.Int("attempts", -1, "failed attempts before a task needs attention (0 = unlimited)")
 	cooldown := c.fs.Duration("retry-cooldown", -1, "delay before re-claiming a failed task")
+	for flagName := range removedProjectFlags {
+		c.fs.String(flagName, "", "removed")
+	}
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	var removed error
+	c.fs.Visit(func(f *flag.Flag) {
+		if why, ok := removedProjectFlags[f.Name]; ok && removed == nil {
+			removed = usage("--%s was removed: %s", f.Name, why)
+		}
+	})
+	if removed != nil {
+		return removed
 	}
 	e, err := c.engine(ctx)
 	if err != nil {
@@ -200,52 +223,11 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	if *name != "" {
 		p.Name, changed = *name, true
 	}
-	if *integration != "" {
-		p.Integration, changed = project.IntegrationPolicy(*integration), true
-	}
 	if *target != "" {
 		p.TargetBranch, changed = *target, true
 	}
-	if *regressionFile != "" {
-		b, err := os.ReadFile(*regressionFile)
-		if err != nil {
-			return usage("read %s: %v", *regressionFile, err)
-		}
-		*regression = string(b)
-	}
-	if *regression != "" {
-		var checks []verification.CheckSpec
-		if err := json.Unmarshal([]byte(*regression), &checks); err != nil {
-			return usage("--regression-json: %v", err)
-		}
-		p.Regression, changed = checks, true
-	}
-	if len(regChecks) > 0 {
-		p.Regression = nil
-		for i, raw := range regChecks {
-			cs, err := parseCheck(raw, i+1, true)
-			if err != nil {
-				return err
-			}
-			p.Regression = append(p.Regression, cs)
-		}
-		changed = true
-	}
-	if *maxAttempts >= 0 {
-		p.MaxAttempts, changed = *maxAttempts, true
-	}
-	for _, b := range []struct {
-		flag string
-		dst  *time.Duration
-	}{{*budgetSmall, &p.Budgets.Small}, {*budgetMedium, &p.Budgets.Medium}, {*budgetLarge, &p.Budgets.Large}, {*regressionBudget, &p.Budgets.Regression}} {
-		if b.flag == "" {
-			continue
-		}
-		d, err := parseBudget(b.flag)
-		if err != nil {
-			return err
-		}
-		*b.dst, changed = d, true
+	if *attempts >= 0 {
+		p.MaxAttempts, changed = *attempts, true
 	}
 	if *cooldown >= 0 {
 		p.RetryCooldown, changed = *cooldown, true
@@ -258,11 +240,9 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 			return err
 		}
 	}
-	return c.emit(p, func(w io.Writer) {
-		fmt.Fprintf(w, "Project:      %s · %s\nRoot:         %s\nIntegration:  %s\nTarget:       %s\nPlan rev:     %d\nMax attempts: %d\nCooldown:     %s\nBudgets:      small %s · medium %s · large %s · regression %s\nRegression:   %d check(s)\n", p.ID, p.Name, p.RootPath, p.Integration, p.TargetBranch, p.PlanRev, p.MaxAttempts, p.RetryCooldown, budgetText(p.Budgets.ForSize("small")), budgetText(p.Budgets.ForSize("medium")), budgetText(p.Budgets.ForSize("large")), budgetText(p.Budgets.RegressionBudget()), len(p.Regression))
-		for _, ch := range p.Regression {
-			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, app.ShellJoin(ch.Command))
-		}
+	v := ProjectView{ID: p.ID, Name: p.Name, Path: p.RootPath, TargetBranch: p.TargetBranch, Attempts: p.MaxAttempts}
+	return c.emit(v, func(w io.Writer) {
+		fmt.Fprintf(w, "Project:  %s · %s\nPath:     %s\nTarget:   %s\nAttempts: %d\n", v.ID, v.Name, v.Path, v.TargetBranch, v.Attempts)
 	})
 }
 
@@ -399,6 +379,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 				return usage("--policy-json: %v", err)
 			}
 			t.TaskChecks = pol.TaskChecks
+			if _, t.Regression, err = pfl.parse(*size); err != nil {
+				return err
+			}
 		} else {
 			if err := pfl.requireBoth(); err != nil {
 				return err
@@ -846,25 +829,6 @@ func runStatus(ctx context.Context, c *ctxt, args []string) error {
 }
 
 var _ = time.Second
-
-// parseBudget reads a budget flag: a duration, or "none" for no cap.
-func parseBudget(s string) (time.Duration, error) {
-	if strings.EqualFold(strings.TrimSpace(s), "none") {
-		return project.Unlimited, nil
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil || d <= 0 {
-		return 0, usage("budget %q: expected a duration such as 30s or 2m, or 'none'", s)
-	}
-	return d, nil
-}
-
-func budgetText(d time.Duration) string {
-	if d <= 0 {
-		return "unlimited"
-	}
-	return d.String()
-}
 
 func runPrune(ctx context.Context, c *ctxt, args []string) error {
 	if err := c.parse(args); err != nil {

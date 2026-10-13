@@ -28,10 +28,6 @@ func benchEngine(b *testing.B) (*app.Engine, project.Project) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	p.Regression = []verification.CheckSpec{{ID: "regress", Command: []string{"test", "-d", "."}, Required: true}}
-	if err := e.UpdateProject(context.Background(), p); err != nil {
-		b.Fatal(err)
-	}
 	return e, p
 }
 

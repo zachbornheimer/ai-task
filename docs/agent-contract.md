@@ -66,14 +66,11 @@ or argv), dir, timeout_ms, required}`). A bad item rejects the whole
 file. `--claim` on a single-task add claims it at once and prints the
 session beside the plan result: the fast path for a small change.
 
-`atask doctor [--skip-baseline]` checks a project before planning or
+`atask doctor` checks a project before planning or
 starting workers: repository and target branch resolve, the target
 checkout has no uncommitted or untracked files (a warning: checks and
 worktrees run on the committed revision), a Git identity
-exists for commits and integration merges (an error without one), the regression suite is defined and passes on the
-target branch within the regression budget (over budget is an error,
-over half is a warning: CI is slower), so no worker is charged for a
-broken or slow baseline, the
+exists for commits and integration merges (an error without one), the
 workspace root is writable, quarantined worktrees, tasks needing
 attention, a stalled plan, and Worktrunk's commit-message setup when
 `wt` is installed. An error-severity finding makes it `NOT_READY` with
@@ -111,9 +108,9 @@ stale `--expect-rev`), a different request under the same key is
   task (in snapshots), appends the new RunResults, and leaves the task
   complete; it does not run actions.
 - `--size small|medium|large` (default small) declares how long the
-  task's checks may take; the project's budgets turn it into seconds
-  (defaults 30s, 5m, 15m; the regression suite 2m; `atask project
-  --budget-small 45s --regression-budget 3m`, `none` for no cap). The
+  task's checks may take; the proof package turns it into seconds
+  (60s, 300s, 900s). A project holds no budgets: `atask project`
+  rejects `--regression-check`, `--integration` and the budget flags. The
   whole suite shares the budget: a check that would start after it is
   spent is recorded as `timed_out` without running. A small task whose
   check is `go test` without `-run` is rejected (`INVALID_INPUT`);

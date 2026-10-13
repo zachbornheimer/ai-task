@@ -62,8 +62,8 @@ func TestRenderEvidenceLabelsRevisions(t *testing.T) {
 
 func TestHelpNamesDefaults(t *testing.T) {
 	_, out, _ := runAt(t, "help")
-	if !strings.Contains(out, "--regression-check") {
-		t.Fatalf("at help does not name --regression-check:\n%s", out)
+	if !strings.Contains(out, "--attempts") {
+		t.Fatalf("at help does not name --attempts:\n%s", out)
 	}
 	// With ATASK_DB unset, --db's help names where the database lives.
 	var o, e bytes.Buffer

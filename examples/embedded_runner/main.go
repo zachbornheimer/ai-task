@@ -24,6 +24,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
+
 	at "github.com/zachbornheimer/ai-task"
 )
 
@@ -64,9 +67,8 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	if err != nil {
 		return err
 	}
-	// Trusted configuration: the project regression suite. Here it checks
-	// the repository is internally consistent (every file is non-empty).
-	proj.Regression = []at.CheckSpec{{ID: "regress-nonempty", Command: []string{"sh", "-c", `! find . -name '*.txt' -empty | grep -q .`}, Required: true}}
+	// The cohort demo needs verified work to land on the target branch.
+	proj.Integration = project.IntegrationPromote
 	if err := eng.UpdateProject(ctx, proj); err != nil {
 		return err
 	}
@@ -232,6 +234,9 @@ func heartbeat(ctx context.Context, eng *at.Store, tok at.SessionToken) func() {
 	return cancel
 }
 
+// regressionProof is every task's own "nothing else broke" proof.
+var regressionProof = &proof.ProofSpec{Preset: "run", Subject: "test -d .", Options: map[string]string{}, Size: proof.SizeSmall}
+
 // fakePlanner turns the prompt into a typed proposal. A real planner asks a
 // model and parses its answer into the same closed set of changes.
 func fakePlanner(prompt string) []at.Change {
@@ -240,13 +245,13 @@ func fakePlanner(prompt string) []at.Change {
 	}
 	return []at.Change{
 		at.AddGroup{Key: "identity", Title: "Identity Core"},
-		at.AddTask{Key: "compat", Title: "Confirm OAuth API compatibility", Parent: "identity", TaskChecks: check("compat")},
-		at.AddTask{Key: "store", Title: "Implement PostgreSQL token store", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("store")},
-		at.AddTask{Key: "scopes", Title: "Implement scope enforcement", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("scopes")},
-		at.AddTask{Key: "e2e", Title: "Verify end-to-end OAuth flow", Parent: "identity", Requires: []at.Ref{"store", "scopes"}, TaskChecks: check("e2e")},
+		at.AddTask{Key: "compat", Regression: regressionProof, Title: "Confirm OAuth API compatibility", Parent: "identity", TaskChecks: check("compat")},
+		at.AddTask{Key: "store", Regression: regressionProof, Title: "Implement PostgreSQL token store", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("store")},
+		at.AddTask{Key: "scopes", Regression: regressionProof, Title: "Implement scope enforcement", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("scopes")},
+		at.AddTask{Key: "e2e", Regression: regressionProof, Title: "Verify end-to-end OAuth flow", Parent: "identity", Requires: []at.Ref{"store", "scopes"}, TaskChecks: check("e2e")},
 		at.AddGroup{Key: "oauth-flow", Title: "OAuth flow", TaskChecks: []at.CheckSpec{{ID: "flow", Command: []string{"sh", "-c", "test -f api.txt && test -f ui.txt"}, Required: true}}},
-		at.AddTask{Key: "api", Title: "OAuth API side", Parent: "oauth-flow", TaskChecks: check("api")},
-		at.AddTask{Key: "ui", Title: "OAuth UI side", Parent: "oauth-flow", TaskChecks: check("ui")},
+		at.AddTask{Key: "api", Regression: regressionProof, Title: "OAuth API side", Parent: "oauth-flow", TaskChecks: check("api")},
+		at.AddTask{Key: "ui", Regression: regressionProof, Title: "OAuth UI side", Parent: "oauth-flow", TaskChecks: check("ui")},
 	}
 }
 
@@ -260,7 +265,7 @@ func fakeReviewer(current at.PlanSnapshot) []at.Change {
 		}
 	}
 	return []at.Change{
-		at.AddTask{Key: "rotate", Title: "Rotate leaked credentials", Blocks: []at.Ref{"store"}, TaskChecks: []at.CheckSpec{{ID: "unit-rotate", Command: []string{"test", "-f", "rotate.txt"}, Required: true}}},
+		at.AddTask{Key: "rotate", Regression: regressionProof, Title: "Rotate leaked credentials", Blocks: []at.Ref{"store"}, TaskChecks: []at.CheckSpec{{ID: "unit-rotate", Command: []string{"test", "-f", "rotate.txt"}, Required: true}}},
 	}
 }
 

@@ -293,7 +293,7 @@ func (p Policy) MissingCategory() string {
 	case !HasRequired(p.TaskChecks):
 		return "required task checks"
 	case !HasRequired(p.Regression):
-		return "required project regression checks"
+		return "required regression checks"
 	}
 	return ""
 }

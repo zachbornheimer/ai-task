@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -62,7 +63,7 @@ func newEnv(t *testing.T) *env {
 }
 
 // gitEnv makes the working directory a Git repository with one commit and
-// registers it with a passing regression check.
+// registers it.
 func gitEnv(t *testing.T) *env {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -74,8 +75,23 @@ func gitEnv(t *testing.T) *env {
 	e.git(e.cwd, "add", "f.txt")
 	e.git(e.cwd, "commit", "-q", "-m", "one")
 	e.ok("init", "--name", "g")
-	e.ok("project", "--regression-check", "regress: true")
+	e.promote()
 	return e
+}
+
+// promote switches the project to the promote integration policy straight in
+// the database: no CLI flag sets it any more, but the promote paths still
+// have end-to-end coverage until their removal task owns them.
+func (e *env) promote() {
+	e.t.Helper()
+	db, err := sql.Open("sqlite", e.db)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE projects SET integration = 'promote' WHERE root_path IS NOT NULL`); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 func (e *env) git(dir string, args ...string) {
@@ -324,8 +340,6 @@ func TestPlanningCommands(t *testing.T) {
 func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	e := newEnv(t)
 	e.ok("init", "--name", "c")
-	e.fails("INVALID_INPUT", "claim") // no regression checks yet
-	e.ok("project", "--regression-check", "regress: true")
 	const n = 6
 	ids := map[string]bool{}
 	for i := 0; i < n; i++ {
@@ -392,14 +406,12 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 func TestVacuousChecksRejectedByCLI(t *testing.T) {
 	e := gitEnv(t)
 	e.fails("INVALID_INPUT", "add", "json false", "--policy-json", `{"task_checks":[{"id":"j","command":["true"],"required":false}]}`)
-	x := taskID(e.ok("add", "json absent", "--policy-json", `{"task_checks":[{"id":"j","command":["test","-d","."]}]}`))
+	x := taskID(e.ok("add", "json absent", "--policy-json", `{"task_checks":[{"id":"j","command":["test","-d","."]}]}`, "--regression", "run: true"))
 	checks := e.ok("show", x)["task_checks"].([]any)
 	if len(checks) != 1 || checks[0].(map[string]any)["required"] != true {
 		t.Fatalf("absent required must mean required: %v", checks)
 	}
 	e.fails("INVALID_INPUT", "update", x, "--optional-check", "o: true")
-	e.fails("INVALID_INPUT", "project", "--regression-json", `[{"id":"r2","command":["true"],"required":false}]`)
-	e.ok("project", "--regression-json", `[{"id":"r2","command":["true"]}]`)
 	s := e.ok("claim", x)
 	e.commit(s["workspace"].(string), "x.txt", "x")
 	if r := e.runIn(e.cwd, "", []string{"ATASK_SESSION=" + s["token"].(string)}, "verify", "complete"); r.code != 0 || r.env["result"].(map[string]any)["completed"] != true {
@@ -556,27 +568,6 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 		t.Fatalf("flags --claim: %v", fast)
 	}
 	e.fails("INVALID_INPUT", "add", "-f", yamlPlan, "--proof", "run: test -d .", "--regression", "run: true")
-	// Unhealthy: the regression suite fails on main; doctor says so and
-	// names the check, before any task is charged for it.
-	e.ok("project", "--regression-check", "regress: false")
-	rr := e.fails("NOT_READY", "doctor")
-	det := rr.env["error"].(map[string]any)["details"].(map[string]any)
-	if det["healthy"] != false {
-		t.Fatalf("doctor details: %v", det)
-	}
-	found := false
-	for _, ch := range det["checks"].([]any) {
-		m := ch.(map[string]any)
-		if m["id"] == "baseline" && m["ok"] == false && strings.Contains(m["message"].(string), "regress") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("baseline not reported: %v", det["checks"])
-	}
-	if e.ok("doctor", "--skip-baseline")["healthy"] != true {
-		t.Fatal("--skip-baseline should not run the suite")
-	}
 }
 
 // TestInitInstallsInstructionsAndHooks: `atask init` writes the AGENTS.md
@@ -692,29 +683,9 @@ func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("plan file size: %s", r.stdout)
 	}
-	cx := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "show", "big")
-	if cx.code != 0 || !strings.Contains(cx.stdout, "task checks 5m0s (size medium), regression 2m0s") {
-		t.Fatalf("show budgets: %s", cx.stdout)
-	}
-	proj := e.ok("project", "--budget-small", "45s", "--regression-budget", "none")
-	b := proj["budgets"].(map[string]any)
-	if b["small_ms"].(float64) != 45000 || b["regression_ms"].(float64) != -1 {
-		t.Fatalf("budgets: %v", b)
-	}
-	e.fails("INVALID_INPUT", "project", "--budget-large", "soon")
-	// A regression gate over its budget is a doctor error, before any task pays for it.
-	e.ok("project", "--regression-budget", "300ms", "--regression-check", "slow: sleep 1")
-	rr := e.fails("NOT_READY", "doctor")
-	found := false
-	for _, ch := range rr.env["error"].(map[string]any)["details"].(map[string]any)["checks"].([]any) {
-		m := ch.(map[string]any)
-		if m["id"] == "regression_budget" && m["ok"] == false && m["severity"] == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("doctor did not flag the slow gate: %s", rr.stdout)
-	}
+	// A project holds no budgets: the flags are gone, not silently ignored.
+	e.fails("INVALID_INPUT", "project", "--budget-small", "45s")
+	e.fails("INVALID_INPUT", "project", "--regression-budget", "none")
 }
 
 // TestEpicChecksFromTheCLI: a group with its own checks through add,

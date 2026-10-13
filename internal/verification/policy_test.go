@@ -92,7 +92,7 @@ func TestMergeKeepsNamespacesSeparate(t *testing.T) {
 	if Collides([]CheckSpec{{ID: "lint"}}, proj) != "lint" || Collides([]CheckSpec{{ID: "unit"}}, proj) != "" {
 		t.Fatal("collision detection")
 	}
-	if m.MissingCategory() != "" || (Policy{TaskChecks: task.TaskChecks}).MissingCategory() != "required project regression checks" || (Policy{Regression: proj}).MissingCategory() != "required task checks" {
+	if m.MissingCategory() != "" || (Policy{TaskChecks: task.TaskChecks}).MissingCategory() != "required regression checks" || (Policy{Regression: proj}).MissingCategory() != "required task checks" {
 		t.Fatal("missing category")
 	}
 	if _, err := ParseMode(""); err == nil {

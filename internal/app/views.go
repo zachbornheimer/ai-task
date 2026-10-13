@@ -105,11 +105,8 @@ type TaskView struct {
 	Regression  *proof.ProofSpec           `json:"regression,omitempty"`
 	Pins        []string                   `json:"pins,omitempty"`
 	Size        string                     `json:"size,omitempty"`
-	// Budgets is the project's verification time caps. Present on show
-	// depth so agents read them from `atask show`, not from context.
-	Budgets     project.Budgets `json:"budgets,omitempty"`
-	ContractRev int             `json:"contract_rev"`
-	Status      task.Status     `json:"status"`
+	ContractRev int                        `json:"contract_rev"`
+	Status      task.Status                `json:"status"`
 	// Started reports whether any execution attempt ever existed: the
 	// difference between ○ (never started) and ◐ (started, not complete).
 	Started      bool                `json:"started"`
@@ -344,9 +341,6 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, Pins: t.Pins, Size: t.Size, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, Creator: t.Creator, CreatedCwd: t.CreatedCwd, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
-	}
-	if depth != viewList {
-		v.Budgets = p.Budgets
 	}
 	if st == task.StatusNeedsAttention {
 		facts := r.Facts(now, p.MaxAttempts)

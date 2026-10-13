@@ -206,9 +206,6 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
 	}
-	if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
-		return "", fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check; task checks cannot shadow regression checks", cid)
-	}
 	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Pins: spec.Pins, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := 0; attempt < 5; attempt++ {
 		if attempt == 0 {
@@ -571,7 +568,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 				return fault.New(fault.CodeInvalidInput, "%s: %v; archive the task instead of removing its gate", t.ID, fault.MessageOf(err))
 			}
 		}
-		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value, OnComplete: t.Verification.OnComplete}
+		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value, Regression: t.Verification.Regression, RegressionProof: t.Verification.RegressionProof, OnComplete: t.Verification.OnComplete}
 		changed = true
 	}
 	if c.OnComplete.Set {
@@ -624,9 +621,6 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			if err := vacuityError(spec); err != nil {
 				return err
 			}
-		}
-		if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
-			return fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check", cid)
 		}
 		t.Description, t.Outcome, t.Constraints, t.Acceptance = spec.Description, spec.Outcome, spec.Constraints, spec.Acceptance
 		if err := a.tx.UpdateTaskContract(t, a.now); err != nil {

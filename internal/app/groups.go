@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/proof"
+
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -360,7 +362,7 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			}
 			// Nothing changed since a failure on this very revision and
 			// contract: the planner has to act, not the verifier.
-			if last != nil && last.Status == sqlite.RunFailed && last.Revision == head.rev && last.PolicyDigest == r.Task.Verification.Digest() && only == "" {
+			if last != nil && last.Status == sqlite.RunFailed && last.Revision == head.rev && last.PolicyDigest == effectivePolicy(r.Task, proj).Digest() && only == "" {
 				continue
 			}
 			if next, _, err := jobBackoff(tx, pid, name); err != nil {
@@ -376,7 +378,7 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			if err != nil {
 				return err
 			}
-			policy := verification.Policy{TaskChecks: r.Task.Verification.TaskChecks}
+			policy := effectivePolicy(r.Task, proj)
 			runID, err := tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, JobID: jobID, Mode: verification.ModeGroup, Status: sqlite.RunRunning, Revision: head.rev, Policy: policy, Environment: environmentFingerprint()}, now)
 			if err != nil {
 				return err
@@ -467,7 +469,7 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 		res.Summary, res.Message = v.Summary, "group complete: its proofs passed on the merge of every child's completed revision"
 		return res, nil
 	case len(v.TimedOut) > 0:
-		summary := fmt.Sprintf("%s; group check(s) %s exceeded the %s budget (%s): the group's verification is built too slow; narrow it or set a larger --size on the group", v.Summary, strings.Join(v.TimedOut, ", "), size, job.proj.Budgets.ForSize(size))
+		summary := fmt.Sprintf("%s; group check(s) %s exceeded the %s budget (%s): the group's verification is built too slow; narrow it or set a larger --size on the group", v.Summary, strings.Join(v.TimedOut, ", "), size, e.sizeBudget(proof.Size(size)))
 		_ = finish(sqlite.RunFailed, "failed", summary, false)
 		return fail(fault.CodeCheckFailed, summary)
 	default:

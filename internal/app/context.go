@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/proof"
+
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -39,8 +41,6 @@ type Context struct {
 	// Worktrunk reports that `wt` is on PATH, so the prompt names its
 	// commit and rebase steps instead of raw git.
 	Worktrunk bool `json:"worktrunk"`
-	// Budgets are the project's verification time caps.
-	Budgets project.Budgets `json:"budgets"`
 	// Summary and Claimable describe the plan when no task is in hand.
 	Summary   *Summary `json:"summary,omitempty"`
 	Claimable []Rel    `json:"claimable,omitempty"`
@@ -62,9 +62,10 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 	}
 	now := e.now()
 	var (
-		v    TaskView
-		proj project.Project
-		sibs []Rel
+		v          TaskView
+		proj       project.Project
+		sibs       []Rel
+		regression []verification.CheckSpec
 	)
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		var r sqlite.Record
@@ -90,6 +91,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 		if v, err = e.buildView(tx, r, proj, now, true, targetHead{}); err != nil {
 			return err
 		}
+		regression = append([]verification.CheckSpec{}, r.Task.Verification.Regression...)
 		// The same enrichment the claim prints: prerequisite learnings
 		// and the last failed verification.
 		if v.Handoff == nil {
@@ -117,7 +119,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 	if len(sibs) > SiblingLimit {
 		sibs = sibs[:SiblingLimit]
 	}
-	c := Context{Project: proj.ID, Task: &v, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Siblings: sibs, Budgets: proj.Budgets}
+	c := Context{Project: proj.ID, Task: &v, TargetBranch: proj.TargetBranch, Regression: regression, Siblings: sibs}
 	if a := v.Attempt; a != nil && a.EndedAt == nil {
 		c.Workspace, c.Branch = a.Workspace, a.Branch
 		lease := a.LeaseExpiresAt
@@ -164,7 +166,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	if err != nil {
 		return Context{}, err
 	}
-	c := Context{Project: proj.ID, TargetBranch: proj.TargetBranch, Regression: proj.Regression, Summary: &sum, Budgets: proj.Budgets}
+	c := Context{Project: proj.ID, TargetBranch: proj.TargetBranch, Regression: []verification.CheckSpec{}, Summary: &sum}
 	for _, t := range snap.Tasks {
 		c.Claimable = append(c.Claimable, Rel{ID: t.ID, Key: t.Key, Title: t.Title, Status: t.Status})
 	}
@@ -260,7 +262,7 @@ func renderContext(c Context) string {
 	if size == "" {
 		size = task.SizeSmall
 	}
-	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size, budgetLabelFor(c.Budgets.RegressionBudget()))
+	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(proof.Size(size).Budget()), size, budgetLabelFor(regressionBudgetOf(v.Regression, size)))
 	if len(v.Checks) > 0 {
 		w.WriteString("Task checks (`atask verify proof`):\n")
 		for _, ch := range v.Checks {
@@ -426,4 +428,13 @@ func budgetLabelFor(d time.Duration) string {
 		return "unlimited"
 	}
 	return d.String()
+}
+
+// regressionBudgetOf is the allowance of a regression proof (the task's size
+// when the proof declares none).
+func regressionBudgetOf(rp *proof.ProofSpec, size string) time.Duration {
+	if rp != nil && rp.Size != "" {
+		return rp.Size.Budget()
+	}
+	return proof.Size(size).Budget()
 }

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/plan"
@@ -108,10 +109,7 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), Size: strptr("small"), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
-	f.proj.Budgets.Small = 300 * 1e6
-	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
-		t.Fatal(err)
-	}
+	f.setProofBudget(300 * time.Millisecond)
 	if ran, err := f.e.RunPendingGroups(f.ctx, f.proj.ID, g); !ran || err != nil {
 		t.Fatalf("epic timeout run: %v %v", ran, err)
 	}
