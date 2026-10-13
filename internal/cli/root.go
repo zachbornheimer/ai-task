@@ -102,6 +102,7 @@ func Main(env Env) int {
 	name, args := rest[0], rest[1:]
 	cmd, ok := commands[name]
 	if !ok {
+		takeJSONMode(&c.g, args)
 		return c.usageError(fmt.Errorf("unknown command %q", name))
 	}
 	c.name = name
@@ -110,7 +111,9 @@ func Main(env Env) int {
 	c.bindGlobals(c.fs)
 	err := cmd.run(ctx, c, args)
 	if c.eng != nil {
-		c.eng.Close()
+		if closeErr := c.eng.Close(); err == nil {
+			err = closeErr
+		}
 	}
 	var h *helpRequest
 	if errors.As(err, &h) {
@@ -148,6 +151,27 @@ func (c *ctxt) encoder() *json.Encoder {
 }
 
 func (c *ctxt) jsonOut() bool { return c.g.json || strings.EqualFold(c.g.output, "json") }
+
+// takeJSONMode applies trailing --json/--output after an unknown command,
+// which top.Parse never reaches (it stops at the first non-flag).
+func takeJSONMode(g *globals, args []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--json" || a == "-json":
+			g.json = true
+		case a == "--output" || a == "-output":
+			if i+1 < len(args) {
+				i++
+				g.output = args[i]
+			}
+		case strings.HasPrefix(a, "--output="):
+			g.output = strings.TrimPrefix(a, "--output=")
+		case strings.HasPrefix(a, "-output="):
+			g.output = strings.TrimPrefix(a, "-output=")
+		}
+	}
+}
 
 // parse parses flags and positionals interleaved in any order, so both
 // `tasks deps add B --requires A` and `tasks deps add --requires A B` work.
