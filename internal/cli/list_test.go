@@ -150,3 +150,57 @@ func TestAddSameOpenTitleIsNoOp(t *testing.T) {
 		t.Fatalf("second add must return %s:\nfirst=%s\nsecond=%s", id, first, second)
 	}
 }
+
+func TestListArchivedGroups(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "at.db")
+	cwd := t.TempDir()
+	getenv := func(k string) string {
+		if k == "ATASK_DB" {
+			return db
+		}
+		return ""
+	}
+	run := func(args ...string) (int, string, string) {
+		var out, errb bytes.Buffer
+		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
+		return code, out.String(), errb.String()
+	}
+	code, created, errOut := run("add", "--group", "retired-epic")
+	if code != ExitOK {
+		t.Fatalf("add group: %d %s", code, errOut)
+	}
+	var id string
+	for f := range strings.FieldsSeq(created) {
+		if strings.HasPrefix(f, "at-") {
+			id = f
+			break
+		}
+	}
+	if id == "" {
+		t.Fatalf("add group produced no id:\n%s", created)
+	}
+	if code, _, errOut := run("update", id, "--archive", "--reason", "retired"); code != ExitOK {
+		t.Fatalf("archive: %d %s", code, errOut)
+	}
+	code, shown, errOut := run("show", id)
+	if code != ExitOK {
+		t.Fatalf("show archived group: %d %s", code, errOut)
+	}
+	if !strings.Contains(shown, "retired-epic") || !strings.Contains(shown, "ARCHIVED") {
+		t.Fatalf("show must still name the archived group:\n%s", shown)
+	}
+	code, listed, errOut := run("list", "archived")
+	if code != ExitOK {
+		t.Fatalf("list archived: %d %s", code, errOut)
+	}
+	if !strings.Contains(listed, id) || !strings.Contains(listed, "retired-epic") {
+		t.Fatalf("list archived must include the group:\n%s", listed)
+	}
+	code, open, errOut := run("list")
+	if code != ExitOK {
+		t.Fatalf("list: %d %s", code, errOut)
+	}
+	if strings.Contains(open, "retired-epic") {
+		t.Fatalf("default list must hide archived groups:\n%s", open)
+	}
+}

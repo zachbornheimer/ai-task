@@ -28,7 +28,7 @@ const (
 	FilterAll Filter = "all"
 	// FilterComplete: completed live tasks and groups.
 	FilterComplete Filter = "complete"
-	// FilterArchived: archived tasks only.
+	// FilterArchived: archived tasks and groups.
 	FilterArchived Filter = "archived"
 )
 

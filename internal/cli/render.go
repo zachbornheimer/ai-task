@@ -77,6 +77,11 @@ func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter, p painter
 				fmt.Fprintf(w, "    requires: %s\n", requiresText(t, true))
 			}
 		}
+		if filter == app.FilterArchived {
+			for _, g := range snap.Groups {
+				fmt.Fprintln(w, groupLine(g, p))
+			}
+		}
 		return
 	}
 	known := map[task.ID]bool{}

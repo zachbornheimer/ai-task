@@ -340,3 +340,29 @@ func TestArchiveGroupWithCompletedMembers(t *testing.T) {
 		t.Fatalf("all=%d archived=%d", len(all.Groups), len(archived.Groups))
 	}
 }
+
+// Archived groups stay addressable by id and appear only on the archived list.
+func TestListArchivedGroups(t *testing.T) {
+	f := newFixture(t)
+	res := f.apply(plan.AddGroup{Key: "g", Title: "retired-epic"})
+	gid := res.Created["g"]
+	f.apply(plan.ArchiveTask{Target: "g", Reason: "retired"})
+	v := f.show(string(gid))
+	if v.Status != task.StatusArchived || v.Kind != task.KindGroup || v.Title != "retired-epic" {
+		t.Fatalf("show archived group: %+v", v)
+	}
+	archived, err := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterArchived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archived.Groups) != 1 || archived.Groups[0].ID != gid || archived.Groups[0].ArchivedAt == nil {
+		t.Fatalf("list archived groups: %+v", archived.Groups)
+	}
+	all, err := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Groups) != 0 {
+		t.Fatalf("live list still has archived group: %+v", all.Groups)
+	}
+}
