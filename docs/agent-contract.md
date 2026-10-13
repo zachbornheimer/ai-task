@@ -62,16 +62,8 @@ atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks 
 [--expect-rev N] [--idempotency-key K]
 atask update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 [--requires REF]* [--remove-requires REF]*[--set-requires REF]*
-<<<<<<< HEAD
 [--accept ..]*[--constraint ..]* [--proof ..] [--regression ..] [--pin PATH|""]*
-[--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
-||||||| parent of da6227d (refactor(app): replace --planner flag with token-based authority)
-[--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
-[--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
-=======
-[--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
 [--archive --reason ..] [--reset-attempts] [--expect-rev N]
->>>>>>> da6227d (refactor(app): replace --planner flag with token-based authority)
 
 ```text
 `REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
