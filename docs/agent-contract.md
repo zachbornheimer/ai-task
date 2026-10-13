@@ -3,8 +3,13 @@
 Nine everyday verbs: `add`, `update`, `claim`, `log`, `verify`, `show`,
 `list`, `help`, `version`. `atask context` with no arguments is the
 operating contract (no project or database). `atask context ID` is the
-worker handoff for that task. Project bootstrap (`init`, `project`,
-`projects`), `status`, `doctor`, `prune` and `hook` exist outside that set.
+worker handoff for that task. `whoami`, `ready`, and `comment` are
+unknown commands; they are not aliases of `show`, `list ready`, or
+`log`. `atask show` with no argument is the current claim; without a
+resolvable claim it requires a task ID. The default `atask list` is
+every non-archived task, including completed ones. Project bootstrap
+(`init`, `project`, `projects`), `status`, `doctor`, `prune` and `hook`
+exist outside that set.
 The CLI is a thin adapter over the Go engine; both apply the same rules.
 
 ## Output and exit codes
@@ -191,7 +196,7 @@ Every claim gets the task's own worktree on branch `atask/<task-id>`, created
 from the project's target branch on the first attempt and reused by every
 later attempt, so the next attempt starts from the previous one's commits
 (and sees its uncommitted edits: the claim reports `workspace_dirty`).
-Worktrees are not deleted by `at`; prune them with your worktree tooling
+Worktrees are not deleted by `atask`; prune them with your worktree tooling
 once the task is complete.
 
 **Lease.** The default lease is 30 minutes (minimum 5, maximum 4 hours).
@@ -265,7 +270,7 @@ arguments is the operating contract and does not dump tasks. The bootstrap is:
 ```
 
 You are a coding agent responsible for one task in an isolated Git worktree.
-Use the shell and the `at` CLI to execute and manage the task; `at` is
+Use the shell and the `atask` CLI to execute and manage the task; `atask` is
 authoritative for task state, verification and completion. ATASK_OUTPUT=json is
 set: every `atask` command returns one JSON envelope; inspect error.details when
 one fails. Start with `atask context` and follow the project instructions.
@@ -332,8 +337,8 @@ token after a committed completion returns the stored result.
 
 atask show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
 TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
-atask list hierarchy of open work (groups indented; blocked tasks show requires:)
-atask list ready | blocked | all | archived
+atask list every non-archived task, including completed ones (groups indented; blocked tasks show requires:)
+atask list ready | blocked | complete | archived | open
 atask status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
 atask prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks
 
