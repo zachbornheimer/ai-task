@@ -362,7 +362,18 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 func TestChecksRunWithoutHoldingTheDatabase(t *testing.T) {
 	e := gitEnv(t)
 	script := bin + " --db " + e.db + " --project g add from-inside-check --proof 'run: true' --regression 'run: true'"
-	a := taskID(e.ok("add", "reentrant", "--proof", "run: sh -c "+shellQuote(script), "--regression", "run: true"))
+	// The run preset caps one argument at 300 chars; a long state path would
+	// exceed that inline, so the nested command lives in a script file.
+	scriptFile, err := os.CreateTemp("", "nested-*.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(scriptFile.Name()) })
+	if _, err := scriptFile.WriteString(script + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	scriptFile.Close()
+	a := taskID(e.ok("add", "reentrant", "--proof", "run: sh "+scriptFile.Name(), "--regression", "run: true"))
 	s := e.ok("claim", a)
 	e.commit(s["workspace"].(string), "r.txt", "r")
 	r := e.runIn(e.cwd, "", []string{"ATASK_SESSION=" + s["token"].(string)}, "verify", "complete")
