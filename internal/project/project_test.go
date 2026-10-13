@@ -104,6 +104,9 @@ func TestValidate(t *testing.T) {
 	if err := ok.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	if err := (Project{ID: NewID(), Name: "x", Integration: IntegrationOnComplete}).Validate(); err != nil {
+		t.Fatal(err)
+	}
 	bad := []Project{
 		{ID: NewID(), Name: " ", Integration: IntegrationNone},
 		{Name: "x", Integration: "weird"},

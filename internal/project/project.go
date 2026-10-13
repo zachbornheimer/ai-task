@@ -48,6 +48,10 @@ const (
 	// policy implemented in Milestone 1 and the right one for projects whose
 	// tasks do not produce Git revisions.
 	IntegrationNone IntegrationPolicy = "none"
+	// IntegrationOnComplete: a verified submission is complete without
+	// moving the target branch. Later on_complete actions may land the
+	// work; verify complete itself does not promote.
+	IntegrationOnComplete IntegrationPolicy = "on_complete"
 	// IntegrationPromote: a verified revision must additionally be promoted
 	// into the project's target branch before the task is complete and before
 	// dependents are released (Milestone 3).
@@ -162,7 +166,7 @@ func (p Project) Validate() error {
 		return fault.New(fault.CodeInvalidInput, "project name must be at most 200 characters")
 	}
 	switch p.Integration {
-	case IntegrationNone, IntegrationPromote:
+	case IntegrationNone, IntegrationOnComplete, IntegrationPromote:
 	default:
 		return fault.New(fault.CodeInvalidInput, "unknown integration policy %q", p.Integration)
 	}

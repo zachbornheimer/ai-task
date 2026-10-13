@@ -15,6 +15,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
+	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -173,6 +174,39 @@ func TestFinalSuccessIsAtomicAndPromotes(t *testing.T) {
 	if full.History == nil || len(full.History.Integrations) != 1 || full.History.Integrations[0].ResultRevision != rev {
 		t.Fatalf("%+v", full.History)
 	}
+}
+
+func TestVerifyCompleteDoesNotPromote(t *testing.T) {
+	policies := []project.IntegrationPolicy{project.IntegrationNone, project.IntegrationOnComplete}
+	for _, policy := range policies {
+		t.Run(string(policy), func(t *testing.T) {
+			f := newGitFixture(t)
+			mainBefore := f.git(f.repo, "rev-parse", "main")
+			f.setIntegration(policy)
+			a := f.add("a")
+			s := f.claim(string(a))
+			rev := f.commit(s.Workspace, "a.txt", "a")
+			res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
+			if err != nil || !res.Completed || res.Status != task.StatusComplete {
+				t.Fatalf("%+v %v", res, err)
+			}
+			if got := f.git(f.repo, "rev-parse", "main"); got != mainBefore {
+				t.Fatalf("main moved from %s to %s (submitted %s)", mainBefore, got, rev)
+			}
+			if b, err := os.ReadFile(filepath.Join(f.repo, "a.txt")); err == nil && string(b) == "a" {
+				t.Fatal("target checkout received the change")
+			}
+			if st := f.status(string(a)); st != task.StatusComplete {
+				t.Fatalf("status %s", st)
+			}
+		})
+	}
+	t.Run("init_stays_promote", func(t *testing.T) {
+		f := newGitFixture(t)
+		if f.proj.Integration != project.IntegrationPromote {
+			t.Fatalf("init policy %q, want promote", f.proj.Integration)
+		}
+	})
 }
 
 func TestFinalFailureKeepsClaimAndBlocksDownstream(t *testing.T) {

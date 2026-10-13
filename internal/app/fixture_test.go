@@ -128,6 +128,19 @@ func (f *fixture) setRegression(checks ...verification.CheckSpec) {
 	f.proj = p
 }
 
+func (f *fixture) setIntegration(policy project.IntegrationPolicy) {
+	f.t.Helper()
+	p, err := f.e.Project(f.ctx, f.proj.ID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	p.Integration = policy
+	if err := f.e.UpdateProject(f.ctx, p); err != nil {
+		f.t.Fatal(err)
+	}
+	f.proj = p
+}
+
 func sh(script string) []string { return []string{"sh", "-c", script} }
 
 func check(id, script string, required bool) verification.CheckSpec {
