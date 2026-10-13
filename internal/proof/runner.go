@@ -17,6 +17,7 @@ const OutputTail = 64 * 1024
 type Runner struct {
 	registry *Registry
 	budget   time.Duration // when > 0, overrides every budget (tests)
+	hasMise  func(workdir string) bool
 }
 
 // RunnerOption configures a Runner.
@@ -29,7 +30,7 @@ func WithBudget(d time.Duration) RunnerOption { return func(r *Runner) { r.budge
 func WithRegistry(reg *Registry) RunnerOption { return func(r *Runner) { r.registry = reg } }
 
 func NewRunner(opts ...RunnerOption) *Runner {
-	r := &Runner{registry: DefaultRegistry()}
+	r := &Runner{registry: DefaultRegistry(), hasMise: HasMiseConfig}
 	for _, o := range opts {
 		o(r)
 	}
@@ -88,7 +89,11 @@ func (r *Runner) argv(spec ProofSpec, workdir string) ([]string, error) {
 	if !ok {
 		return nil, errUnknownPreset(spec.Preset)
 	}
-	return p.Argv(spec, Env{Workdir: workdir})
+	argv, err := p.Argv(spec, Env{Workdir: workdir})
+	if err == nil && r.hasMise(workdir) {
+		argv = wrapMise(argv)
+	}
+	return argv, err
 }
 
 // matchesExpect applies the generic expect=REGEX option to stdout.
