@@ -699,6 +699,9 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		if err := a.tx.ResetAttempts(t.ID, a.now); err != nil {
 			return err
 		}
+		if err := a.auditPlannerReset(t.ID, rec); err != nil {
+			return err
+		}
 		changed = true
 	}
 	if changed {
