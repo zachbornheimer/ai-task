@@ -62,7 +62,7 @@ func TestGroupsBeforeSizesBecomeLarge(t *testing.T) {
 	}
 }
 
-// TestBlankProjectBecomesGeneral: the pre-0015 default project (id ”) is
+// TestBlankProjectBecomesGeneral: the pre-0018 default project (id ”) is
 // renamed to 'general' with a real id, and its tasks move with it.
 func TestBlankProjectBecomesGeneral(t *testing.T) {
 	ctx := context.Background()
@@ -79,7 +79,7 @@ func TestBlankProjectBecomesGeneral(t *testing.T) {
 	}
 	exec(`INSERT INTO projects (id, name, created_at, updated_at) VALUES ('', '', 1, 1)`)
 	exec(`INSERT INTO tasks (id, project_id, description, outcome, policy_digest, kind, created_at, updated_at) VALUES ('t1', '', 't1', 't1', 'd', 'task', 1, 1)`)
-	exec(`DELETE FROM schema_migrations WHERE version = 15`)
+	exec(`DELETE FROM schema_migrations WHERE version = 18`)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}

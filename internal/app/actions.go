@@ -151,7 +151,7 @@ func (e *Engine) Reverify(ctx context.Context, token execution.Token) (VerifyRes
 	}
 	res := VerifyResult{TaskID: id, Mode: verification.ModeComplete, Revision: c.revision, Status: task.StatusComplete, Completed: true, Passed: true}
 	mgr := e.manager(c.proj)
-	inPlace := c.proj.Unscoped() || c.proj.RootPath == ""
+	inPlace := c.proj.IsGeneral() || c.proj.RootPath == ""
 	var changed []string
 	if !inPlace {
 		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+c.proj.TargetBranch, c.revision)

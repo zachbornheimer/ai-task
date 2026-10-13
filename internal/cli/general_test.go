@@ -23,7 +23,7 @@ func TestGeneralProjectIsDefault(t *testing.T) {
 		return code, out.String(), errb.String()
 	}
 
-	code, out, errOut := run("add", "loose work", "--check", "u: true", "--json")
+	code, out, errOut := run("add", "loose work", "--proof", "run: test -d .", "--regression", "run: test -d .", "--json")
 	if code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
