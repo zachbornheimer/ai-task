@@ -325,9 +325,19 @@ atask context ID                      worker handoff for that task
 atask help [command]                  this reference, or one command's flags
 atask version                         build version
 
+<<<<<<< HEAD
 atask add "title" --proof "run: cmd" --regression "run: cmd" [--claim] [--parent ID] [--requires ID] [--group]
 atask update ID [--title ...] [--proof ...] [--regression ...] [--archive --reason ...]
 atask list [project] [ready|blocked|complete|archived|open]
+||||||| parent of 2bbcd6e (refactor(cli): select list project with global --project flag)
+atask add "title" --check "id: cmd" [--claim] [--parent ID] [--requires ID] [--group]
+atask update ID [--title ...] [--check ...] [--archive --reason ...]
+atask list [project] [ready|blocked|complete|archived|open]
+=======
+atask add "title" --check "id: cmd" [--claim] [--parent ID] [--requires ID] [--group]
+atask update ID [--title ...] [--check ...] [--archive --reason ...]
+atask list [ready|blocked|complete|archived|open]
+>>>>>>> 2bbcd6e (refactor(cli): select list project with global --project flag)
 atask show [ID] [--full]
 atask claim [ID] [--wait]
 atask claim renew [token]

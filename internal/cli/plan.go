@@ -28,7 +28,7 @@ func init() {
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" [--size small|medium|large] [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
 	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--proof ..] [--regression ..] [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
-	register("list", "list non-archived tasks: atask list [<project>] [ready|blocked|complete|archived|open]", runList)
+	register("list", "list non-archived tasks: atask [--project NAME] list [ready|blocked|complete|archived|open]", runList)
 	register("status", "board-wide counts, or one project with --project", runStatus)
 	register("prune", "remove worktrees of complete/archived tasks and quarantined directories of idle tasks", runPrune)
 }
@@ -768,30 +768,24 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	filter := app.FilterAll
-	var pid project.ID
-	if len(c.args) == 0 {
-		// Global board: every non-archived task, complete included.
-	} else if f, ok := listFilter(c.args[0]); ok {
-		if len(c.args) > 1 {
-			return usage("list takes a project and an optional filter: ready, blocked, complete, archived, open")
+	switch len(c.args) {
+	case 0:
+	case 1:
+		f, ok := listFilter(c.args[0])
+		if !ok {
+			return usage("list takes only a filter (ready, blocked, complete, archived, open); select a project with --project NAME, not %q", c.args[0])
 		}
 		filter = f
-	} else {
-		if len(c.args) > 2 {
-			return usage("list takes a project and an optional filter: ready, blocked, complete, archived, open")
-		}
-		p, err := e.ResolveProject(ctx, c.args[0], "")
+	default:
+		return usage("list takes at most one filter (ready, blocked, complete, archived, open); select a project with --project NAME")
+	}
+	var pid project.ID
+	if strings.TrimSpace(c.g.project) != "" {
+		p, err := e.ResolveProject(ctx, c.g.project, "")
 		if err != nil {
 			return err
 		}
 		pid = p.ID
-		if len(c.args) == 2 {
-			f, ok := listFilter(c.args[1])
-			if !ok {
-				return usage("unknown list filter %q (ready, blocked, complete, archived, open)", c.args[1])
-			}
-			filter = f
-		}
 	}
 	snap, err := e.List(ctx, app.ListQuery{ProjectID: pid, Filter: filter})
 	if err != nil {

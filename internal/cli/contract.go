@@ -9,7 +9,7 @@ const AgentContract = `atask tracks verifiable objectives. An objective belongs 
 
 atask context with no arguments is this contract. It needs no environment variables, project, database, or claim. atask context ID is the worker handoff for that task: the objective, acceptance criteria, checks, blockers, worktree, and how completion is decided. If the task is already complete, the handoff reports that and issues no new work. atask help is the full command syntax. atask version prints the build.
 
-Discover work with atask list. The default list is every non-archived task, including completed ones. Filters: ready, blocked, complete, archived, open. Pass a project name to scope one enrolled repo. atask show with no argument is the current claim when a worktree or session can resolve one. atask show ID is any task. Outside a resolvable claim, show needs an ID.
+Discover work with atask list. The default list is every non-archived task, including completed ones. Filters: ready, blocked, complete, archived, open. Use the global --project NAME flag to scope one enrolled repo. atask show with no argument is the current claim when a worktree or session can resolve one. atask show ID is any task. Outside a resolvable claim, show needs an ID.
 
 File an objective with atask add "title" --proof "run: cmd" --regression "run: cmd". Every task needs both: --proof shows the task works, --regression shows nothing else broke. Neither is run at add. A second add of the same open title returns the existing id. Do not invent a trivial check just to satisfy the API. If the outcome cannot be verified automatically, make that limitation explicit. atask update ID changes plan fields. atask update ID --archive --reason "..." removes a task from active planning.
 

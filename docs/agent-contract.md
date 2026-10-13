@@ -360,7 +360,7 @@ token after a committed completion returns the stored result.
 
 atask show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, REQUIRES, BLOCKS,
 TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
-atask list hierarchy of open work (groups indented; blocked tasks show requires:)
+atask [--project NAME] list hierarchy of open work (groups indented; blocked tasks show requires:)
 atask list ready | blocked | all | archived
 atask status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
 atask prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks

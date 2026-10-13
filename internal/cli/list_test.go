@@ -45,14 +45,14 @@ func TestListAllProjectsThenOne(t *testing.T) {
 	if !strings.Contains(out, "from-alpha") {
 		t.Fatalf("bare list is the global board:\n%s", out)
 	}
-	code, out, errOut = run(beta, "list", "alpha")
+	code, out, errOut = run(beta, "--project", "alpha", "list")
 	if code != ExitOK {
 		t.Fatalf("list alpha: %d %s", code, errOut)
 	}
 	if !strings.Contains(out, "from-alpha") {
 		t.Fatalf("list alpha should show that project's tasks:\n%s", out)
 	}
-	code, out, errOut = run(alpha, "list", "beta")
+	code, out, errOut = run(alpha, "--project", "beta", "list")
 	if code != ExitOK {
 		t.Fatalf("list beta: %d %s", code, errOut)
 	}
@@ -148,5 +148,45 @@ func TestAddSameOpenTitleIsNoOp(t *testing.T) {
 	}
 	if id == "" || !strings.Contains(second, id) {
 		t.Fatalf("second add must return %s:\nfirst=%s\nsecond=%s", id, first, second)
+	}
+}
+
+func TestListHonorsProjectFlag(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "at.db")
+	alpha, beta := t.TempDir(), t.TempDir()
+	run := func(cwd string, args ...string) (int, string, string) {
+		var out, errb bytes.Buffer
+		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: func(k string) string {
+			if k == "ATASK_DB" {
+				return db
+			}
+			return ""
+		}})
+		return code, out.String(), errb.String()
+	}
+	for name, dir := range map[string]string{"alpha": alpha, "beta": beta} {
+		if code, _, e := run(dir, "init", "--name", name, "--no-instructions"); code != ExitOK {
+			t.Fatalf("init %s: %d %s", name, code, e)
+		}
+		if code, _, e := run(dir, "add", "task-in-"+name, "--check", "u: true"); code != ExitOK {
+			t.Fatalf("add %s: %d %s", name, code, e)
+		}
+	}
+	for _, args := range [][]string{{"--project", "alpha", "list"}, {"list", "--project", "alpha"}} {
+		code, out, e := run(beta, args...)
+		if code != ExitOK {
+			t.Fatalf("%v: %d %s", args, code, e)
+		}
+		if !strings.Contains(out, "task-in-alpha") || strings.Contains(out, "task-in-beta") {
+			t.Fatalf("%v should list only alpha:\n%s", args, out)
+		}
+	}
+	code, _, e := run(beta, "list", "alpha")
+	if code != ExitUsage || !strings.Contains(e, "--project") {
+		t.Fatalf("positional project must be a usage error naming --project: %d %q", code, e)
+	}
+	code, out, e := run(beta, "list", "ready")
+	if code != ExitOK || !strings.Contains(out, "task-in-alpha") {
+		t.Fatalf("list ready should still filter globally: %d %s %s", code, out, e)
 	}
 }
