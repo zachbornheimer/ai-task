@@ -135,7 +135,7 @@ func TestReleaseAfterExpiry(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.c.Advance(10 * time.Minute)
-		v, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Failed: failed})
+		v, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Failed: failed})
 		if err != nil {
 			t.Fatalf("failed=%v: release after expiry: %v", failed, err)
 		}

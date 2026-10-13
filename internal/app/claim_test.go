@@ -120,7 +120,7 @@ func TestTokenFencingAcrossExpiryAndSupersession(t *testing.T) {
 		func() error { _, err := f.e.Log(f.ctx, s1.Token, execution.LogEntry{Done: "zombie"}); return err },
 		func() error { _, err := f.e.Renew(f.ctx, s1.Token); return err },
 		func() error { _, err := f.e.Verify(f.ctx, s1.Token, verification.ModeProof); return err },
-		func() error { _, err := f.e.Release(f.ctx, s1.Token, app.ReleaseOptions{}); return err },
+		func() error { err := f.e.Release(f.ctx, app.ReleaseRequest{Token: s1.Token}); return err },
 	} {
 		wantCode(t, op(), fault.CodeSessionSuperseded)
 	}

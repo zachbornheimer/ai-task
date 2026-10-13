@@ -32,7 +32,7 @@ func TestPlannerAuthorityIsNoToken(t *testing.T) {
 		t.Fatalf("other task's token: %v", err)
 	}
 
-	f.e.Release(f.ctx, sb.Token, app.ReleaseOptions{})
+	f.e.Release(f.ctx, app.ReleaseRequest{Token: sb.Token})
 	c := f.add("c")
 	s := f.claim(string(c))
 	f.c.Advance(5 * time.Hour)

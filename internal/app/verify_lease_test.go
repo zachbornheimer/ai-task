@@ -74,7 +74,7 @@ func TestVerifyCancelsRunWhenSessionLostMidRun(t *testing.T) {
 	f.commit(s.Workspace, "b.txt", "b")
 	go func() {
 		time.Sleep(supersedeAfter)
-		_, _ = e.Release(f.ctx, s.Token, app.ReleaseOptions{})
+		_ = e.Release(f.ctx, app.ReleaseRequest{Token: s.Token})
 	}()
 	started := time.Now()
 	_, err = e.Verify(f.ctx, s.Token, verification.ModeComplete)
