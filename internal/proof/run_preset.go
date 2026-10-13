@@ -22,6 +22,7 @@ var (
 type runPreset struct{}
 
 func (runPreset) Name() string      { return "run" }
+func (runPreset) Subject() string   { return "COMMAND" }
 func (runPreset) Options() []string { return []string{"expect"} }
 func (runPreset) DefaultSize() Size { return SizeSmall }
 

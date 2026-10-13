@@ -328,6 +328,7 @@ atask version                         build version
 atask add "title" --proof "run: cmd" --regression "run: cmd" [--claim] [--parent ID] [--requires ID] [--group]
 atask update ID [--title ...] [--proof ...] [--regression ...] [--archive --reason ...]
 atask list [project] [ready|blocked|complete|archived|open]
+atask presets
 atask show [ID] [--full]
 atask claim [ID] [--wait]
 atask claim renew [token]

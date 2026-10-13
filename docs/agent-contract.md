@@ -162,6 +162,7 @@ stale `--expect-rev`), a different request under the same key is
 
 atask context operating contract (no project or database)
 atask context ID worker handoff for that task
+atask presets list proof presets: subject, options, default size (built-ins, then custom)
 atask show [REF] current claim, or a particular task
 atask claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the token once
 atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
