@@ -718,30 +718,24 @@ func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 }
 
 // TestEpicChecksFromTheCLI: a group with its own checks through add,
-// show, list, verify groups and status.
+// show, list, verify complete GROUP and status.
 func TestEpicChecksFromTheCLI(t *testing.T) {
 	e := gitEnv(t)
-	g := taskID(e.ok("add", "Identity", "--group", "--key", "identity", "--check", "e2e: test -f a.txt"))
+	g := taskID(e.ok("add", "Identity", "--group", "--key", "identity", "--proof", "run: test -f a.txt", "--regression", "run: test -f a.txt"))
 	a := taskID(e.ok("add", "A", "--key", "a", "--parent", "identity", "--proof", "run: test -f a.txt", "--regression", "run: true"))
 	if sh := e.ok("show", "identity"); sh["size"] != "large" || sh["group_verification"].(map[string]any)["status"] != nil {
 		t.Fatalf("group: %v", sh)
 	}
-	vg := e.ok("verify", "groups")
-	if vg["ran"] != false {
-		t.Fatalf("nothing ready: %v", vg)
+	if r := e.run("verify", "complete", "identity"); r.code == 0 || r.env["error"].(map[string]any)["code"] != "NOT_READY" {
+		t.Fatalf("children incomplete must be NOT_READY: %s %s", r.stdout, r.stderr)
 	}
 	s := e.ok("claim", a)
 	e.commit(s["workspace"].(string), "a.txt", "a")
 	if r := e.runIn(s["workspace"].(string), "", nil, "verify", "complete"); r.code != 0 {
 		t.Fatalf("complete: %s %s", r.stdout, r.stderr)
 	}
-	// The member is done; the epic is pending until a verifier runs it.
-	if st := e.ok("status"); st["done"] != false || st["pending_epics"].(float64) != 1 {
-		t.Fatalf("status: %v", st)
-	}
-	vg = e.ok("verify", "groups", "identity")
-	if vg["ran"] != true || vg["groups"].([]any)[0].(map[string]any)["complete"] != true {
-		t.Fatalf("epic run: %v", vg)
+	if vg := e.ok("verify", "complete", "identity"); vg["completed"] != true {
+		t.Fatalf("group verify: %v", vg)
 	}
 	if st := e.ok("status"); st["done"] != true {
 		t.Fatalf("status after epic: %v", st)
