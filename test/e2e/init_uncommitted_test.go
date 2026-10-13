@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
 // doctorCheck returns the doctor finding with the given id, or nil.
@@ -44,8 +46,8 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 		t.Fatalf("init warning: %q", warn)
 	}
 	// init never commits them itself.
-	if out, err := exec.Command("git", "-C", e.cwd, "ls-files").Output(); err != nil || strings.TrimSpace(string(out)) != "" {
-		t.Fatalf("init committed the user's files: %q %v", out, err)
+	if out := testgit.Run(t, e.cwd, "ls-files"); out != "" {
+		t.Fatalf("init committed the user's files: %q", out)
 	}
 	// The human form says it too.
 	h := newEnv(t)

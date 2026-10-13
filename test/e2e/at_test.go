@@ -18,6 +18,7 @@ import (
 	// makes Go's test cache key include every source file the binary
 	// depends on, so a change anywhere re-runs these tests.
 	_ "github.com/zachbornheimer/ai-task/internal/cli"
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
 var bin string
@@ -51,7 +52,12 @@ func newEnv(t *testing.T) *env {
 	cwd := filepath.Join(base, "repo")
 	os.MkdirAll(cwd, 0o755)
 	e := &env{t: t, db: filepath.Join(base, "state", "at.db"), cwd: cwd}
-	e.env = append(os.Environ(), "ATASK_DB="+e.db, "ATASK_OUTPUT=json", "ATASK_PROJECT=", "ATASK_SESSION=", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	e.env = append(os.Environ(), "ATASK_DB="+e.db, "ATASK_OUTPUT=json", "ATASK_PROJECT=", "ATASK_SESSION=")
+	isolated, err := testgit.Overrides(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.env = append(e.env, isolated...)
 	return e
 }
 
@@ -74,9 +80,9 @@ func gitEnv(t *testing.T) *env {
 
 func (e *env) git(dir string, args ...string) {
 	e.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd := testgit.Command(e.t, dir, args...)
 	// Hooks see the test environment and find the built `atask` on PATH.
-	cmd.Env = append(append([]string{}, e.env...), "PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
+	cmd.Env = append(append(cmd.Env, e.env...), "PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		e.t.Fatalf("git %v: %v\n%s", args, err, out)
 	}

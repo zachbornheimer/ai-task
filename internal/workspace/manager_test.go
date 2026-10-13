@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
 type repo struct {
@@ -27,8 +28,6 @@ func newRepo(t *testing.T) *repo {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("HK", "0")
 	base := t.TempDir()
 	dir := filepath.Join(base, "repo")
@@ -56,8 +55,7 @@ func (g gitSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 		path = filepath.Join(resolved, filepath.Base(path))
 	}
 	if create {
-		cmd := exec.CommandContext(ctx, "git", "-C", g.repo, "-c", "core.hooksPath=/dev/null", "branch", branch, base)
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
+		cmd := testgit.CommandContext(g.t, ctx, g.repo, "branch", branch, base)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("branch: %w\n%s", err, out)
 		}
@@ -65,8 +63,7 @@ func (g gitSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 		return path, nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", g.repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", path, branch)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
+	cmd := testgit.CommandContext(g.t, ctx, g.repo, "worktree", "add", path, branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("worktree add: %w\n%s", err, out)
 	}
@@ -75,13 +72,7 @@ func (g gitSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 
 func (r *repo) git(dir string, args ...string) string {
 	r.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		r.t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
+	return testgit.Run(r.t, dir, args...)
 }
 
 func (r *repo) commit(dir, file, content string) string {
