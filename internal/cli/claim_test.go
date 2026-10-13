@@ -26,10 +26,10 @@ func TestJSONClaimRenewDispatch(t *testing.T) {
 
 	// A task titled "renew" must not be claimed when the verb is the
 	// subcommand: global --json must not turn `claim renew` into a title lookup.
-	if code, _, errOut := run("--json", "add", "renew", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run("--json", "add", "renew", "--proof", "run: go version", "--regression", "run: go version"); code != ExitOK {
 		t.Fatalf("add renew: %d %s", code, errOut)
 	}
-	code, out, errOut := run("--json", "add", "held-work", "--check", "u: true", "--claim")
+	code, out, errOut := run("--json", "add", "held-work", "--proof", "run: go version", "--regression", "run: go version", "--claim")
 	if code != ExitOK {
 		t.Fatalf("add --claim: %d %s", code, errOut)
 	}

@@ -6,6 +6,7 @@ operating contract (no project or database). `atask context ID` is the
 worker handoff for that task. Project bootstrap (`init`, `project`,
 `projects`), `status`, `doctor`, `prune` and `hook` exist outside that set.
 The CLI is a thin adapter over the Go engine; both apply the same rules.
+`whoami`, `ready` and `comment` are not commands: each fails as an unknown command rather than aliasing `show`, `list` or `log`.
 
 ## Output and exit codes
 
@@ -124,7 +125,7 @@ stale `--expect-rev`), a different request under the same key is
   (`CHECK_FAILED`, counted as the attempt's failure, before any
   check runs), so an agent cannot pass by weakening the checks. Pins are
   part of the contract (`pins` in `atask show` and in the context); `update
-  --pin ""` clears them. 
+  --pin ""` clears them.
 - `B --requires A` means B cannot be claimed until A is complete. Hard
   edges form a DAG; cycles, self-edges, and cross-project edges are
   rejected and nothing is written.

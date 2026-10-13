@@ -16,32 +16,19 @@ import (
 )
 
 func TestPublicGoAPI(t *testing.T) {
-	wantTypes := []string{
-		"ActionID", "ActionKind", "ActionResult", "ActionSpec", "ActionStatus",
-		"ApplyResult", "Change", "ChangeSet", "CheckSpec", "ClaimRequest",
-		"Engine", "Handoff", "ListQuery", "ListFilter", "LogEntry",
-		"PlanSnapshot", "ProjectID", "Session", "SessionToken", "TaskDefinition",
-		"TaskID", "TaskKind", "TaskView", "VerifyMode", "VerifyRequest", "VerifyResult",
-	}
-	wantConsts := []string{
-		"ActionBuiltin", "ActionCommand", "ActionFailed", "ActionPending",
-		"ActionRunning", "ActionSucceeded",
-		"FilterAll", "FilterArchived", "FilterBlocked", "FilterComplete",
-		"FilterOpen", "FilterReady",
-		"KindGroup", "KindTask",
-		"VerifyComplete", "VerifyRegression", "VerifyTask",
-	}
-	wantFuncs := []string{} // Open and helpers are bootstrap, not the Engine contract
-	wantVars := []string{}
+	wantTypes := []string{"AcceptanceCriterion", "AddGroup", "AddTask", "ApplyResult", "ArchiveTask", "Change", "ChangeSet", "CheckSpec", "ClaimRequest", "Code", "Config", "Engine", "Error", "Evidence", "Filter", "GroupView", "Handoff", "IntegrationPolicy", "Kind", "ListQuery", "LogEntry", "Patch", "PlanSnapshot", "Project", "ProjectID", "RecordedLog", "Ref", "ReleaseRequest", "Session", "SessionToken", "Status", "Store", "Summary", "Task", "TaskID", "TaskView", "UpdateTask", "VerificationPolicy", "VerifyMode", "VerifyResult"}
+	wantConsts := []string{"ListAll", "ListArchived", "ListBlocked", "ListOpen", "ListReady", "VerifyComplete", "VerifyProof", "VerifyRegression"}
+	wantFuncs := []string{"DefaultPath", "ErrorCode", "Glyph", "Open", "ParseSessionToken", "ParseTaskID", "Replace"}
+	wantVars := []string{"ErrDone", "ErrStalled"}
 	wantEngine := map[string]string{
 		"Apply":   "Apply(context.Context, ChangeSet) (ApplyResult, error)",
 		"List":    "List(context.Context, ListQuery) (PlanSnapshot, error)",
-		"Show":    "Show(context.Context, TaskID) (TaskView, error)",
+		"Show":    "Show(context.Context, ProjectID, string, bool) (TaskView, error)",
 		"Claim":   "Claim(context.Context, ClaimRequest) (Session, error)",
 		"Renew":   "Renew(context.Context, SessionToken) (time.Time, error)",
-		"Release": "Release(context.Context, SessionToken, string) error",
-		"Log":     "Log(context.Context, SessionToken, LogEntry) error",
-		"Verify":  "Verify(context.Context, VerifyRequest) (VerifyResult, error)",
+		"Release": "Release(context.Context, ReleaseRequest) error",
+		"Log":     "Log(context.Context, SessionToken, LogEntry) (RecordedLog, error)",
+		"Verify":  "Verify(context.Context, SessionToken, VerifyMode) (VerifyResult, error)",
 	}
 
 	_, thisFile, _, ok := runtime.Caller(0)

@@ -206,7 +206,7 @@ var cliFlagLine = regexp.MustCompile(`(?m)^\s+-([A-Za-z0-9][A-Za-z0-9-]*)`)
 
 func TestCLITouchableSurface(t *testing.T) {
 	wantVerbs := []string{
-		"add", "claim", "context", "doctor", "help", "init", "list", "log",
+		"add", "claim", "context", "doctor", "help", "hook", "init", "list", "log",
 		"project", "projects", "prune", "show", "status", "update", "verify", "version",
 	}
 	gotVerbs := make([]string, 0, len(commands))
@@ -218,21 +218,22 @@ func TestCLITouchableSurface(t *testing.T) {
 	globals := []string{"db", "json", "output", "pretty", "project"}
 	commandFlags := map[string][]string{
 		"add": {
-			"accept", "blocks", "check", "claim", "cohort", "constraint", "group",
-			"key", "on-complete-json", "optional-check", "outcome", "parent",
-			"pin", "requires", "size",
+			"accept", "blocks", "check", "claim", "cohort", "constraint", "expect-rev", "f",
+			"group", "idempotency-key", "key", "on-complete", "on-complete-detach",
+			"optional-check", "outcome", "parent", "pin", "plan", "policy-json", "proof",
+			"regression", "requires", "session", "size",
 		},
 		"update": {
 			"accept", "archive", "check", "cohort", "constraint", "expect-rev",
-			"idempotency-key", "optional-check", "outcome", "parent", "pin",
-			"reason", "remove-requires", "requires", "reset-attempts", "set-requires",
-			"size",
+			"idempotency-key", "on-complete", "on-complete-detach", "optional-check",
+			"outcome", "parent", "pin", "proof", "reason", "regression", "remove-requires",
+			"requires", "reset-attempts", "session", "set-requires", "size", "title",
 		},
 		"show":     {"full"},
-		"claim":    {"wait"},
-		"log":      {"done", "learned", "next", "note"},
-		"verify":   {"reverify"},
-		"init":     {"name", "path"},
+		"claim":    {"lease", "wait"},
+		"log":      {"done", "learned", "next", "note", "session"},
+		"verify":   {"reverify", "session"},
+		"init":     {"claude", "name", "no-instructions", "path"},
 		"help":     nil,
 		"version":  nil,
 		"context":  nil,
@@ -241,6 +242,7 @@ func TestCLITouchableSurface(t *testing.T) {
 		"projects": nil,
 		"prune":    nil,
 		"doctor":   nil,
+		"hook":     nil,
 		"project":  nil, // trusted project flags are project configuration, not the agent verb set
 	}
 
@@ -267,9 +269,9 @@ func TestCLITouchableSurface(t *testing.T) {
 		assertExact(t, "atask "+n+" flags", want, got)
 	}
 
-	wantListFilters := []string{"all", "archived", "blocked", "complete", "open", "ready"}
+	wantListFilters := []string{"all", "archived", "blocked", "complete", "draft", "open", "ready"}
 	var gotFilters []string
-	for _, f := range []string{"all", "archived", "blocked", "complete", "open", "ready", "whoami", "hook"} {
+	for _, f := range []string{"all", "archived", "blocked", "complete", "draft", "open", "ready", "whoami", "hook"} {
 		if _, ok := listFilter(f); ok {
 			gotFilters = append(gotFilters, f)
 		}

@@ -51,8 +51,8 @@ func TestAgentContractDocMatchesSurface(t *testing.T) {
 	if !strings.Contains(lower, "current claim") {
 		t.Errorf("docs/agent-contract.md must say show with no argument is the current claim")
 	}
-	if !strings.Contains(lower, "including completed") {
-		t.Errorf("docs/agent-contract.md must say the default list includes completed tasks")
+	if !strings.Contains(lower, "list draft") && !strings.Contains(lower, "draft") {
+		t.Errorf("docs/agent-contract.md must document draft tasks")
 	}
 }
 

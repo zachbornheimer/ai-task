@@ -300,7 +300,10 @@ func TestPlanningCommands(t *testing.T) {
 	a := taskID(e.ok("--project", "p", "add", "Rotate creds", "--key", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
 	b := taskID(e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
 	e.fails("CONFLICT", "--project", "p", "add", "Token store v2", "--key", "store", "--proof", "run: test -d .", "--regression", "run: true")
-	e.fails("INVALID_INPUT", "--project", "p", "add", "No checks", "--key", "nochecks")
+	if d := e.ok("--project", "p", "add", "No proofs", "--key", "noproofs"); d["task"].(map[string]any)["status"] != "draft" {
+		t.Fatalf("task without proofs must be a draft: %v", d)
+	}
+	e.ok("--project", "p", "update", "noproofs", "--archive", "--reason", "draft probe")
 	rep := e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: test -d .", "--regression", "run: true")
 	if rep["changed"].(float64) != 0 {
 		t.Fatalf("identical replay changed the plan: %v", rep)
@@ -421,14 +424,14 @@ func TestVacuousChecksRejectedByCLI(t *testing.T) {
 
 // The documented discovered-prerequisite flow works from inside the task
 // worktree with no token at all (the worktree supplies the session), needs
-// a check like any task, and is refused from outside without a session.
+// proofs to become claimable, and is refused from outside without a session.
 func TestDiscoveredBlockerFromWorktree(t *testing.T) {
 	e := gitEnv(t)
 	a := taskID(e.ok("add", "main work", "--key", "main", "--proof", "run: test -d .", "--regression", "run: true"))
 	s := e.ok("claim", a)
 	ws := s["workspace"].(string)
-	if r := e.runIn(ws, "", nil, "add", "prereq", "--blocks", "main"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "INVALID_INPUT" {
-		t.Fatalf("blocker without a check accepted: %s", r.stdout)
+	if r := e.runIn(ws, "", nil, "add", "prereq", "--blocks", "main"); r.code != 0 || !strings.Contains(r.stdout, `"status":"draft"`) {
+		t.Fatalf("blocker without proofs must be filed as a draft: %s %s", r.stdout, r.stderr)
 	}
 	r := e.runIn(ws, "", nil, "add", "prereq", "--key", "pre", "--blocks", "main", "--proof", "run: test -d .", "--regression", "run: true")
 	if r.code != 0 {
