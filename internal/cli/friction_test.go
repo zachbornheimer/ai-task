@@ -9,6 +9,19 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
+func TestParseCheckHTTPS(t *testing.T) {
+	spec, err := parseCheck("https://example.com/x", 1, true)
+	if err != nil {
+		t.Fatalf("parseCheck: %v", err)
+	}
+	if spec.ID != "check1" {
+		t.Fatalf("id=%q command=%v, want generated check1 and one argv", spec.ID, spec.Command)
+	}
+	if len(spec.Command) != 1 || spec.Command[0] != "https://example.com/x" {
+		t.Fatalf("command=%v, want one argv https://example.com/x", spec.Command)
+	}
+}
+
 func TestCheckRejectsShellSyntax(t *testing.T) {
 	for _, raw := range []string{
 		`fmt: test -z "$(gofmt -l .)"`,
