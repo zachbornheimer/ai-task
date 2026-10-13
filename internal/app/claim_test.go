@@ -58,7 +58,9 @@ func TestConcurrentClaimsYieldDistinctSessions(t *testing.T) {
 			}
 			s, err := e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
 			if err != nil {
-				if fault.Is(err, fault.CodeNotReady) {
+				// A failed workspace is also NOT_READY; only "no claimable
+				// task" is the expected loser outcome.
+				if fault.Is(err, fault.CodeNotReady) && strings.Contains(err.Error(), "no claimable task") {
 					atomic.AddInt32(&none, 1)
 					return
 				}

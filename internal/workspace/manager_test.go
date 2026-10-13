@@ -417,3 +417,29 @@ func TestPruneRemovesTmp(t *testing.T) {
 		}
 	}
 }
+
+// Concurrent claimers each create a task worktree in the same repository.
+// Git's worktree metadata is written non-atomically, so an unserialised
+// `worktree list` or `worktree add` can fail mid-creation; a transient
+// failure like that must never surface as a failed workspace.
+func TestConcurrentEnsureTaskNeverFails(t *testing.T) {
+	r := newRepo(t)
+	const claimers = 10
+	for round := range 2 {
+		errs := make([]error, claimers)
+		var wg sync.WaitGroup
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, errs[i] = r.mgr.EnsureTask(r.ctx, fmt.Sprintf("at-r%dc%02d", round, i), "main", 0)
+			}()
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("round %d claimer %d: %v", round, i, err)
+			}
+		}
+	}
+}

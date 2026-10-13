@@ -94,6 +94,14 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 	if err := os.MkdirAll(m.Root, 0o755); err != nil {
 		return info, fault.Wrap(err, fault.CodeNotReady, "create workspace root")
 	}
+	// `git worktree add` writes a worktree's metadata non-atomically, so a
+	// concurrent add or list from another claimer can read it half-written
+	// and fail. Creation is serialized across processes.
+	unlock, err := m.repoLock(ctx, worktreeLockFile, "worktree")
+	if err != nil {
+		return info, err
+	}
+	defer unlock()
 	existing, err := m.worktreeFor(ctx, info.Branch)
 	if err != nil {
 		return info, err
@@ -371,21 +379,34 @@ func localClashes(dirty []string, changed []string) []string {
 // dies: there is no stale-lock detection and nothing to steal. It waits
 // (bounded by ctx) while another promoter holds it.
 func (m Manager) promoteLock(ctx context.Context) (func(), error) {
+	return m.repoLock(ctx, promoteLockFile, "promotion")
+}
+
+// Lock files under the git common dir. Each serializes one kind of
+// repository-wide mutation across processes.
+const (
+	promoteLockFile  = "at-promote.lock"
+	worktreeLockFile = "at-worktree.lock"
+)
+
+// repoLock takes the advisory lock named file under the git common dir;
+// what only labels errors.
+func (m Manager) repoLock(ctx context.Context, file, what string) (func(), error) {
 	common, err := git(ctx, m.Repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return nil, fault.Wrap(err, fault.CodeNotReady, "locate git directory")
 	}
-	path := filepath.Join(strings.TrimSpace(common), "at-promote.lock")
+	path := filepath.Join(strings.TrimSpace(common), file)
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		return nil, fault.Wrap(err, fault.CodeNotReady, "open promotion lock")
+		return nil, fault.Wrap(err, fault.CodeNotReady, "open %s lock", what)
 	}
 	delay := 10 * time.Millisecond
 	for {
 		locked, err := tryLockFile(f)
 		if err != nil {
 			f.Close()
-			return nil, fault.Wrap(err, fault.CodeNotReady, "take promotion lock")
+			return nil, fault.Wrap(err, fault.CodeNotReady, "take %s lock", what)
 		}
 		if locked {
 			fmt.Fprintf(f, "%d\n", os.Getpid())
@@ -394,7 +415,7 @@ func (m Manager) promoteLock(ctx context.Context) (func(), error) {
 		select {
 		case <-ctx.Done():
 			f.Close()
-			return nil, fault.Wrap(ctx.Err(), fault.CodeBaseConflict, "waiting for the promotion lock %s", path)
+			return nil, fault.Wrap(ctx.Err(), fault.CodeBaseConflict, "waiting for the %s lock %s", what, path)
 		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
 		}
 		if delay < 200*time.Millisecond {
