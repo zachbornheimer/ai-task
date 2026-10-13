@@ -5,7 +5,7 @@ completes a task; only `verify complete` can, and only with fresh evidence.
 
 ## Two required categories
 
-- **Task checks** (`atask add --check`, `atask update --check`) prove the task's
+- **Task checks** (`atask add --proof`, `atask update --proof`) prove the task's
   own outcome. Required unless a task is a group.
 - **Project regression checks** (`atask project --regression-check` /
   `--regression-json`) guard the rest of the project. Trusted
@@ -33,7 +33,7 @@ regexp, and awk's `$1` are not expansions.
 
 | Invocation                | Inputs                                              | Effect                                                                                |
 | ------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `atask verify task`       | attempt worktree (editable)                         | runs task checks fresh; records a diagnostic run; never completes/releases/integrates |
+| `atask verify proof`      | attempt worktree (editable)                         | runs task checks fresh; records a diagnostic run; never completes/releases/integrates |
 | `atask verify regression` | attempt worktree                                    | same for regression checks                                                            |
 | `atask verify complete`   | clean worktree → immutable HEAD → detached snapshot | runs BOTH categories fresh, integrates, finalises completion                          |
 | `atask verify`            |                                                     | usage error                                                                           |

@@ -98,7 +98,7 @@ func TestMergeKeepsNamespacesSeparate(t *testing.T) {
 	if _, err := ParseMode(""); err == nil {
 		t.Fatal("bare verify must be invalid")
 	}
-	if len(m.Subset(ModeTask).Regression) != 0 || len(m.Subset(ModeRegression).TaskChecks) != 0 {
+	if len(m.Subset(ModeProof).Regression) != 0 || len(m.Subset(ModeRegression).TaskChecks) != 0 {
 		t.Fatal("subset")
 	}
 	// Merge must not alias the input slices.

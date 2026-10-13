@@ -239,6 +239,9 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 		return err
 	}
 	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins, Size: c.Size}
+	if err := applyProofs(&spec.Verification, c.Proof, c.Regression); err != nil {
+		return err
+	}
 	for _, acc := range c.Acceptance {
 		spec.Acceptance = append(spec.Acceptance, task.AcceptanceCriterion{Description: acc})
 	}
@@ -285,7 +288,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	// A task is implementable only with a required check of its own:
 	// completion fails closed without one, so planning fails closed too.
 	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
-		return fault.New(fault.CodeMissingVerification, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
+		return fault.New(fault.CodeMissingVerification, "task %q: %v (--proof defines the required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
 	}
 	if err := planBudgetError(spec, a.proj); err != nil {
 		return err
@@ -490,7 +493,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
+	contract := c.Proof != nil || c.Regression != nil || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
 		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
@@ -579,6 +582,13 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value}
 		changed = true
+	}
+	if c.Proof != nil || c.Regression != nil {
+		pol := t.Verification
+		if err := applyProofs(&pol, c.Proof, c.Regression); err != nil {
+			return err
+		}
+		t.Verification, changed = pol, true
 	}
 	if c.Parent != nil {
 		parent, err := a.parentGroup(*c.Parent)

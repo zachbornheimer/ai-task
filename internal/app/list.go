@@ -397,7 +397,7 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort(s) keep failing to promote; see the members' last_error", cohortsStuck))
 		}
 		if unverifiable > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `atask update <task> --check ...`", unverifiable))
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `atask update <task> --proof ...`", unverifiable))
 		}
 		if c := s.Counts[task.StatusAwaitingVerification]; c > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort member(s) await peers that cannot progress", c))

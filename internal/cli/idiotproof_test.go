@@ -21,7 +21,7 @@ func TestBareAtaskListsBoard(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run("add", "board item", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run("add", "board item", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	code, out, errOut := run()
@@ -54,10 +54,10 @@ func TestStatusWithoutProjectIsBoardWide(t *testing.T) {
 	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(alpha, "add", "alpha-work", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run(alpha, "add", "alpha-work", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add alpha: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(other, "add", "loose-work", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run(other, "add", "loose-work", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add unscoped: %d %s", code, errOut)
 	}
 	code, out, errOut := run(alpha, "status")
@@ -90,10 +90,10 @@ func TestListTagsProjectOnMixedBoard(t *testing.T) {
 	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(alpha, "add", "named-work", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run(alpha, "add", "named-work", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add named: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(other, "add", "loose-work", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run(other, "add", "loose-work", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add loose: %d %s", code, errOut)
 	}
 	code, out, errOut := run(other, "list")

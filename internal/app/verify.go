@@ -28,7 +28,7 @@ func environmentFingerprint() string {
 
 // Verify runs checks under a session's authority.
 //
-//   - ModeTask / ModeRegression run that category fresh in the attempt's
+//   - ModeProof / ModeRegression run that category fresh in the attempt's
 //     workspace (editable, so results are diagnostic) and never complete,
 //     release, or integrate.
 //   - ModeComplete records an immutable submission (a clean commit in Git

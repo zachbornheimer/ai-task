@@ -10,7 +10,7 @@ import (
 )
 
 func TestRenderVerifyPointsAtLogs(t *testing.T) {
-	res := app.VerifyResult{TaskID: "at-aaaaaa", Mode: verification.ModeTask, LogDir: "/state/logs/p/run-7", Evidence: []verification.Evidence{
+	res := app.VerifyResult{TaskID: "at-aaaaaa", Mode: verification.ModeProof, LogDir: "/state/logs/p/run-7", Evidence: []verification.Evidence{
 		{CheckID: "unit", Required: true, Outcome: verification.OutcomeFailed, ExitCode: 1, Stdout: "--- FAIL: TestX", Log: "/state/logs/p/run-7/unit.log"},
 		{CheckID: "vet", Required: true, Outcome: verification.OutcomePassed, Log: "/state/logs/p/run-7/vet.log"},
 	}}

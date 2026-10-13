@@ -13,6 +13,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -50,6 +51,10 @@ type AddTask struct {
 	Blocks      []Ref // existing tasks that will require the new one
 	Cohort      string
 	TaskChecks  []verification.CheckSpec
+	// Proof and Regression are the task's two proofs; when Proof is set it
+	// supplies the task's required gate.
+	Proof      *proof.ProofSpec
+	Regression *proof.ProofSpec
 	// Pins are paths the task's branch must leave untouched.
 	Pins []string
 	// Size: small (default), medium or large; caps the task checks' time.
@@ -68,6 +73,8 @@ type UpdateTask struct {
 	Acceptance     Patch[string]
 	Cohort         *string
 	TaskChecks     Patch[verification.CheckSpec]
+	Proof          *proof.ProofSpec
+	Regression     *proof.ProofSpec
 	Pins           Patch[string]
 	Size           *string
 	Requires       Patch[Ref] // replace the whole prerequisite set

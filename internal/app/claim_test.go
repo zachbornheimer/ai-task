@@ -120,7 +120,7 @@ func TestTokenFencingAcrossExpiryAndSupersession(t *testing.T) {
 	for _, op := range []func() error{
 		func() error { _, err := f.e.Log(f.ctx, s1.Token, execution.LogEntry{Done: "zombie"}); return err },
 		func() error { _, err := f.e.Renew(f.ctx, s1.Token); return err },
-		func() error { _, err := f.e.Verify(f.ctx, s1.Token, verification.ModeTask); return err },
+		func() error { _, err := f.e.Verify(f.ctx, s1.Token, verification.ModeProof); return err },
 	} {
 		wantCode(t, op(), fault.CodeSessionSuperseded)
 	}
@@ -369,7 +369,7 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	wantCode(t, err, fault.CodeSessionSuperseded)
 	_, err = f.e.Log(f.ctx, sA.Token, execution.LogEntry{Note: "still here"})
 	wantCode(t, err, fault.CodeSessionSuperseded)
-	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeTask)
+	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeProof)
 	wantCode(t, err, fault.CodeSessionSuperseded)
 	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeSessionSuperseded)

@@ -47,7 +47,7 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
 | `Add`, `AddWithDependencies`, `AddDependency`, `RemoveDependency`, `SetTaskPolicy` | `Apply(ctx, ChangeSet)` with `AddGroup` / `AddTask` / `UpdateTask` / `ArchiveTask` |
 | `Take(ctx, TakeRequest)`                                                           | `Claim(ctx, ClaimRequest{Wait})`; `ErrDone`, `ErrStalled`                          |
 | `Finish(ctx, token, opts)`                                                         | `Verify(ctx, token, VerifyComplete)`                                               |
-| `Verify(ctx, taskID, opts)`                                                        | `Verify(ctx, token, VerifyTask \| VerifyRegression)`                               |
+| `Verify(ctx, taskID, opts)`                                                        | `Verify(ctx, token, VerifyProof \| VerifyRegression)`                              |
 | `Release(ctx, token, note)`                                                        | `Release(ctx, token, ReleaseOptions{Note, Failed})`                                |
 | `Renew(ctx, token, lease)`                                                         | `Renew(ctx, token)` (default lease)                                                |
 | `List(ctx, pid, ListFilter)`, `Available`, `Takeable`, `Graph`                     | `List(ctx, ListQuery{Filter})` → `PlanSnapshot`                                    |

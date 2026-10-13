@@ -41,16 +41,16 @@ atask project --regression-check 'test: go test ./...' \
            --regression-check 'fmt: sh -c "test -z \"$(gofmt -l .)\""'   # trusted gate, required before any claim; checks run without a shell, so shell syntax goes in sh -c
 atask doctor                                              # repository, target, identity, regression suite green on the target, worktrees
 atask add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
-atask add "Fix the typo" --check "unit: go test ./..." --claim   # one small change: add and claim in one step
+atask add "Fix the typo" --proof "run: go test ./..." --regression "run: go test ./..." --claim   # one small change: add and claim in one step
 atask add "Identity Core" --group --key identity
-atask add "Confirm OAuth API compatibility" --key compat --parent identity --check "unit: go test ./auth/..."
-atask add "Implement token store" --key store --parent identity --requires compat --check "unit: go test ./store/..."
+atask add "Confirm OAuth API compatibility" --key compat --parent identity --proof "run: go test ./auth/..." --regression "run: go test ./..."
+atask add "Implement token store" --key store --parent identity --requires compat --proof "run: go test ./store/..." --regression "run: go test ./..."
 atask list                                                # ○ ◐ ● hierarchy
 cd "$(atask claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on atask/<id>, token stored inside
 atask context                                             # operating contract; atask context ID is the worker handoff
 atask show                                                # the current claim (pins, budgets, handoff); atask show ID for any task
 atask log --done "..." --next "..."                       # inside the worktree no token is needed; every command renews the lease
-atask verify task                                         # diagnostic
+atask verify proof                                        # diagnostic
 # commit in the worktree, then:
 atask verify complete                                     # both suites fresh on a snapshot, promote, complete
 atask claim --wait                                        # next eligible task, or DONE / STALLED

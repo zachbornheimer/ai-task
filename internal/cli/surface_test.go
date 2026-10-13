@@ -84,7 +84,7 @@ func TestContextHandoffForTaskID(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   []string{"--json", "add", "handoff-work", "--check", "u: true"},
+		Args:   []string{"--json", "add", "handoff-work", "--proof", "run: true", "--regression", "run: true"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &out,
 		Stderr: &errb,
@@ -139,7 +139,7 @@ func TestContextCompletedTaskIssuesNoWork(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   []string{"--json", "add", "already-done", "--check", "u: true", "--claim"},
+		Args:   []string{"--json", "add", "already-done", "--proof", "run: true", "--regression", "run: true", "--claim"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &out,
 		Stderr: &errb,
@@ -293,7 +293,7 @@ func TestShowNoArgsIsTheCurrentClaim(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   []string{"--json", "add", "held surface", "--check", "u: true", "--claim"},
+		Args:   []string{"--json", "add", "held surface", "--proof", "run: true", "--regression", "run: true", "--claim"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &out,
 		Stderr: &errb,
@@ -352,7 +352,7 @@ func TestListDefaultIncludesComplete(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	code, out, errOut := run("--json", "add", "finished-work", "--check", "u: true", "--claim")
+	code, out, errOut := run("--json", "add", "finished-work", "--proof", "run: true", "--regression", "run: true", "--claim")
 	if code != ExitOK {
 		t.Fatalf("add --claim: %d %s", code, errOut)
 	}
@@ -405,11 +405,11 @@ func TestListColorsGlyphsAndDimsProject(t *testing.T) {
 	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(alpha, "add", "colored-work", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run(alpha, "add", "colored-work", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	loose := t.TempDir()
-	if code, _, errOut := run(loose, "add", "claimed-work", "--check", "u: true", "--claim"); code != ExitOK {
+	if code, _, errOut := run(loose, "add", "claimed-work", "--proof", "run: true", "--regression", "run: true", "--claim"); code != ExitOK {
 		t.Fatalf("claim add: %d %s", code, errOut)
 	}
 	code, out, errOut := run(alpha, "list")
@@ -449,7 +449,7 @@ func TestNOCOLORDisablesColor(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &o, Stderr: &e, Cwd: cwd, Getenv: getenv})
 		return code, o.String(), e.String()
 	}
-	if code, _, errOut := run("add", "plain-work", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run("add", "plain-work", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	code, out, errOut := run("list")

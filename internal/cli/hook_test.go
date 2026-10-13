@@ -22,7 +22,7 @@ func TestHookSessionStartSilentWithoutClaim(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run("", "add", "prime me", "--check", "u: true"); code != ExitOK {
+	if code, _, errOut := run("", "add", "prime me", "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	code, out, errOut := run(`{"hook_event_name":"SessionStart","cwd":"`+cwd+`"}`, "hook", "session-start")
@@ -45,7 +45,7 @@ func TestHookSessionStartCurrentClaimOnly(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   []string{"--json", "add", "held work", "--check", "u: true", "--claim"},
+		Args:   []string{"--json", "add", "held work", "--proof", "run: true", "--regression", "run: true", "--claim"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &out,
 		Stderr: &errb,
@@ -57,7 +57,7 @@ func TestHookSessionStartCurrentClaimOnly(t *testing.T) {
 	}
 	var other bytes.Buffer
 	if code := Main(Env{
-		Args:   []string{"add", "other work", "--check", "u: true"},
+		Args:   []string{"add", "other work", "--proof", "run: true", "--regression", "run: true"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &other,
 		Stderr: new(bytes.Buffer),
@@ -122,7 +122,7 @@ func TestHookStopDoesNotBlockOpenClaim(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   []string{"--json", "add", "live claim", "--check", "u: true", "--claim"},
+		Args:   []string{"--json", "add", "live claim", "--proof", "run: true", "--regression", "run: true", "--claim"},
 		Stdin:  strings.NewReader(""),
 		Stdout: &out,
 		Stderr: &errb,

@@ -342,7 +342,7 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 	case task.StatusNeedsAttention:
 		switch {
 		case !verification.HasRequired(r.Task.Verification.TaskChecks):
-			return fault.New(fault.CodeMissingVerification, "%s has no required task check (legacy or edited policy); a planner must `atask update %s --check ...` before it can be claimed", id, id)
+			return fault.New(fault.CodeMissingVerification, "%s has no required task check (legacy or edited policy); a planner must `atask update %s --proof ...` before it can be claimed", id, id)
 		case facts.Exhausted:
 			return fault.New(fault.CodeNeedsAttention, "%s exhausted its attempts (%d failures); a planner must `atask update %s --reset-attempts`", id, r.Failures, id)
 		}

@@ -65,7 +65,7 @@ func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
 	// Uncommitted edits are fine for diagnostics.
 	os.WriteFile(filepath.Join(s.Workspace, "wip.txt"), []byte("wip"), 0o644)
 	for i := 1; i <= 3; i++ {
-		res, err := f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+		res, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 		if err != nil || !res.Passed || res.Completed || runs() != i {
 			t.Fatalf("run %d: %+v %v runs=%d", i, res, err, runs())
 		}
@@ -86,7 +86,7 @@ func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; exit 3", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
-	res, err = f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+	res, err = f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 	wantCode(t, err, fault.CodeVerificationFailed)
 	if res.Passed || runs() != 4 || res.Evidence[0].ExitCode != 3 || f.status(string(a)) != task.StatusClaimed {
 		t.Fatalf("%+v runs=%d", res, runs())
@@ -442,7 +442,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	setPolicy(b, optJSON("o4"))
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeMissingVerification)
-	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 	wantCode(t, err, fault.CodeMissingVerification)
 	good, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("u", "true", true)}})
 	setPolicy(b, string(good))
@@ -506,7 +506,7 @@ func TestOrphanedDiagnosticRunsAreReconciled(t *testing.T) {
 	if err := db.QueryRow(`SELECT id FROM execution_attempts WHERE task_id = ? ORDER BY seq DESC LIMIT 1`, a).Scan(&attemptID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO verification_runs (task_id, attempt_id, mode, status, policy_digest, created_at, started_at) VALUES (?, ?, 'task', 'running', 'x', 1, 1)`, a, attemptID); err != nil {
+	if _, err := db.Exec(`INSERT INTO verification_runs (task_id, attempt_id, mode, status, policy_digest, created_at, started_at) VALUES (?, ?, 'proof', 'running', 'x', 1, 1)`, a, attemptID); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true); v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunRunning {

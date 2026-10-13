@@ -6,6 +6,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -97,6 +98,8 @@ type TaskView struct {
 	Constraints []string                   `json:"constraints,omitempty"`
 	Acceptance  []task.AcceptanceCriterion `json:"acceptance,omitempty"`
 	Checks      []verification.CheckSpec   `json:"task_checks,omitempty"`
+	Proof       *proof.ProofSpec           `json:"proof,omitempty"`
+	Regression  *proof.ProofSpec           `json:"regression,omitempty"`
 	Pins        []string                   `json:"pins,omitempty"`
 	Size        string                     `json:"size,omitempty"`
 	// Budgets is the project's verification time caps. Present on show
@@ -321,7 +324,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	t := r.Task
 	v := TaskView{
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
-		Checks: t.Verification.TaskChecks, Pins: t.Pins, Size: t.Size, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
+		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, Pins: t.Pins, Size: t.Size, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, Creator: t.Creator, CreatedCwd: t.CreatedCwd, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 	}
@@ -332,7 +335,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		facts := r.Facts(now, p.MaxAttempts)
 		switch {
 		case facts.Unverifiable:
-			v.AttentionReason = "no required task check; add one with `atask update --check`"
+			v.AttentionReason = "no required task check; add one with `atask update --proof`"
 		case facts.Exhausted:
 			v.AttentionReason = fmt.Sprintf("attempts exhausted (%d failures); `atask update --reset-attempts` after fixing the cause", r.Failures)
 		case facts.WorkspaceBlocked:
@@ -450,7 +453,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	for _, run := range runs {
 		rv := runView(run, seqOf[run.AttemptID], nil)
 		switch run.Mode {
-		case verification.ModeTask:
+		case verification.ModeProof:
 			v.Verification.Task = &rv
 		case verification.ModeRegression:
 			v.Verification.Regression = &rv

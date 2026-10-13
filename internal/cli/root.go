@@ -325,15 +325,15 @@ atask context ID                      worker handoff for that task
 atask help [command]                  this reference, or one command's flags
 atask version                         build version
 
-atask add "title" --check "id: cmd" [--claim] [--parent ID] [--requires ID] [--group]
-atask update ID [--title ...] [--check ...] [--archive --reason ...]
+atask add "title" --proof "run: cmd" --regression "run: cmd" [--claim] [--parent ID] [--requires ID] [--group]
+atask update ID [--title ...] [--proof ...] [--regression ...] [--archive --reason ...]
 atask list [project] [ready|blocked|complete|archived|open]
 atask show [ID] [--full]
 atask claim [ID] [--wait]
 atask claim renew [token]
 atask claim release [token] [--note ...] [--failed]
 atask log --done ... --next ... --learned ... --note ...
-atask verify task|regression|complete
+atask verify proof|regression|complete
 
 Commands:`)
 	names := make([]string, 0, len(commands))

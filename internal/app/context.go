@@ -183,7 +183,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	w.WriteString(".\n")
 	switch {
 	case sum.Total == 0:
-		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a check that proves it (`atask add \"title\" --check \"id: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step.")
+		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a proof and a regression (`atask add \"title\" --proof \"run: cmd\" --regression \"run: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step.")
 		if !proj.Unscoped() {
 			w.WriteString(" Run `atask doctor` first in a repository you have not worked in.")
 		}
@@ -262,7 +262,7 @@ func renderContext(c Context) string {
 	}
 	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(c.Budgets.ForSize(size)), size, budgetLabelFor(c.Budgets.RegressionBudget()))
 	if len(v.Checks) > 0 {
-		w.WriteString("Task checks (`atask verify task`):\n")
+		w.WriteString("Task checks (`atask verify proof`):\n")
 		for _, ch := range v.Checks {
 			req := "required"
 			if !ch.Required {
@@ -401,7 +401,7 @@ Execute
 
 - Implement the outcome and satisfy its acceptance criteria.
 - The checks are the contract: never weaken, skip or bypass a check or the tests it runs.
-- Iterate with ` + "`atask verify task`" + ` and ` + "`atask verify regression`" + ` (diagnostic; they never complete anything).
+- Iterate with ` + "`atask verify proof`" + ` and ` + "`atask verify regression`" + ` (diagnostic; they never complete anything).
 - Record progress with ` + "`atask log --done \"...\" --next \"...\" --learned \"...\"`" + `; ` + "`--next`" + ` is what the next attempt reads first.
 - The lease lasts 30 minutes and every ` + "`atask`" + ` command renews it; log before it runs out.
 - On LEASE_EXPIRED or SESSION_SUPERSEDED, stop editing immediately. The next ` + "`atask claim <task>`" + ` returns your handoff.
@@ -412,7 +412,7 @@ Complete
 - You never set status. Only a passing ` + "`atask verify complete`" + ` completes the task: it runs every required task check and regression check fresh on the committed revision, then promotes the branch to the target. When the target had moved it merges for you and reports ` + "`integrated_revision`" + `.
 - On VERIFICATION_FAILED, read ` + "`error.details`" + `, fix the cause, commit, verify again. Your claim stays live.
 - On INTEGRATION_FAILED, the target moved against you: ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve ` + "`error.details.conflicts`" + `, commit, verify again. It is not counted against you.
-- If completion depends on work that is not yours: ` + "`atask add \"prereq\" --blocks <task> --check \"id: cmd\"`" + `, ` + "`atask log`" + ` the handoff, ` + "`atask claim release`" + `. Do not implement the blocking task.
+- If completion depends on work that is not yours: ` + "`atask add \"prereq\" --blocks <task> --proof \"run: cmd\" --regression \"run: cmd\"`" + `, ` + "`atask log`" + ` the handoff, ` + "`atask claim release`" + `. Do not implement the blocking task.
 
 Exit
 

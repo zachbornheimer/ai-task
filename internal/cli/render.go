@@ -9,6 +9,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -337,7 +338,11 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			fmt.Fprintf(w, "  • %s\n", pin)
 		}
 	}
-	if len(v.Checks) > 0 {
+	if v.Proof != nil || v.Regression != nil {
+		fmt.Fprintln(w, "\nTASK CHECKS")
+		writeProofLine(w, "proof", v.Proof)
+		writeProofLine(w, "regression", v.Regression)
+	} else if len(v.Checks) > 0 {
 		fmt.Fprintln(w, "\nTASK CHECKS")
 		for _, ch := range v.Checks {
 			kind := "required"
@@ -629,4 +634,28 @@ func renderSummary(w io.Writer, s app.Summary) {
 			fmt.Fprintf(w, "  - %s\n", r)
 		}
 	}
+}
+
+// writeProofLine prints one proof in the grammar it was written in.
+func writeProofLine(w io.Writer, label string, spec *proof.ProofSpec) {
+	if spec == nil {
+		return
+	}
+	fmt.Fprintf(w, "  • %-10s %s\n", label+":", proofText(*spec))
+}
+
+// proofText renders a ProofSpec as "PRESET: SUBJECT key=value ...".
+func proofText(spec proof.ProofSpec) string {
+	text := spec.String()
+	keys := make([]string, 0, len(spec.Options))
+	for k := range spec.Options {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var textSb655 strings.Builder
+	for _, k := range keys {
+		textSb655.WriteString(" " + k + "=" + spec.Options[k])
+	}
+	text += textSb655.String()
+	return text
 }

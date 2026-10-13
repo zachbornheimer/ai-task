@@ -21,7 +21,7 @@ func TestVerifyWritesRunLogs(t *testing.T) {
 	a := f.addWith("a", script)
 	s := f.claim(string(a))
 
-	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 	wantCode(t, err, fault.CodeVerificationFailed)
 	if res.LogDir == "" || len(res.Evidence) != 1 {
 		t.Fatalf("no run directory: %+v", res)

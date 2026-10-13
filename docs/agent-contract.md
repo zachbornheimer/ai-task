@@ -43,7 +43,7 @@ stdout (an envelope in JSON mode) and exits `0`.
 | `STALLED`                                                                                 | open tasks remain, nothing claimable, nothing in flight, nothing cooling down; `details` carries the summary with reasons                                                                                                          |
 | `NEEDS_ATTENTION`                                                                         | this task needs a planner: attempts exhausted, or its worktree could not be prepared (`attention_reason` says which)                                                                                                               |
 | `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED`              | authority failures                                                                                                                                                                                                                 |
-| `MISSING_VERIFICATION`                                                                    | `add` without `--check`; `claim` in a project without regression checks; a check set emptied under a live claim                                                                                                                    |
+| `MISSING_VERIFICATION`                                                                    | `add` without `--proof` and `--regression`; `claim` in a project without regression checks; a check set emptied under a live claim                                                                                                                    |
 | `VERIFICATION_FAILED`                                                                     | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once                                                                                                                |
 | `VERIFICATION_TIMEOUT`                                                                    | a required check ran out of its budget (`timed_out` evidence): the verification is built too slow for the task's size, or the code hangs; never counted against the attempt; `details.message` says which budget and whose problem |
 | `VERIFICATION_RUNNING`                                                                    | this attempt's `verify complete` is still running; wait for its result                                                                                                                                                             |
@@ -56,12 +56,13 @@ stdout (an envelope in JSON mode) and exits `0`.
 ````
 
 atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
-[--outcome ..] [--constraint ..]*[--accept ..]* [--check "[id:] cmd"]*[--optional-check ..]*
+[--outcome ..] [--constraint ..]*[--accept ..]* --proof "PRESET: SUBJECT" --regression "PRESET: SUBJECT"
+(groups: [--check "[id:] cmd"]*[--optional-check ..]*)
 [--pin PATH]*[--claim]
 [--expect-rev N] [--idempotency-key K] [--planner]
 atask update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 [--requires REF]* [--remove-requires REF]*[--set-requires REF]*
-[--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
+[--accept ..]*[--constraint ..]* [--proof ..] [--regression ..] [--pin PATH|""]*
 [--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
 
 ```text
@@ -94,9 +95,15 @@ stale `--expect-rev`), a different request under the same key is
 `IDEMPOTENCY_CONFLICT`, and a new request with a stale `--expect-rev` is
 `PLAN_CONFLICT`. Rules:
 
-- Every task carries at least one task check (`--check`). `add` without
-  one is `MISSING_VERIFICATION`; `update --check` replaces the set but
-  cannot empty it. A trivial check (`true`) is the planner's own risk.
+- Every task carries both a proof (`--proof "PRESET: SUBJECT"`, proves
+  the task works) and a regression (`--regression "PRESET: SUBJECT"`, proves
+  nothing else broke; `--size` sets its time class). `add` with only one
+  is `INVALID_INPUT` naming the missing flag; `--check` on a task is
+  `INVALID_INPUT` naming `--proof`. `update --proof` / `--regression`
+  replace either one. `atask show` lists both under TASK CHECKS and
+  `show --json` carries `proof` and `regression` objects
+  (`preset`, `subject`, `options`, `size`). `run: COMMAND` is the raw-command
+  preset. A trivial command (`run: true`) is the planner's own risk.
 - `--size small|medium|large` (default small) declares how long the
   task's checks may take; the project's budgets turn it into seconds
   (defaults 30s, 5m, 15m; the regression suite 2m; `atask project
@@ -160,7 +167,7 @@ atask claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the t
 atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
 atask claim release [token|-] [--note ..] [--failed]
 atask log --done .. --next .. --learned .. --note .. (token: see Token transport)
-atask verify task | regression | complete (same token sources)
+atask verify proof | regression | complete (same token sources)
 
 ```text
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;
@@ -276,7 +283,7 @@ task's direct prerequisites and `last_failure`: the failed checks of the
 newest failed verification run with the tail of their output. Read it
 before touching the code.
 
-`verify task` and `verify regression` run that category fresh in the
+`verify proof` and `verify regression` run that category fresh in the
 attempt's worktree, working tree included (the summary says so when it
 has uncommitted changes; `revision` is HEAD). They are diagnostic: they
 never complete, release, or integrate. `verify complete`:
@@ -390,13 +397,13 @@ A lost token is a stuck task until the lease expires; that is by design.
 Implement the claimed task's outcome and acceptance criteria.
 Use the supplied workspace and session. You do not set task status.
 Use `atask log` for progress/discoveries.
-Use `atask verify task` and `atask verify regression` while iterating.
+Use `atask verify proof` and `atask verify regression` while iterating.
 When ready, commit the final code revision and call `atask verify complete`.
 It runs BOTH suites again and establishes completion only if all gates pass.
 INTEGRATION_FAILED means the target branch moved against you: merge it into
 your branch, resolve `details.conflicts`, commit, and verify again.
 If new prerequisite work is needed, add it as a blocker of the current
-claimed task (`atask add "..." --blocks <task> --check "id: cmd"`; your
+claimed task (`atask add "..." --blocks <task> --proof "run: cmd" --regression "run: cmd"`; your
 ATASK_SESSION authorises it), log the handoff, and release the claim
 (`atask claim release`).
 Every `atask` command renews your lease; `atask log` at least every half hour.

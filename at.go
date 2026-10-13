@@ -123,7 +123,7 @@ type (
 
 // Verify modes.
 const (
-	VerifyTask       = verification.ModeTask
+	VerifyProof      = verification.ModeProof
 	VerifyRegression = verification.ModeRegression
 	VerifyComplete   = verification.ModeComplete
 )

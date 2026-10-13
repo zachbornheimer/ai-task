@@ -35,7 +35,7 @@ while :; do
 	workspace=$(printf '%s' "$session" | jq -r .result.workspace)
 	echo "working on $task_id in $workspace"
 	(cd "$workspace" && printf '%s\n%s\n' \
-		"Implement the claimed task's outcome and acceptance criteria. Use \`atask log\` for progress, \`atask verify task\`/\`atask verify regression\` while iterating, commit, then \`atask verify complete\`. If prerequisite work is needed: \`atask add \"...\" --blocks $task_id\`, log, \`atask claim release -\`. Stop editing if authorization fails." \
+		"Implement the claimed task's outcome and acceptance criteria. Use \`atask log\` for progress, \`atask verify proof\`/\`atask verify regression\` while iterating, commit, then \`atask verify complete\`. If prerequisite work is needed: \`atask add \"...\" --blocks $task_id\`, log, \`atask claim release -\`. Stop editing if authorization fails." \
 		"$session" | $AGENT_CMD) || atask claim release - --failed --note "agent exited with an error" <<EOF2 || true
 $ATASK_SESSION
 EOF2

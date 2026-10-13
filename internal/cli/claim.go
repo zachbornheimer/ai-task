@@ -19,7 +19,7 @@ import (
 func init() {
 	register("claim", "claim work: atask claim [REF] [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
 	register("log", "record progress under the current session: atask log --done .. --next .. --learned .. --note ..", runLog)
-	register("verify", "run checks under the current session: atask verify task|regression|complete | atask verify groups [REF]", runVerify)
+	register("verify", "run checks under the current session: atask verify proof|regression|complete | atask verify groups [REF]", runVerify)
 }
 
 // token resolves a REQUIRED session token: a positional argument, "-" for
@@ -269,7 +269,7 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	if len(c.args) < 1 {
-		return usage("verify needs a mode: `atask verify task`, `atask verify regression`, `atask verify complete`, or `atask verify groups [REF]`")
+		return usage("verify needs a mode: `atask verify proof`, `atask verify regression`, `atask verify complete`, or `atask verify groups [REF]`")
 	}
 	if c.args[0] == "groups" || c.args[0] == "group" {
 		return c.verifyGroups(ctx, c.args[1:])

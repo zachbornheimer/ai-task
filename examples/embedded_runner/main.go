@@ -198,7 +198,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	// Iterate with provisional checks (a failure here is information for
 	// the agent, not an error: cohort members cannot pass their end-to-end
 	// check alone), then establish completion.
-	if diag, err := eng.Verify(ctx, s.Token, at.VerifyTask); err != nil && at.ErrorCode(err) != "VERIFICATION_FAILED" {
+	if diag, err := eng.Verify(ctx, s.Token, at.VerifyProof); err != nil && at.ErrorCode(err) != "VERIFICATION_FAILED" {
 		return err
 	} else if !diag.Passed {
 		_, _ = eng.Log(ctx, s.Token, at.LogEntry{Note: "provisional task checks: " + diag.Summary})

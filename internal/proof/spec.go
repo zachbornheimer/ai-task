@@ -40,10 +40,10 @@ const (
 
 // ProofSpec is a parsed "PRESET: SUBJECT [key=value ...]" command.
 type ProofSpec struct {
-	Preset  string
-	Subject string
-	Options map[string]string
-	Size    Size
+	Preset  string            `json:"preset"`
+	Subject string            `json:"subject"`
+	Options map[string]string `json:"options"`
+	Size    Size              `json:"size"`
 }
 
 // RunResult is the one record every run produces. ReturnCode is nil when no

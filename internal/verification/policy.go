@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 )
 
 // MaxCheckTimeout bounds a single check. Checks are external processes; an
@@ -103,9 +104,15 @@ func (c CheckSpec) EffectiveTimeout() time.Duration {
 // Policy is the verification contract attached to a task. TaskChecks prove the
 // task's own outcome; Regression checks guard the rest of the project and are
 // typically inherited from the project.
+//
+// Proof and RegressionProof are the contract's two ProofSpecs, kept verbatim so
+// they can be shown back; when Proof is set, TaskChecks holds the gate derived
+// from it (see ProofGate) and is what verification currently executes.
 type Policy struct {
-	TaskChecks []CheckSpec `json:"task_checks,omitempty"`
-	Regression []CheckSpec `json:"regression,omitempty"`
+	TaskChecks      []CheckSpec      `json:"task_checks,omitempty"`
+	Regression      []CheckSpec      `json:"regression,omitempty"`
+	Proof           *proof.ProofSpec `json:"proof,omitempty"`
+	RegressionProof *proof.ProofSpec `json:"regression_proof,omitempty"`
 }
 
 // Validate enforces structural rules. It does not judge whether the checks
@@ -243,8 +250,8 @@ func Collides(taskChecks, regression []CheckSpec) string {
 type Mode string
 
 const (
-	// ModeTask: the task's own checks, run fresh, diagnostic only.
-	ModeTask Mode = "task"
+	// ModeProof: the task's own proof, run fresh, diagnostic only.
+	ModeProof Mode = "proof"
 	// ModeRegression: the project's regression checks, run fresh,
 	// diagnostic only.
 	ModeRegression Mode = "regression"
@@ -263,16 +270,16 @@ const (
 // bare `verify` has no implicit meaning.
 func ParseMode(s string) (Mode, error) {
 	switch Mode(s) {
-	case ModeTask, ModeRegression, ModeComplete:
+	case ModeProof, ModeRegression, ModeComplete:
 		return Mode(s), nil
 	}
-	return "", fault.New(fault.CodeInvalidInput, "verify needs a mode: task, regression, or complete")
+	return "", fault.New(fault.CodeInvalidInput, "verify needs a mode: proof, regression, or complete")
 }
 
 // Subset returns the checks a mode executes.
 func (p Policy) Subset(m Mode) Policy {
 	switch m {
-	case ModeTask:
+	case ModeProof:
 		return Policy{TaskChecks: p.TaskChecks}
 	case ModeRegression:
 		return Policy{Regression: p.Regression}

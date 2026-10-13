@@ -43,7 +43,7 @@ func TestGuardEditCoversNewDirsAndNotebooks(t *testing.T) {
 		t.Fatalf("a notebook outside any project must be allowed: %d %s %s", r.code, r.stdout, r.stderr)
 	}
 	// Inside a task worktree both are allowed, new directory or not.
-	e.ok("add", "Guarded", "--check", "u: test -f g.txt")
+	e.ok("add", "Guarded", "--proof", "run: test -f g.txt", "--regression", "run: true")
 	ws := e.ok("claim")["workspace"].(string)
 	if r := guard(ws, "Write", "file_path", filepath.Join(ws, "newdir", "x.txt")); !allowed(r) {
 		t.Fatalf("a new directory in a task worktree must be allowed: %d %s %s", r.code, r.stdout, r.stderr)

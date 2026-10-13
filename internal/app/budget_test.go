@@ -29,7 +29,7 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
 	// Diagnostic and final runs both report the timeout class.
-	r, err := f.e.Verify(f.ctx, s.Token, verification.ModeTask)
+	r, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 	if fault.CodeOf(err) != fault.CodeVerificationTimeout || len(r.Evidence) != 1 || r.Evidence[0].Outcome != verification.OutcomeTimeout || !strings.Contains(r.Evidence[0].Message, "small task-check budget") {
 		t.Fatalf("diagnostic: %v %+v", err, r)
 	}
@@ -99,7 +99,7 @@ func TestChangedFilesReachChecks(t *testing.T) {
 	os.MkdirAll(filepath.Join(s.Workspace, "store"), 0o755)
 	f.commit(s.Workspace, "store/x.go", "package store\n")
 	f.commit(s.Workspace, "README.md", "r")
-	if r, err := f.e.Verify(f.ctx, s.Token, verification.ModeTask); err != nil || !r.Passed {
+	if r, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof); err != nil || !r.Passed {
 		t.Fatalf("diagnostic: %v %+v", err, r)
 	}
 	f.complete(s)

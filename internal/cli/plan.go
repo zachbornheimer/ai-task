@@ -25,8 +25,8 @@ func init() {
 	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import [--no-instructions] [--claude: optional SessionStart only]; re-run to refresh", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --regression-check, --integration, --target-branch, budgets", runProject)
-	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* [--check ..]* [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
-	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--check ..]* [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
+	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" [--size small|medium|large] [--claim] | atask add -f plan.yaml|plan.json|- | atask add --plan '{...}'", runAdd)
+	register("update", "change a plan item: atask update REF [--title ..] [--requires REF]* [--remove-requires REF]* [--proof ..] [--regression ..] [--archive --reason ..] [--reset-attempts] [--withdraw-submission]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
 	register("list", "list non-archived tasks: atask list [<project>] [ready|blocked|complete|archived|open]", runList)
 	register("status", "board-wide counts, or one project with --project", runStatus)
@@ -330,8 +330,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.Var(&pins, "pin", "path (file, or directory prefix) this task may not change; verify complete refuses if it did (repeatable)")
 	size := c.fs.String("size", "", "how long the task's checks may take: small (default, 30s), medium (5m) or large (15m); the project's budgets set the seconds")
 	c.fs.Var(&accept, "accept", "acceptance criterion (repeatable)")
-	c.fs.Var(&checks, "check", "required task check: \"[id:] command args...\" (repeatable)")
-	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable)")
+	c.fs.Var(&checks, "check", "removed for tasks (groups only): use --proof")
+	c.fs.Var(&optionalChecks, "optional-check", "optional epic check (groups only)")
+	pfl := c.bindProofFlags()
 	c.fs.Var(&requires, "requires", "hard prerequisite (id or key, repeatable)")
 	c.fs.Var(&blocks, "blocks", "existing task that will require the new one (repeatable)")
 	policyJSON := c.fs.String("policy-json", "", "task checks as JSON ({\"task_checks\": [...]})")
@@ -342,7 +343,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	if *file != "" || *inline != "" {
-		if len(c.args) != 0 || *key != "" || *group || *outcome != "" || len(checks)+len(optionalChecks)+len(requires)+len(blocks) > 0 {
+		if len(c.args) != 0 || *key != "" || *group || *outcome != "" || pfl.proof != "" || pfl.regression != "" || len(checks)+len(optionalChecks)+len(requires)+len(blocks) > 0 {
 			return usage("-f/--plan take the whole plan; no title or task flags alongside")
 		}
 		return c.addFromPlan(ctx, pf, *file, *inline, *claim)
@@ -377,6 +378,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		op = g
 	} else {
 		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort, Pins: pins, Size: *size}
+		if len(checks)+len(optionalChecks) > 0 {
+			return usage("--check is gone for tasks: use --proof \"PRESET: SUBJECT\" (proves the task, 30s) and --regression \"PRESET: SUBJECT\" (proves nothing else broke); \"run: COMMAND\" runs a raw command")
+		}
 		if *policyJSON != "" {
 			var pol verification.Policy
 			if err := json.Unmarshal([]byte(*policyJSON), &pol); err != nil {
@@ -384,19 +388,11 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 			}
 			t.TaskChecks = pol.TaskChecks
 		} else {
-			for i, raw := range checks {
-				cs, err := parseCheck(raw, i+1, true)
-				if err != nil {
-					return err
-				}
-				t.TaskChecks = append(t.TaskChecks, cs)
+			if err := pfl.requireBoth(); err != nil {
+				return err
 			}
-			for i, raw := range optionalChecks {
-				cs, err := parseCheck(raw, len(checks)+i+1, false)
-				if err != nil {
-					return err
-				}
-				t.TaskChecks = append(t.TaskChecks, cs)
+			if t.Proof, t.Regression, err = pfl.parse(*size); err != nil {
+				return err
 			}
 		}
 		op = t
@@ -546,8 +542,9 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.Var(&pins, "pin", "replace pinned paths (repeatable; use once with empty value to clear)")
 	size := c.fs.String("size", "", "set the size: small, medium or large")
 	c.fs.Var(&accept, "accept", "replace acceptance criteria (repeatable)")
-	c.fs.Var(&checks, "check", "replace task checks (repeatable)")
-	c.fs.Var(&optionalChecks, "optional-check", "optional task check (repeatable, with --check)")
+	c.fs.Var(&checks, "check", "replace epic checks (groups only; tasks use --proof)")
+	c.fs.Var(&optionalChecks, "optional-check", "optional epic check (repeatable, with --check)")
+	pfl := c.bindProofFlags()
 	c.fs.Var(&requires, "requires", "add a hard prerequisite (repeatable)")
 	c.fs.Var(&remove, "remove-requires", "remove a hard prerequisite (repeatable)")
 	c.fs.Var(&setRequires, "set-requires", "replace the prerequisite set (repeatable; use once with empty value to clear)")
@@ -571,7 +568,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
 		}
-		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *size != "" || *reset || *withdraw {
+		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *size != "" || *reset || *withdraw || pfl.proof != "" || pfl.regression != "" {
 			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
@@ -607,6 +604,11 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		}
 		if len(accept) > 0 {
 			u.Acceptance = plan.Replace([]string(accept))
+		}
+		if pfl.proof != "" || pfl.regression != "" {
+			if u.Proof, u.Regression, err = pfl.parse(*size); err != nil {
+				return err
+			}
 		}
 		if len(checks)+len(optionalChecks) > 0 {
 			var list []verification.CheckSpec
