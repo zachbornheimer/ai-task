@@ -273,10 +273,12 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	if len(c.args) < 1 {
-		return usage("verify needs a mode: `atask verify proof`, `atask verify regression`, `atask verify complete`, or `atask verify groups [REF]`")
+		return usage("verify needs a mode: `atask verify proof`, `atask verify regression`, `atask verify complete`, or `atask verify complete GROUP`")
 	}
-	if c.args[0] == "groups" || c.args[0] == "group" {
-		return c.verifyGroups(ctx, c.args[1:])
+	if c.args[0] == string(verification.ModeComplete) && len(c.args) == 2 && *session == "" {
+		if handled, err := c.verifyGroup(ctx, c.args[1]); handled {
+			return err
+		}
 	}
 	mode, err := verification.ParseMode(c.args[0])
 	if err != nil {
@@ -305,65 +307,27 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(res, func(w io.Writer) { renderVerify(w, res) })
 }
 
-// verifyGroups runs the epic checks of every group whose members are
-// complete (or of one named group, even after a failure on the same
-// revision), the way a waiting claim would, and reports each group's
-// verification state.
-func (c *ctxt) verifyGroups(ctx context.Context, args []string) error {
-	if len(args) > 1 {
-		return usage("verify groups takes at most one group reference")
-	}
+// verifyGroup completes the group ref names: its proofs run on the merge of
+// every child's completed revision. handled is false when ref is not a
+// group, so the caller treats it as a session token.
+func (c *ctxt) verifyGroup(ctx context.Context, ref string) (handled bool, err error) {
 	pid, err := c.resolveProject(ctx)
 	if err != nil {
-		return err
+		return false, nil
 	}
 	e, err := c.engine(ctx)
 	if err != nil {
-		return err
+		return false, nil
 	}
-	var only task.ID
-	if len(args) == 1 {
-		v, err := e.Show(ctx, pid, args[0], false)
-		if err != nil {
-			return err
-		}
-		if v.Kind != task.KindGroup {
-			return usage("%s is not a group", args[0])
-		}
-		only = v.ID
+	v, err := e.Show(ctx, pid, ref, false)
+	if err != nil || v.Kind != task.KindGroup {
+		return false, nil
 	}
-	ran, runErr := e.RunPendingGroups(ctx, pid, only)
-	snap, err := e.List(ctx, app.ListQuery{ProjectID: pid, Filter: app.FilterAll})
+	res, err := e.VerifyGroup(ctx, pid, ref)
 	if err != nil {
-		return err
+		return true, err
 	}
-	type out struct {
-		Ran    bool            `json:"ran"`
-		Groups []app.GroupView `json:"groups"`
-	}
-	o := out{Ran: ran}
-	for _, g := range snap.Groups {
-		if len(g.Checks) > 0 && (only == "" || g.ID == only) {
-			o.Groups = append(o.Groups, g)
-		}
-	}
-	if runErr != nil && fault.IsInternal(runErr) {
-		return runErr
-	}
-	if err := c.emit(o, func(w io.Writer) {
-		if !ran {
-			fmt.Fprintln(w, "No epic was ready to verify.")
-		}
-		for _, g := range o.Groups {
-			fmt.Fprintln(w, groupLine(g, c.painter()))
-			if g.Verification != nil && g.Verification.Summary != "" {
-				fmt.Fprintf(w, "    %s\n", g.Verification.Summary)
-			}
-		}
-	}); err != nil {
-		return err
-	}
-	return runErr
+	return true, c.emit(res, func(w io.Writer) { renderVerify(w, res) })
 }
 
 func runContext(ctx context.Context, c *ctxt, args []string) error {

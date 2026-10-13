@@ -128,13 +128,6 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	// archived
 	archived := f.add("archived")
 	f.apply(plan.ArchiveTask{Target: plan.Ref(archived), Reason: "test"})
-	// cohort member awaiting verification
-	cm := f.apply(plan.AddTask{Key: "cm", Title: "cm", Cohort: "c", TaskChecks: okChecks()}, plan.AddTask{Key: "cm2", Title: "cm2", Cohort: "c", TaskChecks: okChecks()}).Created["cm"]
-	scm := f.claim(string(cm))
-	f.commit(scm.Workspace, "cm.txt", "cm")
-	if _, err := f.e.Verify(f.ctx, scm.Token, verification.ModeComplete); err != nil {
-		t.Fatal(err)
-	}
 	// unverifiable (legacy policy) and workspace-blocked, via direct SQL
 	unverifiable := f.add("unverifiable")
 	opt, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("o", "test -d .", false)}})
@@ -193,7 +186,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 				t.Errorf("%s (%s, status %s): derived claimable=%v, SQL prefilter=%v", r.Task.Key, r.Task.ID, st, st.Claimable(), inSQL[r.Task.ID])
 			}
 		}
-		for _, want := range []task.Status{task.StatusReady, task.StatusBlocked, task.StatusClaimed, task.StatusInterrupted, task.StatusVerificationFailed, task.StatusCooldown, task.StatusNeedsAttention, task.StatusComplete, task.StatusArchived, task.StatusAwaitingVerification} {
+		for _, want := range []task.Status{task.StatusReady, task.StatusBlocked, task.StatusClaimed, task.StatusInterrupted, task.StatusVerificationFailed, task.StatusCooldown, task.StatusNeedsAttention, task.StatusComplete, task.StatusArchived} {
 			if !seen[want] {
 				t.Errorf("decision table missing status %s", want)
 			}

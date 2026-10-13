@@ -60,7 +60,6 @@ type Submission struct {
 	AttemptID   int64
 	AttemptSeq  int
 	Revision    string
-	Cohort      string
 	SubmittedAt time.Time
 	// Run is the newest verification run of this submission; nil means
 	// none recorded yet (treated as pending).
@@ -146,12 +145,12 @@ func (r Record) Status(now time.Time, maxAttempts int) task.Status {
 // correlated subqueries are index-backed.
 const recordSelect = `
 SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome, t.constraints_json, t.policy_json,
-       t.cohort, t.contract_rev, t.archived_at, t.archive_reason, t.failures, t.next_eligible_at,
+       t.contract_rev, t.archived_at, t.archive_reason, t.failures, t.next_eligible_at,
        t.completed_at, t.created_at, t.updated_at,
        (SELECT count(*) FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
          WHERE d.task_id = t.id AND r.completed_at IS NULL) AS unmet,
        a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch, a.lease_ms,
-       s.id, s.attempt_id, sa.seq, s.revision, s.cohort, s.submitted_at,
+       s.id, s.attempt_id, sa.seq, s.revision, s.submitted_at,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
        t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.pins_json, t.size,
@@ -173,15 +172,15 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var aID, aSeq, aStarted, aExpires, aEnded, aLease sql.NullInt64
 	var aReason, aPath, aBranch sql.NullString
 	var sID, sAttempt, sAttemptSeq, sAt sql.NullInt64
-	var sRev, sCohort sql.NullString
+	var sRev sql.NullString
 	var run runScan
 	var completedRev sql.NullString
 	var completedSub sql.NullInt64
 	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Kind, &key, &parent, &r.Task.Description, &r.Task.Outcome, &constraints, &policy,
-		&r.Task.Cohort, &r.Task.ContractRev, &archived, &r.Task.ArchiveReason, &r.Failures, &nextEligible,
+		&r.Task.ContractRev, &archived, &r.Task.ArchiveReason, &r.Failures, &nextEligible,
 		&completed, &created, &updated, &r.UnmetRequires,
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch, &aLease,
-		&sID, &sAttempt, &sAttemptSeq, &sRev, &sCohort, &sAt,
+		&sID, &sAttempt, &sAttemptSeq, &sRev, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
 		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &pins, &r.Task.Size,
 		&r.Task.Creator, &r.Task.CreatedCwd)
@@ -218,7 +217,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	if sID.Valid {
 		sub := &Submission{
 			ID: sID.Int64, TaskID: r.Task.ID, AttemptID: sAttempt.Int64, AttemptSeq: int(sAttemptSeq.Int64),
-			Revision: sRev.String, Cohort: sCohort.String, SubmittedAt: fromMS(sAt.Int64),
+			Revision: sRev.String, SubmittedAt: fromMS(sAt.Int64),
 		}
 		if sub.Run, err = run.toRun(r.Task.ID, sID.Int64); err != nil {
 			return r, err
@@ -277,9 +276,9 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if size == "" {
 		size = task.SizeSmall
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, cohort, contract_rev, created_at, updated_at, pins_json, size, creator, created_cwd)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins), size, tk.Creator, tk.CreatedCwd)
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, contract_rev, created_at, updated_at, pins_json, size, creator, created_cwd)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins), size, tk.Creator, tk.CreatedCwd)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return err // caller distinguishes id vs key collisions
@@ -324,8 +323,8 @@ func (t *Tx) UpdateTaskContract(tk task.Task, now time.Time) error {
 	if size == "" {
 		size = task.SizeSmall
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, cohort = ?, pins_json = ?, size = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
-		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), tk.Cohort, string(pins), size, ms(now), tk.ID)
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, pins_json = ?, size = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
+		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), string(pins), size, ms(now), tk.ID)
 	if err != nil {
 		return wrapInternal(err, "update task")
 	}
@@ -610,24 +609,6 @@ func (t *Tx) CountTasks(pid project.ID) (int, error) {
 	var n int
 	err := t.tx.QueryRowContext(t.ctx, `SELECT count(*) FROM tasks WHERE project_id = ?`, pid).Scan(&n)
 	return n, wrapInternal(err, "count tasks")
-}
-
-// CohortMembers returns live, incomplete executable tasks of a cohort.
-func (t *Tx) CohortMembers(pid project.ID, cohort string) ([]Record, error) {
-	rows, err := t.tx.QueryContext(t.ctx, recordSelect+` WHERE t.project_id = ? AND t.cohort = ? AND t.archived_at IS NULL AND t.completed_at IS NULL AND t.kind = 'task' ORDER BY t.created_at, t.id`, pid, cohort)
-	if err != nil {
-		return nil, wrapInternal(err, "cohort members")
-	}
-	defer rows.Close()
-	var out []Record
-	for rows.Next() {
-		r, err := scanRecord(rows)
-		if err != nil {
-			return nil, wrapInternal(err, "scan member")
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
 }
 
 // TaskCheckIDs returns every task-check ID used by live tasks in a project,

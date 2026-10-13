@@ -47,7 +47,6 @@ type SubmissionView struct {
 	ID           int64            `json:"id"`
 	AttemptSeq   int              `json:"attempt"`
 	Revision     string           `json:"revision,omitempty"`
-	Cohort       string           `json:"cohort,omitempty"`
 	SubmittedAt  time.Time        `json:"submitted_at"`
 	Verification sqlite.RunStatus `json:"verification"`
 	RunID        int64            `json:"run_id,omitempty"`
@@ -109,7 +108,6 @@ type TaskView struct {
 	// Budgets is the project's verification time caps. Present on show
 	// depth so agents read them from `atask show`, not from context.
 	Budgets     project.Budgets `json:"budgets,omitempty"`
-	Cohort      string          `json:"cohort,omitempty"`
 	ContractRev int             `json:"contract_rev"`
 	Status      task.Status     `json:"status"`
 	// Started reports whether any execution attempt ever existed: the
@@ -184,12 +182,8 @@ type Summary struct {
 	// Claimable counts tasks a Claim could take now.
 	Claimable int `json:"claimable"`
 	// Active counts work in flight that can still make progress: live
-	// claims, running verification, and cohort submissions whose
-	// verification can run.
+	// claims and running verification.
 	Active int `json:"active"`
-	// PendingCohorts names cohorts whose members have all submitted and
-	// whose verification job can run (or is running).
-	PendingCohorts []string `json:"pending_cohorts,omitempty"`
 	// PendingEpics counts groups whose members are complete and whose own
 	// checks are waiting for, or running under, a verifier.
 	PendingEpics int `json:"pending_epics,omitempty"`
@@ -252,7 +246,6 @@ type VerifyResult struct {
 	IntegratedRevision string                  `json:"integrated_revision,omitempty"`
 	Passed             bool                    `json:"passed"`
 	Completed          bool                    `json:"completed"`
-	Submitted          bool                    `json:"submitted,omitempty"`
 	SubmissionID       int64                   `json:"submission_id,omitempty"`
 	Status             task.Status             `json:"status"`
 	Summary            string                  `json:"summary"`
@@ -298,7 +291,7 @@ func submissionView(s *sqlite.Submission) *SubmissionView {
 	if s == nil {
 		return nil
 	}
-	v := &SubmissionView{ID: s.ID, AttemptSeq: s.AttemptSeq, Revision: s.Revision, Cohort: s.Cohort, SubmittedAt: s.SubmittedAt, Verification: s.RunStatus()}
+	v := &SubmissionView{ID: s.ID, AttemptSeq: s.AttemptSeq, Revision: s.Revision, SubmittedAt: s.SubmittedAt, Verification: s.RunStatus()}
 	if r := s.Run; r != nil {
 		v.RunID, v.Summary = r.ID, r.Summary
 	}
@@ -348,7 +341,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	t := r.Task
 	v := TaskView{
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
-		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, Pins: t.Pins, Size: t.Size, Cohort: t.Cohort, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
+		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, Pins: t.Pins, Size: t.Size, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, Creator: t.Creator, CreatedCwd: t.CreatedCwd, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 	}

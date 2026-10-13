@@ -253,9 +253,6 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 	if v.Key != "" {
 		fmt.Fprintf(w, "Key: %s\n", v.Key)
 	}
-	if v.Cohort != "" {
-		fmt.Fprintf(w, "Cohort: %s\n", v.Cohort)
-	}
 	if v.Size != "" && v.Kind != task.KindGroup {
 		fmt.Fprintf(w, "Size: %s\n", v.Size)
 		fmt.Fprintf(w, "Budgets: task checks %s (size %s), regression %s\n", budgetText(v.Budgets.ForSize(v.Size)), v.Size, budgetText(v.Budgets.RegressionBudget()))
@@ -633,8 +630,6 @@ func renderVerify(w io.Writer, res app.VerifyResult) {
 	switch {
 	case res.Completed:
 		fmt.Fprintln(w, "Task:      COMPLETE (claim ended)")
-	case res.Submitted:
-		fmt.Fprintf(w, "Task:      %s (submitted for cohort verification; claim ended)\n", stateLabel(res.Status))
 	default:
 		fmt.Fprintf(w, "Task:      NOT complete (%s)\n", strings.ToLower(stateLabel(res.Status)))
 	}
@@ -664,9 +659,6 @@ func renderSummary(w io.Writer, s app.Summary) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		fmt.Fprintf(w, "  %-22s %d\n", k, s.Counts[task.Status(k)])
-	}
-	for _, c := range s.PendingCohorts {
-		fmt.Fprintf(w, "  cohort %q ready for verification\n", c)
 	}
 	switch {
 	case s.Done:

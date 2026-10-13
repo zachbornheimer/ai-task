@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"sort"
-	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -260,39 +258,6 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	if err != nil {
 		return s, err
 	}
-	// Cohort readiness: a cohort can be verified when every live member has
-	// a submission that is pending or running.
-	cohortMembers := map[string][]sqlite.Record{}
-	for _, r := range records {
-		if r.Task.Kind == task.KindTask && r.Task.Cohort != "" && r.CompletedAt == nil {
-			cohortMembers[r.Task.Cohort] = append(cohortMembers[r.Task.Cohort], r)
-		}
-	}
-	runnable := map[string]bool{}
-	backoff := map[string]time.Time{}
-	var cohortsBackingOff, cohortsStuck int
-	for cohort, members := range cohortMembers {
-		ok := len(members) > 0
-		for _, m := range members {
-			if m.Submission == nil || (m.Submission.RunStatus() != sqlite.RunPending && m.Submission.RunStatus() != sqlite.RunRunning) {
-				ok = false
-			}
-		}
-		runnable[cohort] = ok
-		if ok {
-			next, errs, err := cohortBackoff(tx, proj.ID, cohort)
-			if err != nil {
-				return s, err
-			}
-			if next.After(n) {
-				backoff[cohort] = next
-				cohortsBackingOff++
-				if proj.MaxAttempts > 0 && errs >= proj.MaxAttempts {
-					cohortsStuck++
-				}
-			}
-		}
-	}
 	var exhausted, blockedByExhausted, workspaceBlocked, unverifiable int
 	var epicsPending, epicsFailed, epicsErrored int
 	var epicErrors []string
@@ -350,16 +315,7 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 			// the owner's lease expires.
 			s.Active++
 		case st == task.StatusAwaitingVerification:
-			if next, ok := backoff[r.Task.Cohort]; ok {
-				// The cohort's promotion is backing off: self-resolving.
-				s.Cooling++
-				if s.NextEligibleAt == nil || next.Before(*s.NextEligibleAt) {
-					ne := next
-					s.NextEligibleAt = &ne
-				}
-			} else if r.Task.Cohort == "" || runnable[r.Task.Cohort] {
-				s.Active++
-			}
+			s.Active++
 		case st == task.StatusNeedsAttention:
 			switch facts := r.Facts(n, proj.MaxAttempts); {
 			case facts.Unverifiable:
@@ -373,12 +329,6 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 			blockedByExhausted++
 		}
 	}
-	for cohort, ok := range runnable {
-		if ok {
-			s.PendingCohorts = append(s.PendingCohorts, cohort)
-		}
-	}
-	sort.Strings(s.PendingCohorts)
 	s.PendingEpics = epicsPending
 	s.Done = s.Open == 0 && epicsPending == 0 && epicsFailed == 0 && epicsErrored == 0
 	s.Stalled = (s.Open > 0 || epicsFailed > 0 || epicsErrored > 0) && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
@@ -393,14 +343,8 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		if workspaceBlocked > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have an unusable workspace; fix the worktree and `atask claim <task>`, or `atask update <task> --reset-attempts`", workspaceBlocked))
 		}
-		if cohortsStuck > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort(s) keep failing to promote; see the members' last_error", cohortsStuck))
-		}
 		if unverifiable > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `atask update <task> --proof ...`", unverifiable))
-		}
-		if c := s.Counts[task.StatusAwaitingVerification]; c > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d cohort member(s) await peers that cannot progress", c))
 		}
 		if blockedByExhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) blocked behind work that cannot progress", blockedByExhausted))

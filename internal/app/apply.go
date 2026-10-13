@@ -174,18 +174,22 @@ func (a *applier) addGroup(i int, c plan.AddGroup) error {
 	if err != nil {
 		return err
 	}
+	policy := verification.Policy{TaskChecks: c.TaskChecks}
+	if err := applyProofs(&policy, c.Proof, c.Regression); err != nil {
+		return err
+	}
 	if c.Key != "" {
 		if existing, ok, err := a.tx.GetByKey(a.cs.ProjectID, c.Key); err != nil {
 			return err
 		} else if ok {
-			if existing.Task.Kind == task.KindGroup && !existing.Task.Archived() && existing.Task.Description == c.Title && existing.Task.ParentID == parent && existing.Task.Verification.Digest() == (verification.Policy{TaskChecks: c.TaskChecks}).Digest() {
+			if existing.Task.Kind == task.KindGroup && !existing.Task.Archived() && existing.Task.Description == c.Title && existing.Task.ParentID == parent && existing.Task.Verification.Digest() == policy.Digest() {
 				a.refs[c.Key] = existing.Task.ID
 				return nil // identical replay
 			}
 			return fault.New(fault.CodeConflict, "key %q already names %s with a different definition", c.Key, existing.Task.ID)
 		}
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Size: c.Size}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title, Verification: policy, Size: c.Size}
 	id, err := a.insert(spec)
 	if err != nil {
 		return err
@@ -205,7 +209,7 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 		return "", fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check; task checks cannot shadow regression checks", cid)
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Cohort: spec.Cohort, Pins: spec.Pins, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Pins: spec.Pins, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := 0; attempt < 5; attempt++ {
 		if attempt == 0 {
 			t.ID = a.e.newID()
@@ -239,7 +243,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Cohort: c.Cohort, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins, Size: c.Size}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins, Size: c.Size}
 	if err := applyProofs(&spec.Verification, c.Proof, c.Regression); err != nil {
 		return err
 	}
@@ -346,10 +350,10 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 
 // sameDefinition reports whether an existing task matches a proposed
 // definition exactly (title, outcome, constraints, acceptance, checks,
-// cohort, parent, and prerequisite set).
+// parent, and prerequisite set).
 func (a *applier) sameDefinition(existing sqlite.Record, spec task.Spec, requires []task.ID) (bool, error) {
 	t := existing.Task
-	if t.Archived() || t.Kind != spec.Kind || t.Description != spec.Description || t.Outcome != spec.Outcome || t.Cohort != spec.Cohort || t.ParentID != spec.ParentID || t.Size != spec.Size {
+	if t.Archived() || t.Kind != spec.Kind || t.Description != spec.Description || t.Outcome != spec.Outcome || t.ParentID != spec.ParentID || t.Size != spec.Size {
 		return false, nil
 	}
 	if err := a.tx.LoadAcceptance(&t); err != nil {
@@ -517,7 +521,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
+	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
 		return fault.New(fault.CodeConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
@@ -534,42 +538,6 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	changed := false
-	// A submission waiting for its cohort peers pins the contract it will
-	// be judged under. Changing it needs an explicit withdrawal: the
-	// submission is marked withdrawn (no failure counted) and the member
-	// must resubmit under the new contract.
-	if s := rec.Submission; s != nil && (contract || edges) {
-		switch s.RunStatus() {
-		case sqlite.RunRunning:
-			// A single task's running final run re-checks the contract in
-			// its intent transaction and fails closed (planner authority
-			// is still required above). A cohort job judges several
-			// members at once, so a member's contract is pinned outright
-			// while the job runs.
-			if s.Run != nil && s.Run.Mode == verification.ModeCohort {
-				return fault.New(fault.CodeConflict, "%s is being verified by a cohort job; its contract is pinned until the job ends", t.ID)
-			}
-		case sqlite.RunPending:
-			if !c.WithdrawSubmission {
-				return fault.New(fault.CodeConflict, "%s has a submission awaiting its cohort peers; its contract is pinned. To change it, withdraw the submission explicitly (planner authority: --withdraw-submission without the task token); the member will have to resubmit", t.ID)
-			}
-			if s.Run != nil {
-				if err := a.tx.FinishRun(s.Run.ID, sqlite.RunFailed, "withdrawn by the planner: the contract changed before cohort verification", a.now); err != nil {
-					return err
-				}
-			} else {
-				runID, err := a.tx.InsertRun(sqlite.NewRun{TaskID: t.ID, AttemptID: s.AttemptID, SubmissionID: s.ID, Mode: verification.ModeComplete, Status: sqlite.RunFailed, Revision: s.Revision, Policy: effectivePolicy(t, a.proj), Environment: environmentFingerprint(), Summary: "withdrawn by the planner: the contract changed before cohort verification"}, a.now)
-				if err != nil {
-					return err
-				}
-				_ = runID
-			}
-			if err := a.tx.SetLastError(t.ID, 0, "submission withdrawn by the planner; resubmit under the new contract", a.now); err != nil {
-				return err
-			}
-			changed = true
-		}
-	}
 	if edges {
 		if err := a.integrating(rec.Task.ID); err != nil {
 			return err
@@ -590,9 +558,6 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			t.Acceptance = append(t.Acceptance, task.AcceptanceCriterion{Description: s})
 		}
 		changed = true
-	}
-	if c.Cohort != nil {
-		t.Cohort, changed = *c.Cohort, true
 	}
 	if c.Pins.Set {
 		t.Pins, changed = c.Pins.Value, true
@@ -650,7 +615,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	if contract {
-		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Cohort: t.Cohort, Pins: t.Pins, Size: t.Size}
+		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Pins: t.Pins, Size: t.Size}
 		if err := spec.Validate(); err != nil {
 			return err
 		}
@@ -663,7 +628,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		if cid := verification.Collides(spec.Verification.TaskChecks, a.proj.Regression); cid != "" {
 			return fault.New(fault.CodeInvalidInput, "task check id %q collides with a project regression check", cid)
 		}
-		t.Description, t.Outcome, t.Constraints, t.Acceptance, t.Cohort = spec.Description, spec.Outcome, spec.Constraints, spec.Acceptance, spec.Cohort
+		t.Description, t.Outcome, t.Constraints, t.Acceptance = spec.Description, spec.Outcome, spec.Constraints, spec.Acceptance
 		if err := a.tx.UpdateTaskContract(t, a.now); err != nil {
 			return err
 		}

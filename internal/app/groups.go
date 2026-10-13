@@ -188,7 +188,7 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 			return gv, nil
 		}
 	}
-	if next, _, err := cohortBackoff(tx, proj.ID, groupJobName(rec.Task.ID)); err != nil {
+	if next, _, err := jobBackoff(tx, proj.ID, groupJobName(rec.Task.ID)); err != nil {
 		return gv, err
 	} else if next.After(now) {
 		gv.NextRetry = &next
@@ -198,17 +198,42 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 
 // groupJob is one claimed group verification.
 type groupJob struct {
-	id    int64
-	owner execution.Token
-	proj  project.Project
-	rec   sqlite.Record
-	runID int64
-	head  string
+	id           int64
+	owner        execution.Token
+	proj         project.Project
+	rec          sqlite.Record
+	runID        int64
+	head         string
+	requirements []workspace.Requirement
 }
 
-// RunPendingGroups finds groups whose checks may run and runs them, one
-// durable job each. Claim(wait) calls it beside RunPendingCohorts;
-// `atask verify groups` calls it on demand.
+// groupRequirements lists the completed revision of every executable task
+// beneath a group, at any depth: what the group's proofs are judged on.
+func groupRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, error) {
+	children, err := tx.Children(id)
+	if err != nil {
+		return nil, err
+	}
+	var out []workspace.Requirement
+	for _, c := range children {
+		switch {
+		case c.Task.Archived():
+		case c.Task.Kind == task.KindGroup:
+			nested, err := groupRequirements(tx, c.Task.ID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, nested...)
+		case c.CompletedRevision != "":
+			out = append(out, workspace.Requirement{Task: string(c.Task.ID), Revision: c.CompletedRevision})
+		}
+	}
+	return out, nil
+}
+
+// RunPendingGroups finds groups whose proofs may run and runs them, one
+// durable job each. Claim(wait) calls it so any worker with capacity
+// verifies a ready group.
 func (e *Engine) RunPendingGroups(ctx context.Context, pid project.ID, only task.ID) (bool, error) {
 	if err := e.reconcile(ctx); err != nil {
 		return false, err
@@ -220,7 +245,7 @@ func (e *Engine) RunPendingGroups(ctx context.Context, pid project.ID, only task
 			return ran, err
 		}
 		ran = true
-		if err := e.executeGroupJob(ctx, job); err != nil && fault.IsInternal(err) {
+		if _, err := e.executeGroupJob(ctx, job); err != nil && fault.IsInternal(err) {
 			return ran, err
 		}
 		e.notify()
@@ -228,6 +253,68 @@ func (e *Engine) RunPendingGroups(ctx context.Context, pid project.ID, only task
 			return ran, nil
 		}
 	}
+}
+
+// VerifyGroup verifies one group now: its proofs run on the merge of every
+// child's completed revision and, when they pass, the group completes. It
+// fails with NOT_READY until every child is complete, and with
+// BASE_CONFLICT when the children's revisions cannot be merged.
+func (e *Engine) VerifyGroup(ctx context.Context, pid project.ID, ref string) (VerifyResult, error) {
+	v, err := e.Show(ctx, pid, ref, false)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if v.Kind != task.KindGroup {
+		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s is not a group; tasks complete with `verify complete` in their claim", ref)
+	}
+	if v.CompletedAt != nil {
+		return VerifyResult{TaskID: v.ID, Mode: verification.ModeGroup, Passed: true, Completed: true, Status: task.StatusComplete, Message: "group already complete"}, nil
+	}
+	if err := e.reconcile(ctx); err != nil {
+		return VerifyResult{}, err
+	}
+	if err := e.requireGroupReady(ctx, pid, v.ID); err != nil {
+		return VerifyResult{}, err
+	}
+	job, ok, err := e.claimGroupJob(ctx, pid, v.ID)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if !ok {
+		return VerifyResult{}, fault.New(fault.CodeConflict, "%s: another verifier is running this group; wait for its result", v.ID)
+	}
+	res, err := e.executeGroupJob(ctx, job)
+	e.notify()
+	writeRunResult(res, err)
+	return res, err
+}
+
+// requireGroupReady fails with NOT_READY, saying how many children are
+// still open, unless every child of the group is complete.
+func (e *Engine) requireGroupReady(ctx context.Context, pid project.ID, id task.ID) error {
+	now := e.now()
+	return e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		proj, err := tx.GetProject(pid)
+		if err != nil {
+			return err
+		}
+		rec, err := tx.GetRecord(id)
+		if err != nil {
+			return err
+		}
+		if !verification.HasRequired(rec.Task.Verification.TaskChecks) {
+			return fault.New(fault.CodeInvalidInput, "%s has no required proof to verify (add one with --proof)", id)
+		}
+		ready, err := e.groupReady(tx, rec, proj, now)
+		if err != nil || ready {
+			return err
+		}
+		prog, err := e.groupProgress(tx, id, proj, now)
+		if err != nil {
+			return err
+		}
+		return fault.New(fault.CodeNotReady, "%s is not ready: %d of %d children are complete; a group verifies only after every child completes", id, prog.Complete, prog.Total)
+	})
 }
 
 func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID) (groupJob, bool, error) {
@@ -276,10 +363,14 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			if last != nil && last.Status == sqlite.RunFailed && last.Revision == head.rev && last.PolicyDigest == r.Task.Verification.Digest() && only == "" {
 				continue
 			}
-			if next, _, err := cohortBackoff(tx, pid, name); err != nil {
+			if next, _, err := jobBackoff(tx, pid, name); err != nil {
 				return err
 			} else if next.After(now) && only == "" {
 				continue
+			}
+			requirements, err := groupRequirements(tx, r.Task.ID)
+			if err != nil {
+				return err
 			}
 			jobID, err := tx.InsertJob(pid, name, nil, owner.Digest(), now.Add(execution.DefaultLease), now)
 			if err != nil {
@@ -290,7 +381,7 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			if err != nil {
 				return err
 			}
-			job = groupJob{id: jobID, owner: owner, proj: proj, rec: r, runID: runID, head: head.rev}
+			job = groupJob{id: jobID, owner: owner, proj: proj, rec: r, runID: runID, head: head.rev, requirements: requirements}
 			found = true
 			return nil
 		}
@@ -299,12 +390,14 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 	return job, found, err
 }
 
-// executeGroupJob runs the group's checks on a snapshot of the target
-// head under the group's size budget and records the outcome: passed
-// completes the group; failed records the evidence for the planner;
-// an environment error backs off like a cohort job.
-func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) error {
-	checkCtx, stop := e.jobHeartbeat(ctx, cohortJob{id: job.id, owner: job.owner, proj: job.proj, cohort: groupJobName(job.rec.Task.ID)})
+// executeGroupJob runs the group's proof and regression on the merge of
+// every child's completed revision, built in a scratch worktree (no
+// integration branch exists), under the group's size budget. Passed
+// completes the group; failed records the evidence for the planner; an
+// environment error backs off before the next attempt.
+func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResult, error) {
+	res := VerifyResult{TaskID: job.rec.Task.ID, Mode: verification.ModeGroup, RunID: job.runID, Revision: job.head, LogDir: e.runLogDir(job.proj.ID, job.runID)}
+	checkCtx, stop := e.jobHeartbeat(ctx, jobLease{id: job.id, owner: job.owner})
 	defer stop()
 	fence := func(tx *sqlite.Tx) error {
 		j, err := tx.GetJob(job.id)
@@ -332,42 +425,55 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) error {
 			} else if err := tx.SetLastError(job.rec.Task.ID, 0, summary, now); err != nil {
 				return err
 			}
-			return tx.FinishJob(job.id, job.owner.Digest(), jobStatus, job.head, summary, now)
+			return tx.FinishJob(job.id, job.owner.Digest(), jobStatus, res.Revision, summary, now)
 		})
 	}
-	mgr := e.manager(job.proj)
-	dir, cleanup, err := mgr.Snapshot(ctx, job.head)
-	if err != nil {
-		_ = finish(sqlite.RunError, "error", "cannot snapshot "+job.proj.TargetBranch+": "+fault.MessageOf(err), false)
-		return err
+	fail := func(code fault.Code, summary string) (VerifyResult, error) {
+		res.Summary, res.Status = summary, e.statusOf(ctx, job.rec.Task.ID)
+		return res, &fault.Error{Code: code, Message: fmt.Sprintf("group %s: %s", job.rec.Task.ID, summary), Details: res}
 	}
-	defer cleanup()
+	mgr := e.manager(job.proj)
+	base, err := mgr.Base(ctx, job.proj.TargetBranch, job.requirements)
+	if err != nil {
+		summary := "cannot merge the children's completed revisions: " + fault.MessageOf(err)
+		status, jobStatus := sqlite.RunError, "error"
+		if fault.CodeOf(err) == fault.CodeBaseConflict {
+			status, jobStatus = sqlite.RunFailed, "failed"
+		}
+		_ = finish(status, jobStatus, summary, false)
+		return fail(fault.CodeOf(err), summary)
+	}
+	res.Revision = base
 	size := job.rec.Task.Size
 	if size == "" {
 		size = task.SizeLarge
 	}
-	policy := verification.Policy{TaskChecks: job.rec.Task.Verification.TaskChecks}
-	opts := runOpts{budget: job.proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s budget of the group", size), target: job.proj.TargetBranch, logDir: e.runLogDir(job.proj.ID, job.runID)}
-	evidence, err := e.runChecks(checkCtx, dir, policy, job.runID, job.head, fence, opts)
+	t := job.rec.Task
+	t.Size = size
+	policy := effectivePolicy(t, job.proj)
+	evidence, err := e.runSuites(checkCtx, mgr, base, policy, job.runID, fence, t, job.proj, "")
+	res.Evidence = evidence
 	if err != nil {
 		_ = finish(sqlite.RunError, "error", "group verification interrupted: "+fault.MessageOf(err), false)
-		return err
+		return res, err
 	}
 	v := verification.Judge(policy, evidence)
 	switch {
 	case v.Passed:
 		if err := finish(sqlite.RunPassed, "passed", v.Summary, true); err != nil {
-			return err
+			return res, err
 		}
-		return nil
+		res.Passed, res.Completed, res.Status = true, true, task.StatusComplete
+		res.Summary, res.Message = v.Summary, "group complete: its proofs passed on the merge of every child's completed revision"
+		return res, nil
 	case len(v.TimedOut) > 0:
-		summary := fmt.Sprintf("%s; group check(s) %s exceeded the %s budget (%s): the epic's verification is built too slow; narrow it or set a larger --size on the group", v.Summary, strings.Join(v.TimedOut, ", "), size, job.proj.Budgets.ForSize(size))
+		summary := fmt.Sprintf("%s; group check(s) %s exceeded the %s budget (%s): the group's verification is built too slow; narrow it or set a larger --size on the group", v.Summary, strings.Join(v.TimedOut, ", "), size, job.proj.Budgets.ForSize(size))
 		_ = finish(sqlite.RunFailed, "failed", summary, false)
-		return fault.New(fault.CodeCheckFailed, "group %s: %s", job.rec.Task.ID, summary)
+		return fail(fault.CodeCheckFailed, summary)
 	default:
-		summary := v.Summary + "; the epic's checks failed on " + short(job.head) + ": add follow-up member tasks (they reopen the group) or fix the checks"
+		summary := v.Summary + "; the group's proofs failed on the merge of its children (" + short(base) + "): add follow-up child tasks (they reopen the group) or fix the proofs"
 		_ = finish(sqlite.RunFailed, "failed", summary, false)
-		return fault.New(fault.CodeCheckFailed, "group %s: %s", job.rec.Task.ID, summary)
+		return fail(fault.CodeCheckFailed, summary)
 	}
 }
 
@@ -388,5 +494,3 @@ func reopenAncestors(tx *sqlite.Tx, parent task.ID, now time.Time) error {
 	}
 	return nil
 }
-
-var _ = workspace.ErrTargetMoved

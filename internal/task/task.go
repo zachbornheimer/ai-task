@@ -117,9 +117,6 @@ type Spec struct {
 	// Size declares how long the task's checks may take: small (the
 	// default), medium or large; the project's budgets give the seconds.
 	Size string
-	// Cohort names a coupled-verification cohort: members implement
-	// independently and are judged together on one assembled candidate.
-	Cohort string
 }
 
 // Sizes name how long a task's checks may take; the project's budgets
@@ -144,7 +141,6 @@ type Task struct {
 	Verification  verification.Policy   `json:"verification"`
 	Pins          []string              `json:"pins,omitempty"`
 	Size          string                `json:"size"`
-	Cohort        string                `json:"cohort,omitempty"`
 	ContractRev   int                   `json:"contract_rev"`
 	ArchivedAt    *time.Time            `json:"archived_at,omitempty"`
 	ArchiveReason string                `json:"archive_reason,omitempty"`
@@ -249,14 +245,7 @@ func (s *Spec) Validate() error {
 		accepted = append(accepted, a)
 	}
 	s.Acceptance = accepted
-	s.Cohort = strings.TrimSpace(s.Cohort)
-	if err := ValidateKey(s.Cohort); err != nil {
-		return fault.New(fault.CodeInvalidInput, "invalid cohort name %q", s.Cohort)
-	}
 	if s.Kind == KindGroup {
-		if s.Cohort != "" {
-			return fault.New(fault.CodeInvalidInput, "a group cannot have a cohort; cohorts couple tasks")
-		}
 		if len(s.Pins) > 0 {
 			return fault.New(fault.CodeInvalidInput, "a group cannot pin files; pins belong to the tasks that work")
 		}

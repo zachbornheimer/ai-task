@@ -105,7 +105,7 @@ func TestListGolden(t *testing.T) {
 	startedButBlocked.Started = true
 	mixed := app.PlanSnapshot{Tasks: []app.TaskView{
 		tv("at-v01", "Verifying now", task.StatusVerifying),
-		tv("at-w01", "Waiting for cohort", task.StatusAwaitingVerification),
+		tv("at-w01", "Waiting for verification", task.StatusAwaitingVerification),
 		tv("at-x01", "Failed last time", task.StatusVerificationFailed),
 		tv("at-y01", "Done", task.StatusComplete),
 		startedButBlocked,

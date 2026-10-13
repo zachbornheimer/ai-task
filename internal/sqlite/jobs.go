@@ -10,18 +10,18 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
-// JobMember is one cohort member's submission in a verification job.
+// JobMember is one member task of a verification job.
 type JobMember struct {
 	TaskID       task.ID `json:"task_id"`
 	SubmissionID int64   `json:"submission_id"`
 	Revision     string  `json:"revision"`
 }
 
-// Job is a durable cohort verification job.
+// Job is a durable, leased verification job (the group verifier's).
 type Job struct {
 	ID             int64
 	ProjectID      project.ID
-	Cohort         string
+	Name           string // the job's stable name (stored in the legacy cohort column)
 	Status         string // running | passed | failed | error (environment) | interrupted (verifier died)
 	Members        []JobMember
 	OwnerDigest    string
@@ -33,13 +33,13 @@ type Job struct {
 }
 
 // InsertJob records a running job owned by the caller.
-func (t *Tx) InsertJob(pid project.ID, cohort string, members []JobMember, ownerDigest string, lease time.Time, now time.Time) (int64, error) {
+func (t *Tx) InsertJob(pid project.ID, name string, members []JobMember, ownerDigest string, lease time.Time, now time.Time) (int64, error) {
 	body, err := json.Marshal(members)
 	if err != nil {
 		return 0, wrapInternal(err, "encode members")
 	}
 	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_jobs (project_id, cohort, status, members_json, owner_digest, lease_expires_at, created_at) VALUES (?, ?, 'running', ?, ?, ?, ?)`,
-		pid, cohort, string(body), ownerDigest, ms(lease), ms(now))
+		pid, name, string(body), ownerDigest, ms(lease), ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "insert job")
 	}
@@ -47,9 +47,9 @@ func (t *Tx) InsertJob(pid project.ID, cohort string, members []JobMember, owner
 	return id, nil
 }
 
-// RunningJob returns the live job for a cohort, if any.
-func (t *Tx) RunningJob(pid project.ID, cohort string, now time.Time) (*Job, error) {
-	row := t.tx.QueryRowContext(t.ctx, jobSelect+` WHERE project_id = ? AND cohort = ? AND status = 'running' AND lease_expires_at > ? ORDER BY id DESC LIMIT 1`, pid, cohort, ms(now))
+// RunningJob returns the live job with this name, if any.
+func (t *Tx) RunningJob(pid project.ID, name string, now time.Time) (*Job, error) {
+	row := t.tx.QueryRowContext(t.ctx, jobSelect+` WHERE project_id = ? AND cohort = ? AND status = 'running' AND lease_expires_at > ? ORDER BY id DESC LIMIT 1`, pid, name, ms(now))
 	j, err := scanJob(row)
 	if isNoRows(err) {
 		return nil, nil
@@ -67,7 +67,7 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	var members string
 	var lease, created int64
 	var finished sql.NullInt64
-	if err := sc.Scan(&j.ID, &j.ProjectID, &j.Cohort, &j.Status, &members, &j.OwnerDigest, &lease, &j.Candidate, &created, &finished, &j.Summary); err != nil {
+	if err := sc.Scan(&j.ID, &j.ProjectID, &j.Name, &j.Status, &members, &j.OwnerDigest, &lease, &j.Candidate, &created, &finished, &j.Summary); err != nil {
 		return j, err
 	}
 	if err := json.Unmarshal([]byte(members), &j.Members); err != nil {
@@ -111,11 +111,11 @@ func (t *Tx) FinishJob(id int64, ownerDigest, status, candidate, summary string,
 	return nil
 }
 
-// RecentJobs lists a cohort's newest jobs, newest first.
-func (t *Tx) RecentJobs(pid project.ID, cohort string, limit int) ([]Job, error) {
-	rows, err := t.tx.QueryContext(t.ctx, jobSelect+` WHERE project_id = ? AND cohort = ? ORDER BY id DESC LIMIT ?`, pid, cohort, limit)
+// RecentJobs lists the newest jobs with this name, newest first.
+func (t *Tx) RecentJobs(pid project.ID, name string, limit int) ([]Job, error) {
+	rows, err := t.tx.QueryContext(t.ctx, jobSelect+` WHERE project_id = ? AND cohort = ? ORDER BY id DESC LIMIT ?`, pid, name, limit)
 	if err != nil {
-		return nil, wrapInternal(err, "list cohort jobs")
+		return nil, wrapInternal(err, "list jobs")
 	}
 	defer rows.Close()
 	var out []Job

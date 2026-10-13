@@ -33,7 +33,7 @@ stdout (an envelope in JSON mode) and exits `0`.
 | `CONFLICT`             | the request clashes with current state: stale `--expect-rev`, edit to a completed or claimed contract, illegal archive, key reused with a different definition, task already claimed (live lease) or complete, `verify complete` still running for this attempt |
 | `INVALID_SESSION`      | the token is unknown, expired, superseded, or finished: stop editing and `atask claim <task>` again |
 | `NOT_READY`            | not possible right now: prerequisites incomplete, task awaiting verification or integration, nothing claimable (non-waiting claim, cooldown), uncommitted changes or missing worktree, a cancelled call, a failed doctor check, or an I/O failure; the message says which |
-| `BASE_CONFLICT`        | the target branch moved or the work does not merge onto it (`details.conflicts` lists the files; merge the target into the task branch, commit, verify again) |
+| `BASE_CONFLICT`        | the target branch moved or the work does not merge onto it, including a group whose children' revisions conflict (`details.conflicts` lists the files; merge the target into the task branch, commit, verify again) |
 | `CHECK_FAILED`         | checks ran and a required one did not pass or ran out of its budget; `details` is the result with evidence. A failed check counts against the attempt once; a timeout (`timed_out` evidence) never does, since the verification is built too slow for the size or the code hangs |
 | `IDEMPOTENCY_CONFLICT` | the idempotency key was already used for a different change set |
 | `DONE`                 | every executable task is complete (waiting claim) |
@@ -42,13 +42,13 @@ stdout (an envelope in JSON mode) and exits `0`.
 ## Planning (planner authority)
 ````
 
-atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
+atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]*
 [--outcome ..] [--constraint ..]*[--accept ..]* --proof "PRESET: SUBJECT" --regression "PRESET: SUBJECT"
-(groups: [--check "[id:] cmd"]*[--optional-check ..]*)
+(groups: --proof and --regression, same as tasks)
 [--on-complete "PRESET: SUBJECT"]*[--on-complete-detach "PRESET: SUBJECT"]*
 [--pin PATH]*[--claim]
 [--expect-rev N] [--idempotency-key K]
-atask update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
+atask update REF [--title ..] [--outcome ..] [--parent REF|""]
 [--requires REF]* [--remove-requires REF]*[--set-requires REF]*
 [--accept ..]*[--constraint ..]* [--proof ..] [--regression ..] [--on-complete ..]*[--on-complete-detach ..]* [--pin PATH|""]*
 [--archive --reason ..] [--reset-attempts] [--expect-rev N]
@@ -60,7 +60,7 @@ nothing is not a revision. `atask add -f plan.yaml` (or `.json`, or `-` for
 stdin) and `atask add --plan '…'` apply a whole plan in one revision: one
 item, a list, or `{tasks: [...]}`, each item with the field names `atask
 show` prints (`kind` task|group, `key`, `title`, `outcome`, `parent`,
-`cohort`, `constraints`, `acceptance`, `requires`, `blocks`, `checks`,
+`constraints`, `acceptance`, `requires`, `blocks`, `checks`,
 `optional_checks`; a check is `"[id:] cmd args"` or `{id, command (string
 or argv), dir, timeout_ms, required}`). A bad item rejects the whole
 file. `--claim` on a single-task add claims it at once and prints the
@@ -128,24 +128,24 @@ stale `--expect-rev`), a different request under the same key is
   (`CHECK_FAILED`, counted as the attempt's failure, before any
   check runs), so an agent cannot pass by weakening the checks. Pins are
   part of the contract (`pins` in `atask show` and in the context); `update
-  --pin ""` clears them. Cohort members are not pinned yet.
+  --pin ""` clears them. 
 - `B --requires A` means B cannot be claimed until A is complete. Hard
   edges form a DAG; cycles, self-edges, and cross-project edges are
   rejected and nothing is written.
 - Groups (`--group`, `--parent`) are organizational: membership never
   implies an edge, groups cannot be claimed, and group progress is derived.
-  A group may carry its own checks (`--group --check ...`, `--size`, large
-  by default): an epic whose checks run once, on the target branch, in a
-  durable leased job once every executable member is complete and every
-  sub-epic verified. Whichever worker is waiting in `atask claim --wait`
-  runs it, or `atask verify groups [REF]` runs it on demand. The group is
-  complete (●) only when its checks passed; `status` counts a waiting
-  epic as active (`pending_epics`) and a failed one as a stall with the
-  reason, and nothing is charged to any member. Adding or moving a
-  member into a verified group, or changing its checks, reopens it. A
-  timeout is the epic's construction problem, reported on the group.
-- `--cohort C` marks coupled verification: members implement independently
-  and are judged together on one assembled candidate. It is not a blocker.
+  A group may carry its own proofs (`--group --proof ... --regression ...`,
+  `--size`, large by default). They run on the merge of every child's
+  completed revision, built in a scratch worktree: no integration branch
+  exists. `atask verify complete GROUP` runs them, or a worker waiting in
+  `atask claim --wait` does. Before every child is complete it fails with
+  `NOT_READY`; children whose revisions cannot be merged fail it with
+  `BASE_CONFLICT`, naming the files. The group is complete (●) only after
+  its proofs pass, and `status` counts a waiting group as active
+  (`pending_epics`) and a failed one as a stall with the reason; nothing
+  is charged to any child. Adding or moving a child into a completed
+  group, or changing its proofs, reopens it. A timeout is the group's
+  construction problem, reported on the group.
 - `--blocks C` on a completed task is rejected.
 - Completed tasks cannot be edited or archived. Planner authority is the absence of a
   claimed task's own session token: an `update` that changes its proofs,
@@ -197,7 +197,7 @@ preparation (the repair path after fixing the worktree); `atask update <ref>
 `INVALID_INPUT` while the project has no regression checks: work
 that can never complete is never handed out. `--wait` blocks until work is
 claimable, `DONE`, `STALLED`, or interrupted; while waiting the process
-runs any pending cohort verification job it finds.
+verifies any ready group it finds.
 
 The claim result carries the task view, the token (the only place it is
 ever printed), `attempt`, `lease_until`, `workspace` and `branch`,
@@ -315,25 +315,6 @@ never complete, release, or integrate. `verify complete`:
    revision, regression policy and the run's evidence, then records
    completion and ends the claim.
 
-For a cohort member, step 2 records the submission and ends the claim;
-when every peer has submitted, a verifier job assembles one candidate,
-runs every member's task checks and the regression suite on it, promotes,
-and completes all members atomically. The consumed token is not a cohort
-credential, but `verify complete` with it again is an idempotent
-acknowledgement: the stored submission and the member's current status,
-no new run, no new authority. A submission waiting for its peers pins the
-member's contract: changing it needs `atask update <ref>
---withdraw-submission` (without the task token) (the member becomes claimable, nothing is counted,
-and it must resubmit under the new contract); while a cohort job runs,
-members' contracts are pinned outright. Blame is precise: a
-member whose own checks fail goes back alone; a late conflict on one
-member (new prerequisite, archive) sends only that member back while its
-peers keep their submissions; a shared regression failure sends every
-member back with the evidence but charges nobody; a promotion that cannot
-land (environment) keeps every submission, records the cause as
-`last_error`, and retries with a growing backoff (30s doubling to 30m)
-that `status` reports as cooling, never as a stall.
-
 A failed `verify complete` returns `CHECK_FAILED` with the evidence
 in `error.details`; the claim stays live for repair and the task's failure
 count and cooldown are recorded. Evidence keeps each stream's head and
@@ -349,7 +330,7 @@ atask show REF [--full] glyph line, [STATE], DESCRIPTION, OUTCOME, ACCEPTANCE, R
 TASK CHECKS, VERIFICATION, ATTEMPT, SUBMISSION, HANDOFF, HISTORY
 atask [--project NAME] list hierarchy of open work (groups indented; blocked tasks show requires:)
 atask list ready | blocked | all | archived
-atask status counts, claimable, active, cooling, pending cohorts, done, stalled with reasons
+atask status counts, claimable, active, cooling, done, stalled with reasons
 atask prune remove worktrees of complete/archived tasks and quarantined directories of idle tasks
 
 ```text
@@ -358,7 +339,7 @@ atask prune remove worktrees of complete/archived tasks and quarantined director
 
 Glyphs are progress, not liveness: `○` never started (ready or blocked
 work with no attempt yet), `◐` started but not complete (claimed,
-verifying, awaiting cohort verification or integration, interrupted,
+verifying, awaiting integration, interrupted,
 failed, cooling, or any task that once had an attempt), `●` complete.
 The bracketed annotation (`[blocked]`, `[failed]`, `[awaiting
 verification]`, …) says why a task is not complete. A group shows

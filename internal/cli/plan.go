@@ -315,6 +315,9 @@ func refs(raw stringList) []plan.Ref {
 	return out
 }
 
+// removedCohortMessage answers the retired --cohort flag.
+const removedCohortMessage = "cohorts were removed; use a group"
+
 func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	var pf planFlags
 	c.bindPlanFlags(&pf)
@@ -322,7 +325,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	group := c.fs.Bool("group", false, "create an organizational group instead of a task")
 	parent := c.fs.String("parent", "", "enclosing group (id or key)")
 	outcome := c.fs.String("outcome", "", "the single intended outcome (default: the title)")
-	cohort := c.fs.String("cohort", "", "coupled-verification cohort name")
+	cohort := c.fs.String("cohort", "", "removed: cohorts were replaced by groups")
 	var constraints, accept, checks, optionalChecks, requires, blocks, pins stringList
 	c.fs.Var(&constraints, "constraint", "constraint (repeatable)")
 	c.fs.Var(&pins, "pin", "path (file, or directory prefix) this task may not change; verify complete refuses if it did (repeatable)")
@@ -340,6 +343,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	if err := c.parse(args); err != nil {
 		return err
 	}
+	if *cohort != "" {
+		return usage(removedCohortMessage)
+	}
 	if *file != "" || *inline != "" {
 		if len(c.args) != 0 || *key != "" || *group || *outcome != "" || pfl.proof != "" || pfl.regression != "" || len(checks)+len(optionalChecks)+len(requires)+len(blocks) > 0 {
 			return usage("-f/--plan take the whole plan; no title or task flags alongside")
@@ -355,10 +361,18 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
-		if len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *policyJSON != "" {
-			return usage("--group takes --key, --parent, --check (the epic's own checks, run on the target once every member is complete) and --size; prerequisites, blockers, cohort, outcome, acceptance and pins belong to tasks")
+		if len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *outcome != "" || *policyJSON != "" {
+			return usage("--group takes --key, --parent, --proof and --regression (run on the merge of every child's completed revision once every child is complete) and --size; prerequisites, blockers, outcome, acceptance and pins belong to tasks")
 		}
 		g := plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent), Size: *size}
+		if pfl.proof != "" || pfl.regression != "" {
+			if err := pfl.requireBoth(); err != nil {
+				return err
+			}
+			if g.Proof, g.Regression, err = pfl.parse(*size); err != nil {
+				return err
+			}
+		}
 		for i, raw := range checks {
 			cs, err := parseCheck(raw, i+1, true)
 			if err != nil {
@@ -375,7 +389,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		}
 		op = g
 	} else {
-		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Cohort: *cohort, Pins: pins, Size: *size}
+		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Pins: pins, Size: *size}
 		if len(checks)+len(optionalChecks) > 0 {
 			return usage("--check is gone for tasks: use --proof \"PRESET: SUBJECT\" (proves the task, 30s) and --regression \"PRESET: SUBJECT\" (proves nothing else broke); \"run: COMMAND\" runs a raw command")
 		}
@@ -537,7 +551,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	title := c.fs.String("title", "", "new title")
 	outcome := c.fs.String("outcome", "", "new outcome")
 	parent := c.fs.String("parent", "\x00", "move into a group (id or key); empty string clears")
-	cohort := c.fs.String("cohort", "\x00", "set cohort; empty string clears")
+	cohort := c.fs.String("cohort", "\x00", "removed: cohorts were replaced by groups")
 	var constraints, accept, checks, optionalChecks, requires, remove, setRequires, pins stringList
 	c.fs.Var(&constraints, "constraint", "replace constraints (repeatable)")
 	c.fs.Var(&pins, "pin", "replace pinned paths (repeatable; use once with empty value to clear)")
@@ -552,9 +566,11 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	archive := c.fs.Bool("archive", false, "archive (soft-delete) the task or group; needs --reason")
 	reason := c.fs.String("reason", "", "why the item is archived (recorded; required with --archive)")
 	reset := c.fs.Bool("reset-attempts", false, "clear failure bookkeeping so the task can be claimed again")
-	withdraw := c.fs.Bool("withdraw-submission", false, "withdraw a cohort member's submission that awaits its peers so its contract can change")
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if *cohort != "\x00" {
+		return usage(removedCohortMessage)
 	}
 	if len(c.args) != 1 {
 		return usage("update needs exactly one task reference")
@@ -569,12 +585,12 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
 		}
-		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *size != "" || *reset || *withdraw || pfl.proof != "" || pfl.regression != "" {
+		if *title != "" || *outcome != "" || *parent != "\x00" || *cohort != "\x00" || len(constraints)+len(accept)+len(checks)+len(optionalChecks)+len(requires)+len(remove)+len(setRequires)+len(pins) > 0 || *size != "" || *reset || pfl.proof != "" || pfl.regression != "" {
 			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
 	} else {
-		u := plan.UpdateTask{Target: target, ResetAttempts: *reset, WithdrawSubmission: *withdraw}
+		u := plan.UpdateTask{Target: target, ResetAttempts: *reset}
 		if *title != "" {
 			u.Title = title
 		}
@@ -584,9 +600,6 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if *parent != "\x00" {
 			p := plan.Ref(*parent)
 			u.Parent = &p
-		}
-		if *cohort != "\x00" {
-			u.Cohort = cohort
 		}
 		if len(constraints) > 0 {
 			u.Constraints = plan.Replace([]string(constraints))

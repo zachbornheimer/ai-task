@@ -57,7 +57,6 @@ func TestSpecValidate(t *testing.T) {
 		{ProjectID: pid, Kind: "epic", Description: "x"},
 		{ProjectID: pid, Key: "bad key", Description: "x"},
 		{ProjectID: pid, Kind: KindGroup, Description: "g", Pins: []string{"x"}},
-		{ProjectID: pid, Kind: KindGroup, Description: "g", Cohort: "c"},
 		{ProjectID: pid, Description: "x", Verification: verification.Policy{Regression: []verification.CheckSpec{{ID: "a", Command: []string{"true"}}}}},
 	}
 	for i, b := range bad {

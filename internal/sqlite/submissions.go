@@ -11,9 +11,9 @@ import (
 // InsertSubmission records an immutable submission for an attempt and
 // points the task at it. The newest submission is the one that must be
 // judged, so any completion fact for an older submission is withdrawn.
-func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision, cohort string, now time.Time) (int64, error) {
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO submissions (task_id, attempt_id, revision, cohort, submitted_at) VALUES (?, ?, ?, ?, ?)`,
-		id, attemptID, revision, cohort, ms(now))
+func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision string, now time.Time) (int64, error) {
+	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO submissions (task_id, attempt_id, revision, submitted_at) VALUES (?, ?, ?, ?)`,
+		id, attemptID, revision, ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "insert submission")
 	}
@@ -124,7 +124,7 @@ func (t *Tx) LatestRunID(submissionID int64) (int64, error) {
 // newest run.
 func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 	rows, err := t.tx.QueryContext(t.ctx, `
-		SELECT s.id, s.attempt_id, a.seq, s.revision, s.cohort, s.submitted_at,
+		SELECT s.id, s.attempt_id, a.seq, s.revision, s.submitted_at,
 		       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary
 		FROM submissions s JOIN execution_attempts a ON a.id = s.attempt_id
 		LEFT JOIN verification_runs vr ON vr.id = (SELECT id FROM verification_runs WHERE submission_id = s.id ORDER BY id DESC LIMIT 1)
@@ -138,7 +138,7 @@ func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 		var s Submission
 		var at int64
 		var rs runScan
-		if err := rows.Scan(&s.ID, &s.AttemptID, &s.AttemptSeq, &s.Revision, &s.Cohort, &at, &rs.id, &rs.attempt, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.integrated, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary); err != nil {
+		if err := rows.Scan(&s.ID, &s.AttemptID, &s.AttemptSeq, &s.Revision, &at, &rs.id, &rs.attempt, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.integrated, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary); err != nil {
 			return nil, wrapInternal(err, "scan submission")
 		}
 		s.TaskID = id
@@ -157,24 +157,6 @@ func (t *Tx) RunsForTask(id task.ID) ([]Run, error) {
 	rows, err := t.tx.QueryContext(t.ctx, `SELECT `+runColumns+` FROM verification_runs WHERE task_id = ? ORDER BY id`, id)
 	if err != nil {
 		return nil, wrapInternal(err, "list runs")
-	}
-	defer rows.Close()
-	var out []Run
-	for rows.Next() {
-		r, err := scanRun(rows)
-		if err != nil {
-			return nil, wrapInternal(err, "scan run")
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-// RunsForJob lists the member runs of a cohort job.
-func (t *Tx) RunsForJob(jobID int64) ([]Run, error) {
-	rows, err := t.tx.QueryContext(t.ctx, `SELECT `+runColumns+` FROM verification_runs WHERE job_id = ? ORDER BY id`, jobID)
-	if err != nil {
-		return nil, wrapInternal(err, "list job runs")
 	}
 	defer rows.Close()
 	var out []Run
@@ -248,8 +230,7 @@ func (t *Tx) EvidenceForRun(runID int64) ([]verification.Evidence, error) {
 }
 
 // ReconcileRuns closes final runs whose owning attempt's lease has expired
-// (the verifying process is gone), resets cohort member runs whose job
-// lease expired to pending so the job can be retried, and closes epic runs
+// (the verifying process is gone), and closes group runs
 // whose job lease expired. Returns how many
 // rows changed.
 func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
@@ -268,12 +249,6 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 	}
 	nD, _ := resD.RowsAffected()
 	n += nD
-	res2, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'pending', summary = 'verifier interrupted; waiting for a new verifier'
-		WHERE status = 'running' AND mode = 'cohort' AND job_id IN (SELECT id FROM verification_jobs WHERE status = 'running' AND lease_expires_at <= ?)`, ms(now))
-	if err != nil {
-		return 0, wrapInternal(err, "reconcile cohort runs")
-	}
-	n2, _ := res2.RowsAffected()
 	// An epic (group-mode) run whose verifier died is closed as an error, so
 	// the epic reads as pending again and the next worker reruns it; it
 	// must run before the jobs below are marked interrupted.
@@ -285,12 +260,12 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 	n4, _ := res4.RowsAffected()
 	n += n4
 	// 'interrupted' (not 'error'): a dead verifier is not a failed
-	// promotion, so it does not count toward the cohort's retry backoff.
+	// promotion, so it does not count toward the job's retry backoff.
 	res3, err := t.tx.ExecContext(t.ctx, `UPDATE verification_jobs SET status = 'interrupted', finished_at = ?, summary = 'verifier lease expired; job will be retried'
 		WHERE status = 'running' AND lease_expires_at <= ?`, ms(now), ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "reconcile jobs")
 	}
 	n3, _ := res3.RowsAffected()
-	return n + n2 + n3, nil
+	return n + n3, nil
 }

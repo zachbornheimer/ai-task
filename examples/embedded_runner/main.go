@@ -196,8 +196,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 		}
 	}
 	// Iterate with provisional checks (a failure here is information for
-	// the agent, not an error: cohort members cannot pass their end-to-end
-	// check alone), then establish completion.
+	// the agent, not an error), then establish completion.
 	if diag, err := eng.Verify(ctx, s.Token, at.VerifyProof); err != nil && at.ErrorCode(err) != "CHECK_FAILED" {
 		return err
 	} else if !diag.Passed {
@@ -210,8 +209,6 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	switch {
 	case res.Completed:
 		fmt.Fprintf(out, "worker %d: %s complete\n", n, s.Task.ID)
-	case res.Submitted:
-		fmt.Fprintf(out, "worker %d: %s submitted for cohort verification\n", n, s.Task.ID)
 	}
 	return nil
 }
@@ -247,8 +244,9 @@ func fakePlanner(prompt string) []at.Change {
 		at.AddTask{Key: "store", Title: "Implement PostgreSQL token store", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("store")},
 		at.AddTask{Key: "scopes", Title: "Implement scope enforcement", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("scopes")},
 		at.AddTask{Key: "e2e", Title: "Verify end-to-end OAuth flow", Parent: "identity", Requires: []at.Ref{"store", "scopes"}, TaskChecks: check("e2e")},
-		at.AddTask{Key: "api", Title: "OAuth API side", Cohort: "oauth-flow", TaskChecks: []at.CheckSpec{{ID: "unit-api", Command: []string{"test", "-f", "api.txt"}, Required: true}, {ID: "flow", Command: []string{"sh", "-c", "test -f api.txt && test -f ui.txt"}, Required: true}}},
-		at.AddTask{Key: "ui", Title: "OAuth UI side", Cohort: "oauth-flow", TaskChecks: check("ui")},
+		at.AddGroup{Key: "oauth-flow", Title: "OAuth flow", TaskChecks: []at.CheckSpec{{ID: "flow", Command: []string{"sh", "-c", "test -f api.txt && test -f ui.txt"}, Required: true}}},
+		at.AddTask{Key: "api", Title: "OAuth API side", Parent: "oauth-flow", TaskChecks: check("api")},
+		at.AddTask{Key: "ui", Title: "OAuth UI side", Parent: "oauth-flow", TaskChecks: check("ui")},
 	}
 }
 

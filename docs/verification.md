@@ -123,32 +123,9 @@ after a committed completion returns the stored result and runs nothing.
 No SQLite transaction is ever held across a Git command or a check
 process.
 
-## Cohorts
+## Groups
 
-Tasks sharing `--cohort C` implement independently. `verify complete` on a
-member records its submission and ends its claim. When every live member
-has submitted, a verifier job (durable, leased, owned by a fresh token)
-assembles one candidate by merging every member revision onto the target,
-runs each member's task checks and the regression suite on it, pins one
-intent per member, promotes under the same lock, and completes all
-members in one transaction; the same recovery applies (a dead verifier's
-job lease expires, Git decides, members complete or return to pending for
-the next verifier). Failing member checks send
-that member back for repair (one counted failure) while passing peers keep
-waiting; a failing regression sends every member back with the evidence
-and charges nobody; a late conflict on one member sends only that member
-back; a promotion that cannot land keeps every submission and retries
-with a capped exponential backoff. A verifier that dies leaves a job whose
-lease expires (`interrupted`, not an error: no backoff); `Claim(wait)` in
-any worker reconciles and retries it, so no hidden command is needed. A
-submitted member's contract is pinned until the planner withdraws the
-submission (`--withdraw-submission`, without the task token). A consumed token's
-`verify complete` is an idempotent acknowledgement.
-
-Cohorts are not hard edges and must not be used where A truly cannot be
-implemented before B; that is a design problem a cohort cannot fix. Prefer
-an explicit integration task that `--requires` independently verifiable
-implementation tasks whenever possible.
+A group's proofs run on the merge of every child's completed revision, built in a scratch worktree; the group completes only after every child is complete and no integration branch exists. `verify complete GROUP` fails with `NOT_READY` until then, and with `BASE_CONFLICT` when the children cannot be merged.
 
 ## Budgets: checks must be fast
 

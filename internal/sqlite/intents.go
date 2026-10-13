@@ -96,11 +96,6 @@ func (t *Tx) ActiveIntentForTask(id task.ID) (*Intent, error) {
 	return &i, nil
 }
 
-// IntentsForJob lists the member intents of a cohort job.
-func (t *Tx) IntentsForJob(jobID int64) ([]Intent, error) {
-	return t.queryIntents(`SELECT `+intentColumns+` FROM integration_intents WHERE job_id = ? ORDER BY id`, jobID)
-}
-
 // IntentsForTask lists every intent of a task, oldest first.
 func (t *Tx) IntentsForTask(id task.ID) ([]Intent, error) {
 	return t.queryIntents(`SELECT `+intentColumns+` FROM integration_intents WHERE task_id = ? ORDER BY id`, id)

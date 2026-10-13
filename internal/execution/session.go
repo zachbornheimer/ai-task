@@ -88,9 +88,6 @@ const (
 	// and the task is immediately takeable again (or blocked, if a new
 	// prerequisite was added).
 	EndReleased EndReason = "released"
-	// EndSubmitted: the attempt recorded an immutable submission for a
-	// cohort and handed verification to the cohort verifier.
-	EndSubmitted EndReason = "submitted"
 )
 
 // Attempt is one execution attempt of a task. Seq is the fencing generation:
@@ -149,8 +146,6 @@ func Authorize(a Attempt, currentSeq int, now time.Time) error {
 		switch a.EndReason {
 		case EndFinished:
 			return fault.New(fault.CodeInvalidSession, "session for %s already finished; claim the task again to continue", a.TaskID)
-		case EndSubmitted:
-			return fault.New(fault.CodeInvalidSession, "session for %s submitted its implementation; the cohort verifier owns it now", a.TaskID)
 		}
 		return fault.New(fault.CodeInvalidSession, "session for %s has ended", a.TaskID)
 	}

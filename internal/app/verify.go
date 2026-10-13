@@ -35,9 +35,7 @@ func environmentFingerprint() string {
 //     projects), runs BOTH categories fresh on a detached snapshot of that
 //     revision, integrates when the project requires it, and then, in one
 //     short transaction that re-checks authority, prerequisites, contract
-//     and policy, records completion and ends the claim. For cohort
-//     members it records the submission, ends the claim, and runs the
-//     cohort job if every peer has submitted.
+//     and policy, records completion and ends the claim.
 //
 // Every invocation executes checks; stored evidence is never reused as
 // proof. A failing result is returned as CHECK_FAILED with the
@@ -408,9 +406,6 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		revision = st.Revision
 	}
 	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.proj.Regression}).Digest()}
-	if p.rec.Task.Cohort != "" {
-		return e.submitForCohort(ctx, fr)
-	}
 	now := e.now()
 	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if _, err := e.touch(tx, token, now); err != nil {
@@ -428,7 +423,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		if s := r.Submission; s != nil && s.AttemptID == p.attempt.ID && s.RunStatus() == sqlite.RunRunning {
 			return fault.New(fault.CodeConflict, "%s: a `verify complete` run (%d) is already in progress for this attempt; wait for its result", r.Task.ID, s.Run.ID)
 		}
-		if fr.submission, err = tx.InsertSubmission(r.Task.ID, p.attempt.ID, revision, "", now); err != nil {
+		if fr.submission, err = tx.InsertSubmission(r.Task.ID, p.attempt.ID, revision, now); err != nil {
 			return err
 		}
 		fr.runID, err = tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, AttemptID: p.attempt.ID, SubmissionID: fr.submission, Mode: verification.ModeComplete, Status: sqlite.RunRunning, Revision: revision, Policy: p.policy, Environment: environmentFingerprint()}, now)
@@ -729,39 +724,6 @@ func (e *Engine) replayCompletion(ctx context.Context, token execution.Token) (V
 		r, err := tx.GetRecord(a.TaskID)
 		if err != nil {
 			return err
-		}
-		if a.EndReason == execution.EndSubmitted {
-			// A cohort submission is acknowledged idempotently: the stored
-			// submission plus the member's current status, no new authority.
-			subs, err := tx.Submissions(a.TaskID)
-			if err != nil {
-				return err
-			}
-			proj, err := tx.GetProject(r.Task.ProjectID)
-			if err != nil {
-				return err
-			}
-			for _, s := range subs {
-				if s.AttemptID != a.ID {
-					continue
-				}
-				st := r.Status(e.now(), proj.MaxAttempts)
-				res = VerifyResult{TaskID: a.TaskID, Mode: verification.ModeComplete, Revision: s.Revision, SubmissionID: s.ID, Submitted: true, Replayed: true, Status: st, Completed: st == task.StatusComplete, Passed: st == task.StatusComplete}
-				if s.Run != nil {
-					res.RunID, res.Summary = s.Run.ID, s.Run.Summary
-				}
-				switch {
-				case r.CompletedAt != nil && r.CompletedSubmissionID == s.ID:
-					res.Message = "already submitted and complete; stored result returned"
-				case r.Submission != nil && r.Submission.ID != s.ID:
-					res.Message = fmt.Sprintf("already submitted (submission %d); a later attempt superseded it, current status %s", s.ID, st)
-					res.Completed, res.Passed = false, false
-				default:
-					res.Message = fmt.Sprintf("already submitted (submission %d); current status %s", s.ID, st)
-				}
-				ok = true
-			}
-			return nil
 		}
 		if a.EndReason != execution.EndFinished {
 			return nil

@@ -29,13 +29,17 @@ func (r Ref) IsID() bool { return task.IsID(string(r)) }
 // AddTask, UpdateTask, ArchiveTask.
 type Change interface{ change() }
 
-// AddGroup creates a group. With TaskChecks it is an epic with its own
-// verification, run on the target branch once every member is complete.
+// AddGroup creates a group. With a proof it verifies on the merge of every
+// child's completed revision once every child is complete.
 type AddGroup struct {
 	Key        string
 	Title      string
 	Parent     Ref // optional enclosing group
 	TaskChecks []verification.CheckSpec
+	// Proof and Regression are the group's two proofs; when Proof is set
+	// it supplies the group's required gate.
+	Proof      *proof.ProofSpec
+	Regression *proof.ProofSpec
 	Size       string
 }
 
@@ -49,7 +53,6 @@ type AddTask struct {
 	Acceptance  []string
 	Requires    []Ref
 	Blocks      []Ref // existing tasks that will require the new one
-	Cohort      string
 	TaskChecks  []verification.CheckSpec
 	// Proof and Regression are the task's two proofs; when Proof is set it
 	// supplies the task's required gate.
@@ -73,7 +76,6 @@ type UpdateTask struct {
 	Parent         *Ref // pointer to "" clears the parent
 	Constraints    Patch[string]
 	Acceptance     Patch[string]
-	Cohort         *string
 	TaskChecks     Patch[verification.CheckSpec]
 	Proof          *proof.ProofSpec
 	Regression     *proof.ProofSpec
@@ -86,10 +88,6 @@ type UpdateTask struct {
 	// ResetAttempts clears failure bookkeeping so an exhausted task can be
 	// claimed again (planner decision).
 	ResetAttempts bool
-	// WithdrawSubmission withdraws a cohort member's submission that is
-	// waiting for its peers, so its contract can change (planner
-	// decision; the member becomes claimable and must resubmit).
-	WithdrawSubmission bool
 }
 
 // ArchiveTask soft-deletes a task or group. Reason is mandatory: removing a

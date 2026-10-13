@@ -47,7 +47,7 @@ type Engine interface {
 
 // Store is the concrete engine returned by Open; it also carries the
 // trusted bootstrap operations (InitProject, UpdateProject, Projects,
-// ResolveProject, Summary, RunPendingCohorts, Whoami, Close).
+// ResolveProject, Summary, RunPendingGroups, VerifyGroup, Whoami, Close).
 type Store = app.Engine
 
 var _ Engine = (*Store)(nil)

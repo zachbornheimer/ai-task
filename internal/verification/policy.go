@@ -259,11 +259,8 @@ const (
 	// ModeComplete: both categories fresh on an immutable revision; the
 	// only mode that can establish completion.
 	ModeComplete Mode = "complete"
-	// ModeCohort: both categories for every cohort member on one
-	// assembled candidate, run by a verifier job.
-	ModeCohort Mode = "cohort"
-	// ModeGroup: a group's own checks on the target branch once every
-	// member is complete (the integration tier).
+	// ModeGroup: a group's own checks on the merge of every child's
+	// completed revision, once every child is complete.
 	ModeGroup Mode = "group"
 )
 

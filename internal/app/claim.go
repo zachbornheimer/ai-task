@@ -56,9 +56,6 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 			if _, err := e.RunPendingGroups(ctx, req.ProjectID, ""); err != nil && ctx.Err() != nil {
 				return Session{}, ctx.Err()
 			}
-			if _, err := e.RunPendingCohorts(ctx, req.ProjectID); err != nil && ctx.Err() != nil {
-				return Session{}, ctx.Err()
-			}
 		}
 		wake := e.changes() // subscribe before checking so no change is missed
 		s, err := e.claimOnce(ctx, req, lease)
