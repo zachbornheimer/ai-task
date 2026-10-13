@@ -198,7 +198,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 				ids = append(ids, fmt.Sprintf("%s (%s)", t.ID, t.AttentionReason))
 			}
 		}
-		add("needs_attention", false, "warning", fmt.Sprintf("%d task(s) need a planner: %s", n, strings.Join(ids, "; ")), "atask update <task> --reset-attempts --planner, or atask claim <task> to retry its worktree")
+		add("needs_attention", false, "warning", fmt.Sprintf("%d task(s) need a planner: %s", n, strings.Join(ids, "; ")), "atask update <task> --reset-attempts, or atask claim <task> to retry its worktree")
 	} else {
 		add("needs_attention", true, "info", "no task needs attention", "")
 	}

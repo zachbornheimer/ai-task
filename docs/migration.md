@@ -27,7 +27,7 @@ handoff. Databases created by the earlier `tasks` binary migrate in place
 | `tasks log <token> …`                                  | `atask log …` (positional, `-`, `--session`, or ATASK_SESSION) |                                                                                                    |
 | `tasks finish <token>`                                 | `atask verify complete`                                        | records submission, runs BOTH suites fresh, integrates, completes                                  |
 | `tasks verify <task> [--retry] [--again] [--no-reuse]` | `atask verify task` / `atask verify regression` (diagnostic)   | no evidence reuse exists any more; a stuck run is closed by reconciliation and the task re-claimed |
-| `tasks policy <task> --check …`                        | `atask update <task> --check …`                                | planner authority; rejected on claimed/completed tasks without `--planner`                         |
+| `tasks policy <task> --check …`                        | `atask update <task> --check …`                                | planner authority; rejected on claimed/completed tasks with the task's own token                   |
 | `tasks evidence <task>`                                | `atask show <task> --full`                                     |                                                                                                    |
 | `tasks status`                                         | `atask status`                                                 | `done`/`stalled` plus reasons and pending cohorts                                                  |
 | `tasks list --available/--takeable/--blocked`          | `atask list ready` / `atask list blocked` / `atask list all`   | glyph hierarchy                                                                                    |
@@ -71,12 +71,12 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
 - Leases default to 30 minutes (5m..4h); every authenticated command
   renews them. The token is never stored on disk; hosts inject it as
   `ATASK_SESSION`.
-- `--archive` needs `--reason`; `--withdraw-submission` (with `--planner`)
+- `--archive` needs `--reason`; `--withdraw-submission`
   withdraws a cohort member's pending submission so its contract can
   change.
 - JSON output is compact by default (`--pretty` indents); `help` and a
   bare `at` print envelopes in JSON mode.
-- `--reset-attempts` needs `--planner`; `--group` and `--archive` refuse
+- `--reset-attempts` is planner authority (no task token); `--group` and `--archive` refuse
   unrelated flags; a check label is only `<id>:` (a colon in a command
   is left alone).
 - `atask prune` removes worktrees of complete/archived tasks and quarantined

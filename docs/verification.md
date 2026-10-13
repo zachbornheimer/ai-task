@@ -140,7 +140,7 @@ with a capped exponential backoff. A verifier that dies leaves a job whose
 lease expires (`interrupted`, not an error: no backoff); `Claim(wait)` in
 any worker reconciles and retries it, so no hidden command is needed. A
 submitted member's contract is pinned until the planner withdraws the
-submission (`--planner --withdraw-submission`). A consumed token's
+submission (`--withdraw-submission`, without the task token). A consumed token's
 `verify complete` is an idempotent acknowledgement.
 
 Cohorts are not hard edges and must not be used where A truly cannot be

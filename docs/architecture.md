@@ -34,8 +34,9 @@ is re-checked in Go before the claim.
 
 - **Planning authority** (`Apply`, `atask add/update`) edits the graph. It is
   distinct from execution authority: reviewing a plan never requires a
-  claim. Edits to a _claimed_ task's eligibility need that task's session
-  token or `--planner`; contract edits to claimed tasks need `--planner`;
+  claim. Planner authority is the absence of a _claimed_ task's own
+  session token: its proofs, size, and requires change without it and are
+  refused with `INVALID_SESSION` with it;
   completed tasks are immutable (archive and re-plan).
 - **Execution authority** is a session token: returned once by `Claim`,
   stored as a digest, valid while its attempt is current (fencing

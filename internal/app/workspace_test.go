@@ -91,7 +91,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 		t.Fatal("not marked")
 	}
 	f.git(sz.Workspace, "checkout", "-q", "atask/"+string(z))
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(z), ResetAttempts: true}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(z), ResetAttempts: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	if f.status(string(z)) != task.StatusReady {

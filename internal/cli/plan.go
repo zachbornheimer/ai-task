@@ -43,14 +43,12 @@ func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 type planFlags struct {
 	expectRev      uint64
 	idempotencyKey string
-	planner        bool
 	session        string
 }
 
 func (c *ctxt) bindPlanFlags(pf *planFlags) {
 	c.fs.Uint64Var(&pf.expectRev, "expect-rev", 0, "fail with PLAN_CONFLICT unless the plan revision equals this")
 	c.fs.StringVar(&pf.idempotencyKey, "idempotency-key", "", "stable operation id; a replay returns the stored result")
-	c.fs.BoolVar(&pf.planner, "planner", false, "assert planning authority for edits to claimed tasks")
 	c.fs.StringVar(&pf.session, "session", "", "session token authorizing a discovered blocker (default: ATASK_SESSION, or the task worktree's own token)")
 }
 
@@ -65,7 +63,7 @@ func (c *ctxt) changeSet(ctx context.Context, pid project.ID, pf planFlags, ops 
 	if session == "" {
 		session = workspace.LoadToken(ctx, c.env.Cwd)
 	}
-	return plan.ChangeSet{ProjectID: pid, ExpectedPlanRev: pf.expectRev, IdempotencyKey: pf.idempotencyKey, Planner: pf.planner, Session: session, Operations: ops}
+	return plan.ChangeSet{ProjectID: pid, ExpectedPlanRev: pf.expectRev, IdempotencyKey: pf.idempotencyKey, Session: session, Operations: ops}
 }
 
 func runInit(ctx context.Context, c *ctxt, args []string) error {
@@ -551,7 +549,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	archive := c.fs.Bool("archive", false, "archive (soft-delete) the task or group; needs --reason")
 	reason := c.fs.String("reason", "", "why the item is archived (recorded; required with --archive)")
 	reset := c.fs.Bool("reset-attempts", false, "clear failure bookkeeping so the task can be claimed again")
-	withdraw := c.fs.Bool("withdraw-submission", false, "withdraw a cohort member's submission that awaits its peers so its contract can change (with --planner)")
+	withdraw := c.fs.Bool("withdraw-submission", false, "withdraw a cohort member's submission that awaits its peers so its contract can change")
 	if err := c.parse(args); err != nil {
 		return err
 	}

@@ -119,12 +119,10 @@ type ChangeSet struct {
 	// IdempotencyKey, when set, makes a replay return the stored result
 	// instead of applying again.
 	IdempotencyKey string
-	// Session optionally authorises edits that touch a claimed task's
-	// eligibility (a discovered blocker added by the agent holding it).
-	Session string
-	// Planner asserts planning authority for edits to claimed tasks. It is
-	// a convention for the local trust model, not a security boundary.
-	Planner    bool
+	// Session is the caller's token, if any. Planner authority is its
+	// absence for the task being edited; a task's own token may not
+	// rewrite that task's contract.
+	Session    string
 	Operations []Change
 }
 

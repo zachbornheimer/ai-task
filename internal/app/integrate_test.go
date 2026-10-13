@@ -82,11 +82,11 @@ func TestIntegrationIntentCrashRecovery(t *testing.T) {
 				// Nothing can move the task while the intent is open.
 				_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
 				wantCode(t, err, fault.CodeTaskAwaitingIntegration)
-				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Title: strptr("renamed")}}})
+				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Title: strptr("renamed")}}})
 				wantCode(t, err, fault.CodePlanConflict)
-				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a), Reason: "x"}}})
+				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a), Reason: "x"}}})
 				wantCode(t, err, fault.CodePlanConflict)
-				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}})
+				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}})
 				wantCode(t, err, fault.CodePlanConflict)
 			case "final:after-complete":
 				if v.Status != task.StatusComplete {
@@ -147,7 +147,7 @@ func TestPlannerEditDuringVerificationNeverMovesTarget(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { _, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete); done <- err }()
 	f.waitStatus(string(a), task.StatusVerifying)
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Acceptance: plan.Replace([]string{"also this"})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Acceptance: plan.Replace([]string{"also this"})}}}); err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(flag, []byte("1"), 0o644)

@@ -147,7 +147,7 @@ proves nothing.
 - **Human gates.** No human attestation path; a task without runnable
   checks cannot complete. Model such work as a task whose check verifies
   the artefact of the human action (a file, a config value).
-- **Trust.** `--planner` and `ATASK_SESSION` are a convention for the local
+- **Trust.** Planner authority (no task token) and `ATASK_SESSION` are a convention for the local
   OS user. Same-user processes can edit the SQLite file or the repository.
 - **Check side effects.** Checks run in a disposable snapshot with
   `GOFLAGS=-count=1`; the engine cannot prove a check does not touch

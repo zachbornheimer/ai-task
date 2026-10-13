@@ -59,11 +59,19 @@ atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks 
 [--outcome ..] [--constraint ..]*[--accept ..]* --proof "PRESET: SUBJECT" --regression "PRESET: SUBJECT"
 (groups: [--check "[id:] cmd"]*[--optional-check ..]*)
 [--pin PATH]*[--claim]
-[--expect-rev N] [--idempotency-key K] [--planner]
+[--expect-rev N] [--idempotency-key K]
 atask update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 [--requires REF]* [--remove-requires REF]*[--set-requires REF]*
+<<<<<<< HEAD
 [--accept ..]*[--constraint ..]* [--proof ..] [--regression ..] [--pin PATH|""]*
 [--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
+||||||| parent of da6227d (refactor(app): replace --planner flag with token-based authority)
+[--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
+[--archive --reason ..] [--reset-attempts] [--expect-rev N] [--planner]
+=======
+[--accept ..]*[--constraint ..]* [--check ..]*[--pin PATH|""]*
+[--archive --reason ..] [--reset-attempts] [--expect-rev N]
+>>>>>>> da6227d (refactor(app): replace --planner flag with token-based authority)
 
 ```text
 `REF` is a task ID (`at-…`) or a key. One `add`/`update` is one atomic
@@ -140,11 +148,14 @@ stale `--expect-rev`), a different request under the same key is
   timeout is the epic's construction problem, reported on the group.
 - `--cohort C` marks coupled verification: members implement independently
   and are judged together on one assembled candidate. It is not a blocker.
-- `--blocks C` on a claimed task needs C's session token (`ATASK_SESSION`) or
-  `--planner`; on a completed task it is rejected.
-- Completed tasks cannot be edited or archived. Claimed tasks accept
-  prerequisite changes with authority; contract changes need `--planner`
-  and make a running verification fail closed.
+- `--blocks C` on a completed task is rejected.
+- Completed tasks cannot be edited or archived. Planner authority is the absence of a
+  claimed task's own session token: an `update` that changes its proofs,
+  size, requires, or archive state succeeds without that token (no
+  `ATASK_SESSION`, not inside its worktree) and fails with `INVALID_SESSION`
+  ("a worker may not rewrite its own contract") with it. Another task's
+  token does not count as the worker's. Such a change makes a running
+  verification fail closed.
 - `--archive --reason ".."` is soft deletion with a recorded reason
   (shown as `archive_reason`): rejected for claimed/completed tasks and
   when live dependents or unfinished members remain unless the same batch
@@ -152,7 +163,9 @@ stale `--expect-rev`), a different request under the same key is
   and keeps their history (`list archived` shows it). `--archive` is not
   combined with other edits, and `--group` takes only `--key`/`--parent`;
   both are usage errors otherwise.
-- `--reset-attempts` restarts a retry budget and needs `--planner`.
+- `--reset-attempts` restarts a retry budget and ends a dead attempt,
+  returning the task to `ready`. It reports `changed: 0` when there was
+  nothing to reset, and is planner authority like any contract edit.
 - `add`/`update` results may carry `warnings` (keyed by task reference):
   advisory planning hints such as a check that looks like a no-op.
 - There is no status flag of any kind. Status is derived.
@@ -311,8 +324,8 @@ and completes all members atomically. The consumed token is not a cohort
 credential, but `verify complete` with it again is an idempotent
 acknowledgement: the stored submission and the member's current status,
 no new run, no new authority. A submission waiting for its peers pins the
-member's contract: changing it needs `atask update <ref> --planner
---withdraw-submission` (the member becomes claimable, nothing is counted,
+member's contract: changing it needs `atask update <ref>
+--withdraw-submission` (without the task token) (the member becomes claimable, nothing is counted,
 and it must resubmit under the new contract); while a cohort job runs,
 members' contracts are pinned outright. Blame is precise: a
 member whose own checks fail goes back alone; a late conflict on one

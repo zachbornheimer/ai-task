@@ -341,10 +341,22 @@ func (t *Tx) ArchiveTask(id task.ID, reason string, now time.Time) error {
 	return wrapInternal(err, "archive task")
 }
 
-// ResetAttempts clears failure bookkeeping.
-func (t *Tx) ResetAttempts(id task.ID, now time.Time) error {
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = 0, next_eligible_at = 0, last_failure_attempt_id = 0, last_error = '', workspace_error = '', updated_at = ? WHERE id = ?`, ms(now), id)
-	return wrapInternal(err, "reset attempts")
+// ResetAttempts clears failure bookkeeping and ends a dead attempt (one
+// never ended whose lease expired), returning the task to ready. It
+// reports whether anything changed; a live claim is never touched.
+func (t *Tx) ResetAttempts(id task.ID, now time.Time) (bool, error) {
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE execution_attempts SET ended_at = ?, end_reason = ? WHERE task_id = ? AND ended_at IS NULL AND lease_expires_at <= ?`, ms(now), execution.EndReleased, id, ms(now))
+	if err != nil {
+		return false, wrapInternal(err, "end dead attempt")
+	}
+	ended, _ := res.RowsAffected()
+	res, err = t.tx.ExecContext(t.ctx, `UPDATE tasks SET failures = 0, next_eligible_at = 0, last_failure_attempt_id = 0, last_error = '', workspace_error = '', updated_at = ?
+		WHERE id = ? AND (failures <> 0 OR next_eligible_at <> 0 OR last_failure_attempt_id <> 0 OR last_error <> '' OR workspace_error <> '')`, ms(now), id)
+	if err != nil {
+		return false, wrapInternal(err, "reset attempts")
+	}
+	cleared, _ := res.RowsAffected()
+	return ended+cleared > 0, nil
 }
 
 // SetWorkspaceError records why the task's worktree could not be

@@ -41,25 +41,25 @@ func TestSmallSizeRunFilterAllowsNarrowGoTest(t *testing.T) {
 	}})
 	wantSmallSizeReject(t, err)
 
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.UpdateTask{Target: plan.Ref("filtered"), TaskChecks: plan.Patch[verification.CheckSpec]{Set: true, Value: []verification.CheckSpec{goCheck("a", "go", "test", "./...")}}},
 	}})
 	wantSmallSizeReject(t, err)
 
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.UpdateTask{Target: plan.Ref("filtered"), TaskChecks: plan.Patch[verification.CheckSpec]{Set: true, Value: []verification.CheckSpec{goCheck("a", "go", "test", "./...", "-run", "TestY")}}},
 	}}); err != nil {
 		t.Fatalf("filtered update: %v", err)
 	}
 
 	large := "large"
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.AddTask{Key: "pkg", Title: "pkg", Size: large, TaskChecks: []verification.CheckSpec{goCheck("d", "go", "test", "./pkg")}},
 	}}); err != nil {
 		t.Fatalf("large add: %v", err)
 	}
 	small := "small"
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.UpdateTask{Target: plan.Ref("pkg"), Size: &small},
 	}})
 	wantSmallSizeReject(t, err)

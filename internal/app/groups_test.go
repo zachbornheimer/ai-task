@@ -96,7 +96,7 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 		t.Fatalf("done: %+v", sum)
 	}
 	// A verified epic whose checks change is verified again.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), TaskChecks: plan.Replace([]verification.CheckSpec{check("e2e", "test -f a.txt", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), TaskChecks: plan.Replace([]verification.CheckSpec{check("e2e", "test -f a.txt", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	if v := f.show(string(g)); v.CompletedAt != nil || v.GroupVerification.Status != "pending" {
@@ -106,7 +106,7 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 		t.Fatal("members' work must be on the target")
 	}
 	// Timeouts are reported as the epic's construction problem.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), Size: strptr("small"), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), Size: strptr("small"), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	f.proj.Budgets.Small = 300 * 1e6

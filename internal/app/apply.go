@@ -312,7 +312,10 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 		if rec.CompletedAt != nil {
 			return fault.New(fault.CodePlanConflict, "%s is complete; a new prerequisite cannot be added to a completed task", rec.Task.ID)
 		}
-		if err := a.authorizeEligibilityChange(rec); err != nil {
+		if err := a.integrating(rec.Task.ID); err != nil {
+			return err
+		}
+		if err := a.requireLiveIfHeld(rec.Task.ID); err != nil {
 			return err
 		}
 		edges = append(edges, dependency.Edge{Task: rec.Task.ID, Requires: id})
@@ -425,34 +428,51 @@ func (a *applier) integrating(id task.ID) error {
 	return nil
 }
 
-// authorizeEligibilityChange guards edits that change a claimed task's
-// eligibility: the agent holding it (session token) or the planner.
-func (a *applier) authorizeEligibilityChange(target sqlite.Record) error {
-	if err := a.integrating(target.Task.ID); err != nil {
+// holdsTask reports whether the caller presents the session token of
+// this task's own attempt. Planner authority is exactly its absence: no
+// token, or a token that belongs to some other task.
+func (a *applier) holdsTask(id task.ID) (bool, error) {
+	if a.cs.Session == "" {
+		return false, nil
+	}
+	tok, err := execution.ParseToken(a.cs.Session)
+	if err != nil {
+		return false, err
+	}
+	auth, err := a.tx.AttemptByDigest(tok.Digest())
+	if err != nil {
+		return false, err
+	}
+	return auth.Attempt.TaskID == id, nil
+}
+
+// requireLiveIfHeld refuses a stale or superseded token for this task: a
+// discovered blocker is the worker's to add only while its claim is live.
+func (a *applier) requireLiveIfHeld(id task.ID) error {
+	if a.cs.Session == "" {
+		return nil
+	}
+	tok, err := execution.ParseToken(a.cs.Session)
+	if err != nil {
 		return err
 	}
-	att := target.Attempt
-	if att == nil || att.EndedAt != nil || !att.LeaseActive(a.now) {
-		return nil
+	auth, err := a.tx.AttemptByDigest(tok.Digest())
+	if err != nil || auth.Attempt.TaskID != id {
+		return err
 	}
-	if a.cs.Planner {
-		return nil
+	return execution.Authorize(auth.Attempt, auth.CurrentSeq, a.now)
+}
+
+// requirePlanner refuses a worker rewriting its own task's contract.
+func (a *applier) requirePlanner(id task.ID) error {
+	holds, err := a.holdsTask(id)
+	if err != nil {
+		return err
 	}
-	if a.cs.Session != "" {
-		tok, err := execution.ParseToken(a.cs.Session)
-		if err != nil {
-			return err
-		}
-		auth, err := a.tx.AttemptByDigest(tok.Digest())
-		if err != nil {
-			return err
-		}
-		if auth.Attempt.TaskID == target.Task.ID && execution.Authorize(auth.Attempt, auth.CurrentSeq, a.now) == nil {
-			return nil
-		}
-		return fault.New(fault.CodeSessionSuperseded, "session does not hold %s", target.Task.ID)
+	if holds {
+		return fault.New(fault.CodeInvalidSession, "%s: a worker may not rewrite its own contract; run this without its session token", id)
 	}
-	return fault.New(fault.CodePlanConflict, "%s is claimed; changing its prerequisites needs its session token (ATASK_SESSION) or planner authority (--planner)", target.Task.ID)
+	return nil
 }
 
 func (a *applier) insertEdges(ctx context.Context, edges []dependency.Edge) error {
@@ -504,8 +524,10 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	claimed := rec.Attempt != nil && rec.Attempt.EndedAt == nil && rec.Attempt.LeaseActive(a.now)
-	if claimed && contract && !a.cs.Planner {
-		return fault.New(fault.CodePlanConflict, "%s is claimed; its contract can only change with planner authority (--planner), and a running verification will fail closed", t.ID)
+	if claimed && (contract || edges) {
+		if err := a.requirePlanner(t.ID); err != nil {
+			return err
+		}
 	}
 	changed := false
 	// A submission waiting for its cohort peers pins the contract it will
@@ -524,8 +546,8 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 				return fault.New(fault.CodePlanConflict, "%s is being verified by a cohort job; its contract is pinned until the job ends", t.ID)
 			}
 		case sqlite.RunPending:
-			if !c.WithdrawSubmission || !a.cs.Planner {
-				return fault.New(fault.CodePlanConflict, "%s has a submission awaiting its cohort peers; its contract is pinned. To change it, withdraw the submission explicitly (planner authority: --planner --withdraw-submission); the member will have to resubmit", t.ID)
+			if !c.WithdrawSubmission {
+				return fault.New(fault.CodePlanConflict, "%s has a submission awaiting its cohort peers; its contract is pinned. To change it, withdraw the submission explicitly (planner authority: --withdraw-submission without the task token); the member will have to resubmit", t.ID)
 			}
 			if s.Run != nil {
 				if err := a.tx.FinishRun(s.Run.ID, sqlite.RunFailed, "withdrawn by the planner: the contract changed before cohort verification", a.now); err != nil {
@@ -545,7 +567,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	if edges {
-		if err := a.authorizeEligibilityChange(rec); err != nil {
+		if err := a.integrating(rec.Task.ID); err != nil {
 			return err
 		}
 	}
@@ -703,13 +725,14 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	if c.ResetAttempts {
-		if !a.cs.Planner {
-			return fault.New(fault.CodePlanConflict, "%s: resetting attempts restarts a retry budget and needs planner authority (--planner)", t.ID)
-		}
-		if err := a.tx.ResetAttempts(t.ID, a.now); err != nil {
+		if err := a.requirePlanner(t.ID); err != nil {
 			return err
 		}
-		changed = true
+		reset, err := a.tx.ResetAttempts(t.ID, a.now)
+		if err != nil {
+			return err
+		}
+		changed = changed || reset
 	}
 	if changed {
 		a.result.Updated = append(a.result.Updated, t.ID)

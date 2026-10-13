@@ -83,7 +83,7 @@ func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
 	}
 	// Failing diagnostics report VERIFICATION_FAILED with details and keep
 	// the claim live.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; exit 3", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; exit 3", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	res, err = f.e.Verify(f.ctx, s.Token, verification.ModeProof)
@@ -194,7 +194,7 @@ func TestFinalFailureKeepsClaimAndBlocksDownstream(t *testing.T) {
 	}
 	// The claim is live: the planner relaxes the check, the agent commits a
 	// fix and verifies again -> complete; a second submission supersedes.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "true", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "true", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	f.commit(s.Workspace, "fix.txt", "fix")
@@ -273,7 +273,7 @@ func TestContractChangeDuringVerificationFailsClosed(t *testing.T) {
 		t.Fatalf("status during run: %s", st)
 	}
 	// Planner tightens the contract while the run is in flight.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Acceptance: plan.Replace([]string{"stricter"})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Acceptance: plan.Replace([]string{"stricter"})}}}); err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(flag, []byte("1"), 0o644)

@@ -48,7 +48,7 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	// and the warning says it used more than half of a small budget only
 	// when that is the case.
 	medium := "medium"
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Size: &medium}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Size: &medium}}}); err != nil {
 		t.Fatal(err)
 	}
 	if f.show(string(a)).Size != task.SizeMedium {

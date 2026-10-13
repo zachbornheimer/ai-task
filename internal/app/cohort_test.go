@@ -192,11 +192,9 @@ func TestSubmittedCohortContractIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	relaxed := plan.Replace([]verification.CheckSpec{check("api-unit", "test -f api.txt", true)})
-	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(api), TaskChecks: relaxed}}})
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(api), TaskChecks: relaxed}}})
 	wantCode(t, err, fault.CodePlanConflict)
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(api), TaskChecks: relaxed, WithdrawSubmission: true}}})
-	wantCode(t, err, fault.CodePlanConflict) // withdrawal needs planner authority
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(api), TaskChecks: relaxed, WithdrawSubmission: true}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(api), TaskChecks: relaxed, WithdrawSubmission: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	v := f.show(string(api))

@@ -191,10 +191,7 @@ func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 	f := newFixture(t)
 	c := f.add("c")
 	s := f.claim(string(c))
-	// Without authority: the claimed task's eligibility cannot change.
-	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks()}}})
-	wantCode(t, err, fault.CodePlanConflict)
-	// With the holder's session: allowed; c stays claimed (claim outranks
+	// The holder's session: allowed; c stays claimed (claim outranks
 	// blocked) and becomes blocked once released.
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(c)}, TaskChecks: okChecks()}}}); err != nil {
 		t.Fatal(err)
@@ -208,18 +205,20 @@ func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 	if f.status(string(c)) != task.StatusBlocked {
 		t.Fatal("not blocked after release")
 	}
-	// A different session cannot do it; the planner flag can.
+	// Another task's session is not d's worker, so it is planner authority.
 	d := f.add("d")
 	sd := f.claim(string(d))
 	other := f.claim("x")
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(other.Token), Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), AddRequires: []plan.Ref{"x"}}}})
-	wantCode(t, err, fault.CodeSessionSuperseded)
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), AddRequires: []plan.Ref{"x"}}}}); err != nil {
+	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(other.Token), Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), AddRequires: []plan.Ref{"x"}}}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Contract edits to a claimed task need the planner, never a session.
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), AddRequires: []plan.Ref{"x"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	// Contract edits to a claimed task are refused to its own session.
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sd.Token), Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), Title: strptr("renamed")}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeInvalidSession)
 }
 
 // An idempotency key is bound to the exact request; a stable key's replay

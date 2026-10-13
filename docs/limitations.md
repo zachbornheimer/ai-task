@@ -8,7 +8,7 @@
    present. Final checks run on a detached snapshot, so a stale editor
    cannot change what is verified.
 
-2. **Local-user trust.** `--planner` and `ATASK_SESSION` are conventions. The
+2. **Local-user trust.** Planner authority (no task token) and `ATASK_SESSION` are conventions. The
    same OS user can edit the SQLite file, the repository, or the checks.
    Self-certification is impossible _through the API_; it is not a defence
    against a hostile local user. That needs a protected service or CI.
