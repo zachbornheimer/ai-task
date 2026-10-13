@@ -47,6 +47,11 @@ func (r *Registry) Parse(s string) (ProofSpec, error) {
 	if len(toks) > 0 {
 		spec.Subject = strings.TrimSpace(rest[toks[0].start:toks[len(toks)-1].end])
 	}
+	if v, ok := preset.(Validator); ok {
+		if err := v.Validate(spec); err != nil {
+			return ProofSpec{}, err
+		}
+	}
 	return spec, nil
 }
 

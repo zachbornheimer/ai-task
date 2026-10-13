@@ -47,7 +47,7 @@ func validPRSubject(s string) bool {
 }
 
 // Judge reads gh's JSON. A non-zero gh exit is always a failure.
-func (p prMergedPreset) Judge(output []byte, exitCode int) (bool, string) {
+func (p prMergedPreset) Judge(_ ProofSpec, output []byte, exitCode int) (bool, string) {
 	if exitCode != 0 {
 		line, _, _ := strings.Cut(strings.TrimSpace(string(output)), "\n")
 		return false, fmt.Sprintf("gh failed (exit %d): %s", exitCode, line)

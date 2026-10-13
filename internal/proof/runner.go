@@ -121,7 +121,11 @@ func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, c
 	if cmd.Log != nil {
 		log = io.MultiWriter(tail, cmd.Log)
 	}
-	out := checkexec.Run(ctx, checkexec.Spec{Argv: cmd.Argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: budget, Log: log})
+	argv := cmd.Argv
+	if r.hasMise(cmd.Dir) {
+		argv = wrapMise(argv)
+	}
+	out := checkexec.Run(ctx, checkexec.Spec{Argv: argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: budget, Log: log})
 	return r.finishRun(res, spec, cmd.Dir, out, tail), out
 }
 
@@ -144,7 +148,7 @@ func (r *Runner) finishRun(res RunResult, spec ProofSpec, workdir string, out ch
 			p = b.ForEnv(Env{Workdir: workdir, TargetBranch: r.target})
 		}
 		if j, ok := p.(Judger); ok {
-			passed, reason := j.Judge([]byte(res.Output), *res.ReturnCode)
+			passed, reason := j.Judge(spec, []byte(res.Output), *res.ReturnCode)
 			res.Passed = res.Passed && passed
 			if reason != "" {
 				res.Output += "\n" + reason
@@ -159,11 +163,7 @@ func (r *Runner) argv(spec ProofSpec, workdir string) ([]string, error) {
 	if !ok {
 		return nil, errUnknownPreset(spec.Preset)
 	}
-	argv, err := p.Argv(spec, Env{Workdir: workdir, TargetBranch: r.target})
-	if err == nil && r.hasMise(workdir) {
-		argv = wrapMise(argv)
-	}
-	return argv, err
+	return p.Argv(spec, Env{Workdir: workdir, TargetBranch: r.target})
 }
 
 // matchesExpect applies the generic expect=REGEX option to stdout.

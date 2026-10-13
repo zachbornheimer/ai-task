@@ -42,7 +42,12 @@ func NewRegistry() *Registry { return &Registry{presets: map[string]Preset{}} }
 
 // Judger lets a preset decide pass or fail from a run's output and exit code.
 type Judger interface {
-	Judge(output []byte, exitCode int) (bool, string)
+	Judge(spec ProofSpec, output []byte, exitCode int) (passed bool, reason string)
+}
+
+// Validator is an optional Preset capability: it rejects a parsed spec early.
+type Validator interface {
+	Validate(spec ProofSpec) error
 }
 
 // EnvBinder is a preset that needs the run's Env when judging.

@@ -39,7 +39,7 @@ func TestPresetPRMerged(t *testing.T) {
 	}
 	for _, c := range cases {
 		j := p.ForEnv(Env{TargetBranch: c.target}).(Judger)
-		pass, reason := j.Judge(c.out, c.code)
+		pass, reason := j.Judge(ProofSpec{}, c.out, c.code)
 		if pass != c.pass || (!pass && reason == "") {
 			t.Errorf("%s: pass=%v reason=%q", c.name, pass, reason)
 		}
