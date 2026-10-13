@@ -168,7 +168,7 @@ func TestListHonorsProjectFlag(t *testing.T) {
 		if code, _, e := run(dir, "init", "--name", name, "--no-instructions"); code != ExitOK {
 			t.Fatalf("init %s: %d %s", name, code, e)
 		}
-		if code, _, e := run(dir, "add", "task-in-"+name, "--check", "u: true"); code != ExitOK {
+		if code, _, e := run(dir, "add", "task-in-"+name, "--proof", "run: true", "--regression", "run: true"); code != ExitOK {
 			t.Fatalf("add %s: %d %s", name, code, e)
 		}
 	}
