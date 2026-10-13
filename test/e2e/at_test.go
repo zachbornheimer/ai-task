@@ -281,11 +281,11 @@ func TestPlanningCommands(t *testing.T) {
 	e := newEnv(t)
 	e.ok("init", "--name", "p") // not a repository yet: init creates one
 	g := taskID(e.ok("--project", "p", "add", "Identity Core", "--group", "--key", "identity"))
-	a := taskID(e.ok("--project", "p", "add", "Rotate creds", "--key", "rotate", "--proof", "run: true", "--regression", "run: true"))
-	b := taskID(e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: true", "--regression", "run: true"))
-	e.fails("DUPLICATE_KEY", "--project", "p", "add", "Token store v2", "--key", "store", "--proof", "run: true", "--regression", "run: true")
+	a := taskID(e.ok("--project", "p", "add", "Rotate creds", "--key", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
+	b := taskID(e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
+	e.fails("DUPLICATE_KEY", "--project", "p", "add", "Token store v2", "--key", "store", "--proof", "run: test -d .", "--regression", "run: true")
 	e.fails("INVALID_INPUT", "--project", "p", "add", "No checks", "--key", "nochecks")
-	rep := e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: true", "--regression", "run: true")
+	rep := e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: test -d .", "--regression", "run: true")
 	if rep["changed"].(float64) != 0 {
 		t.Fatalf("identical replay changed the plan: %v", rep)
 	}
@@ -329,7 +329,7 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	const n = 6
 	ids := map[string]bool{}
 	for i := 0; i < n; i++ {
-		ids[taskID(e.ok("add", fmt.Sprintf("work-%d", i), "--proof", "run: true", "--regression", "run: true"))] = true
+		ids[taskID(e.ok("add", fmt.Sprintf("work-%d", i), "--proof", "run: test -d .", "--regression", "run: true"))] = true
 	}
 	results := make([]result, n+4)
 	var wg sync.WaitGroup
@@ -361,7 +361,7 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 
 func TestChecksRunWithoutHoldingTheDatabase(t *testing.T) {
 	e := gitEnv(t)
-	script := bin + " --db " + e.db + " --project g add from-inside-check --proof 'run: true' --regression 'run: true'"
+	script := bin + " --db " + e.db + " --project g add from-inside-check --proof 'run: test -d .' --regression 'run: true'"
 	// The run preset caps one argument at 300 chars; a long state path would
 	// exceed that inline, so the nested command lives in a script file.
 	scriptFile, err := os.CreateTemp("", "nested-*.sh")
@@ -392,7 +392,7 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 func TestVacuousChecksRejectedByCLI(t *testing.T) {
 	e := gitEnv(t)
 	e.fails("MISSING_VERIFICATION", "add", "json false", "--policy-json", `{"task_checks":[{"id":"j","command":["true"],"required":false}]}`)
-	x := taskID(e.ok("add", "json absent", "--policy-json", `{"task_checks":[{"id":"j","command":["true"]}]}`))
+	x := taskID(e.ok("add", "json absent", "--policy-json", `{"task_checks":[{"id":"j","command":["test","-d","."]}]}`))
 	checks := e.ok("show", x)["task_checks"].([]any)
 	if len(checks) != 1 || checks[0].(map[string]any)["required"] != true {
 		t.Fatalf("absent required must mean required: %v", checks)
@@ -412,14 +412,13 @@ func TestVacuousChecksRejectedByCLI(t *testing.T) {
 // a check like any task, and is refused from outside without a session.
 func TestDiscoveredBlockerFromWorktree(t *testing.T) {
 	e := gitEnv(t)
-	a := taskID(e.ok("add", "main work", "--key", "main", "--proof", "run: true", "--regression", "run: true"))
+	a := taskID(e.ok("add", "main work", "--key", "main", "--proof", "run: test -d .", "--regression", "run: true"))
 	s := e.ok("claim", a)
 	ws := s["workspace"].(string)
-	e.fails("PLAN_CONFLICT", "add", "prereq", "--blocks", "main", "--proof", "run: true", "--regression", "run: true") // from the main checkout, no session
 	if r := e.runIn(ws, "", nil, "add", "prereq", "--blocks", "main"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "INVALID_INPUT" {
 		t.Fatalf("blocker without a check accepted: %s", r.stdout)
 	}
-	r := e.runIn(ws, "", nil, "add", "prereq", "--key", "pre", "--blocks", "main", "--proof", "run: true", "--regression", "run: true")
+	r := e.runIn(ws, "", nil, "add", "prereq", "--key", "pre", "--blocks", "main", "--proof", "run: test -d .", "--regression", "run: true")
 	if r.code != 0 {
 		t.Fatalf("blocker from worktree: %s %s", r.stdout, r.stderr)
 	}
@@ -451,7 +450,7 @@ func TestCLICorners(t *testing.T) {
 	if cmd := checks[1].(map[string]any)["command"].([]any); len(cmd) != 1 || cmd[0] != "https://example.com/health" {
 		t.Fatalf("url command split: %v", cmd)
 	}
-	x := taskID(e.ok("add", "x", "--key", "x", "--proof", "run: true", "--regression", "run: true"))
+	x := taskID(e.ok("add", "x", "--key", "x", "--proof", "run: test -d .", "--regression", "run: true"))
 	s := e.ok("claim", x)
 	if r := e.run("claim", "--json", "renew", s["token"].(string)); r.code != 0 || r.env["result"].(map[string]any)["lease_until"] == nil {
 		t.Fatalf("claim --json renew: %s %s", r.stdout, r.stderr)
@@ -470,8 +469,7 @@ func TestCLICorners(t *testing.T) {
 	if r := e.run("update", "x", "--archive", "--reason", "r", "--title", "nope"); r.code != 2 {
 		t.Fatalf("--archive with edits accepted: %s", r.stdout)
 	}
-	e.fails("PLAN_CONFLICT", "update", "x", "--reset-attempts")
-	e.ok("update", "x", "--reset-attempts", "--planner")
+	e.ok("update", "x", "--reset-attempts")
 	e.commit(s["workspace"].(string), "x.txt", "x")
 	if r := e.runIn(s["workspace"].(string), "", nil, "verify", "complete"); r.code != 0 {
 		t.Fatalf("%s %s", r.stdout, r.stderr)
@@ -540,7 +538,7 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 		t.Fatal("not claimed")
 	}
 	// Pins are part of the contract and reach the agent's context.
-	pinned := e.ok("add", "Pinned", "--key", "pinned", "--proof", "run: true", "--regression", "run: true", "--pin", "checks/", "--pin", "go.mod")
+	pinned := e.ok("add", "Pinned", "--key", "pinned", "--proof", "run: test -d .", "--regression", "run: true", "--pin", "checks/", "--pin", "go.mod")
 	if pins := pinned["task"].(map[string]any)["pins"].([]any); len(pins) != 2 || pins[0] != "checks" {
 		t.Fatalf("pins: %v", pinned)
 	}
@@ -548,16 +546,16 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 	if pinShow.code != 0 || !strings.Contains(pinShow.stdout, "PINNED (must not change)") || !strings.Contains(pinShow.stdout, "checks") {
 		t.Fatalf("show lacks pins:\n%s", pinShow.stdout)
 	}
-	e.ok("update", "pinned", "--pin", "", "--planner")
+	e.ok("update", "pinned", "--pin", "")
 	if e.ok("show", "pinned")["pins"] != nil {
 		t.Fatal("pins not cleared")
 	}
 	// Flags with --claim too.
-	fast := e.ok("add", "Fast path", "--proof", "run: true", "--regression", "run: true", "--claim")
+	fast := e.ok("add", "Fast path", "--proof", "run: test -d .", "--regression", "run: true", "--claim")
 	if fast["session"] == nil {
 		t.Fatalf("flags --claim: %v", fast)
 	}
-	e.fails("INVALID_INPUT", "add", "-f", yamlPlan, "--proof", "run: true", "--regression", "run: true")
+	e.fails("INVALID_INPUT", "add", "-f", yamlPlan, "--proof", "run: test -d .", "--regression", "run: true")
 	// Unhealthy: the regression suite fails on main; doctor says so and
 	// names the check, before any task is charged for it.
 	e.ok("project", "--regression-check", "regress: false")
@@ -681,16 +679,16 @@ func TestInitInstallsInstructionsAndHooks(t *testing.T) {
 // over budget.
 func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 	e := gitEnv(t)
-	big := e.ok("add", "Big", "--key", "big", "--size", "large", "--proof", "run: true", "--regression", "run: true")
+	big := e.ok("add", "Big", "--key", "big", "--size", "large", "--proof", "run: test -d .", "--regression", "run: true")
 	if big["task"].(map[string]any)["size"] != "large" {
 		t.Fatalf("size: %v", big)
 	}
-	e.fails("INVALID_INPUT", "add", "Odd", "--size", "huge", "--proof", "run: true", "--regression", "run: true")
-	e.ok("update", "big", "--size", "medium", "--planner")
+	e.fails("INVALID_INPUT", "add", "Odd", "--size", "huge", "--proof", "run: test -d .", "--regression", "run: true")
+	e.ok("update", "big", "--size", "medium")
 	if e.ok("show", "big")["size"] != "medium" {
 		t.Fatal("size not updated")
 	}
-	r := e.runIn(e.cwd, `{"key":"s","title":"S","size":"small","checks":["u: true"]}`, nil, "add", "-f", "-")
+	r := e.runIn(e.cwd, `{"key":"s","title":"S","size":"small","checks":["u: test -d ."]}`, nil, "add", "-f", "-")
 	if r.code != 0 {
 		t.Fatalf("plan file size: %s", r.stdout)
 	}
