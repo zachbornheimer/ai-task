@@ -39,7 +39,7 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	if failures(a) != 1 {
 		t.Fatalf("failures after two failed proofs in one attempt: %d", failures(a))
 	}
-	if _, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Failed: true}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Failed: true}); err != nil {
 		t.Fatal(err)
 	}
 	if failures(a) != 1 {
@@ -101,12 +101,12 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	sd := f.claim(string(d))
 	f.c.Advance(execution.DefaultLease + time.Minute)
 	sd2 := f.claim(string(d))
-	_, err = f.e.Release(f.ctx, sd.Token, app.ReleaseOptions{Failed: true})
+	_, err = f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sd.Token, Failed: true})
 	wantCode(t, err, fault.CodeSessionSuperseded)
 	if failures(d) != 0 {
 		t.Fatalf("stale release counted: %d", failures(d))
 	}
-	if _, err := f.e.Release(f.ctx, sd2.Token, app.ReleaseOptions{Failed: true}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sd2.Token, Failed: true}); err != nil {
 		t.Fatal(err)
 	}
 	if failures(d) != 1 {

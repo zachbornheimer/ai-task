@@ -228,7 +228,7 @@ func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 		}
 		return c.emit(out{exp}, func(w io.Writer) { fmt.Fprintf(w, "✓ Renewed · lease until %s\n", exp.Format(time.RFC3339)) })
 	default:
-		v, err := e.Release(ctx, tok, app.ReleaseOptions{Note: *note, Failed: *failed})
+		v, err := e.ReleaseTask(ctx, app.ReleaseRequest{Token: tok, Note: *note, Failed: *failed})
 		if err != nil {
 			return err
 		}

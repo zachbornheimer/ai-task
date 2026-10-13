@@ -43,7 +43,7 @@ func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
 	f.c.Advance(execution.DefaultLease + time.Minute)
 	notFailed("timeout, lease expired", a, task.StatusInterrupted, "VERIFICATION_TIMEOUT")
 	s2 := f.claim(string(a))
-	if _, err := f.e.Release(f.ctx, s2.Token, app.ReleaseOptions{}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s2.Token}); err != nil {
 		t.Fatal(err)
 	}
 	notFailed("timeout, released", a, task.StatusReady, "")
@@ -66,7 +66,7 @@ func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
 	f.commit(sc.Workspace, "c.txt", "c")
 	_, err = f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeVerificationFailed)
-	if _, err := f.e.Release(f.ctx, sc.Token, app.ReleaseOptions{}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sc.Token}); err != nil {
 		t.Fatal(err)
 	}
 	f.c.Advance(11 * time.Minute)

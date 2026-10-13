@@ -48,7 +48,7 @@ New: `PLAN_CONFLICT`, `DUPLICATE_KEY`, `MISSING_VERIFICATION`,
 | `Take(ctx, TakeRequest)`                                                           | `Claim(ctx, ClaimRequest{Wait})`; `ErrDone`, `ErrStalled`                          |
 | `Finish(ctx, token, opts)`                                                         | `Verify(ctx, token, VerifyComplete)`                                               |
 | `Verify(ctx, taskID, opts)`                                                        | `Verify(ctx, token, VerifyProof \| VerifyRegression)`                              |
-| `Release(ctx, token, note)`                                                        | `Release(ctx, token, ReleaseOptions{Note, Failed})`                                |
+| `Release(ctx, token, note)`                                                        | `Release(ctx, ReleaseRequest{Token, Note, Failed})`                                |
 | `Renew(ctx, token, lease)`                                                         | `Renew(ctx, token)` (default lease)                                                |
 | `List(ctx, pid, ListFilter)`, `Available`, `Takeable`, `Graph`                     | `List(ctx, ListQuery{Filter})` → `PlanSnapshot`                                    |
 | `Show(ctx, id)`, `History`, `Evidence`                                             | `Show(ctx, pid, ref, full)`                                                        |

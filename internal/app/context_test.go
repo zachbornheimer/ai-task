@@ -31,7 +31,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	if _, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeVerificationFailed {
 		t.Fatalf("expected a failed proof, got %v", err)
 	}
-	if _, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Note: "out of time"}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "out of time"}); err != nil {
 		t.Fatal(err)
 	}
 	s2 := f.claim(string(a))

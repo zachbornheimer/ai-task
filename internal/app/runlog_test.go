@@ -62,7 +62,7 @@ func TestVerifyWritesRunLogs(t *testing.T) {
 	f.commit(s.Workspace, "a.txt", "attempt one")
 	failed, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeVerificationFailed)
-	if _, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Note: "stuck"}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "stuck"}); err != nil {
 		t.Fatal(err)
 	}
 	s = f.claim(string(a))

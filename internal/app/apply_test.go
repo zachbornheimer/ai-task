@@ -199,7 +199,7 @@ func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 	if f.status(string(c)) != task.StatusClaimed {
 		t.Fatal("claimed task hidden")
 	}
-	if _, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Note: "needs x"}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "needs x"}); err != nil {
 		t.Fatal(err)
 	}
 	if f.status(string(c)) != task.StatusBlocked {

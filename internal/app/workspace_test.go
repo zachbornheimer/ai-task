@@ -25,7 +25,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	young := f.add("young")
 	// Break the oldest task's worktree: an agent left it on another branch.
 	s := f.claim(string(old))
-	if _, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token}); err != nil {
 		t.Fatal(err)
 	}
 	f.git(s.Workspace, "checkout", "-q", "-b", "somewhere-else")
@@ -83,7 +83,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	// A planner reset also clears the mark (the alternative repair path).
 	z := f.add("z")
 	sz := f.claim(string(z))
-	f.e.Release(f.ctx, sz.Token, app.ReleaseOptions{})
+	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sz.Token})
 	f.git(sz.Workspace, "checkout", "-q", "--detach")
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
 	wantCode(t, err, fault.CodeWorkspaceUnavailable)

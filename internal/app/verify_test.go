@@ -222,7 +222,7 @@ func TestLateBlockerPreventsCompletion(t *testing.T) {
 		t.Fatal("claim lost")
 	}
 	// Release, complete the prerequisite, resume and complete.
-	f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Note: "waiting on pre"})
+	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "waiting on pre"})
 	if f.status(string(a)) != task.StatusBlocked {
 		t.Fatal("not blocked")
 	}
@@ -512,7 +512,7 @@ func TestOrphanedDiagnosticRunsAreReconciled(t *testing.T) {
 	if v, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true); v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunRunning {
 		t.Fatal("setup: diagnostic run not visible as running")
 	}
-	f.e.Release(f.ctx, s.Token, app.ReleaseOptions{})
+	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token})
 	v, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true)
 	if v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunError || v.Failures != 0 {
 		t.Fatalf("orphaned diagnostic run: %+v failures=%d", v.Verification.Task, v.Failures)

@@ -42,10 +42,10 @@ func TestCooldownIsOneRuleEverywhere(t *testing.T) {
 			if via == "failed verification" {
 				_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 				wantCode(t, err, fault.CodeVerificationFailed)
-				if _, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{}); err != nil {
+				if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token}); err != nil {
 					t.Fatal(err)
 				}
-			} else if _, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Failed: true}); err != nil {
+			} else if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Failed: true}); err != nil {
 				t.Fatal(err)
 			}
 			if st := f.status(string(a)); st != task.StatusCooldown {
@@ -115,12 +115,12 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	if _, err := f.e.Verify(f.ctx, sf.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeVerificationFailed {
 		t.Fatal(err)
 	}
-	f.e.Release(f.ctx, sf.Token, app.ReleaseOptions{})
+	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sf.Token})
 	// exhausted (max attempts 2)
 	exhausted := f.add("exhausted")
 	for i := 0; i < 2; i++ {
 		s := f.claim(string(exhausted))
-		f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Failed: true})
+		f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Failed: true})
 		f.c.Advance(time.Hour + time.Minute)
 	}
 	// complete
@@ -154,7 +154,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	// is still running when the table is read
 	cooling := f.add("cooling")
 	sc := f.claim(string(cooling))
-	f.e.Release(f.ctx, sc.Token, app.ReleaseOptions{Failed: true})
+	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sc.Token, Failed: true})
 	// failed proof whose cooldown is still running: the case where the
 	// derived status and the SQL prefilter used to disagree
 	fc := f.addWith("failedcooling", "false")
@@ -163,7 +163,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	if _, err := f.e.Verify(f.ctx, sfc.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeVerificationFailed {
 		t.Fatal(err)
 	}
-	f.e.Release(f.ctx, sfc.Token, app.ReleaseOptions{})
+	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sfc.Token})
 
 	store, err := sqlite.Open(f.ctx, f.path)
 	if err != nil {

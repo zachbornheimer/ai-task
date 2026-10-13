@@ -165,7 +165,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 			// ours, so release it for the next attempt.
 			fmt.Fprintf(out, "worker %d: %s agent error: %v\n", n, session.Task.ID, err)
 			_, _ = eng.Log(ctx, session.Token, at.LogEntry{Note: "agent error: " + err.Error()})
-			_, _ = eng.Release(ctx, session.Token, at.ReleaseOptions{Note: "released after agent error", Failed: true})
+			_ = eng.Release(ctx, at.ReleaseRequest{Token: session.Token, Note: "released after agent error", Failed: true})
 		}
 	}
 }

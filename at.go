@@ -39,7 +39,7 @@ type Engine interface {
 
 	Claim(ctx context.Context, q ClaimRequest) (Session, error)
 	Renew(ctx context.Context, token SessionToken) (time.Time, error)
-	Release(ctx context.Context, token SessionToken, opts ReleaseOptions) (TaskView, error)
+	Release(ctx context.Context, q ReleaseRequest) error
 	Log(ctx context.Context, token SessionToken, entry LogEntry) (RecordedLog, error)
 
 	Verify(ctx context.Context, token SessionToken, mode VerifyMode) (VerifyResult, error)
@@ -106,7 +106,7 @@ type (
 	Handoff        = execution.Handoff
 	Session        = app.Session
 	ClaimRequest   = app.ClaimRequest
-	ReleaseOptions = app.ReleaseOptions
+	ReleaseRequest = app.ReleaseRequest
 )
 
 // Read models.

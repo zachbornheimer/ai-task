@@ -206,7 +206,7 @@ func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	f.commit(sx.Workspace, "x.txt", "x")
 	_, err = f.e.Verify(f.ctx, sx.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeVerificationFailed)
-	f.e.Release(f.ctx, sx.Token, app.ReleaseOptions{})
+	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sx.Token})
 	if f.status(string(x)) != task.StatusNeedsAttention {
 		v := f.show(string(x))
 		pp, _ := f.e.Project(f.ctx, f.proj.ID)
@@ -248,7 +248,7 @@ func TestReleaseAndCooldown(t *testing.T) {
 	f.e.UpdateProject(f.ctx, p)
 	a := f.add("a")
 	s := f.claim(string(a))
-	v, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Note: "giving up for now", Failed: true})
+	v, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "giving up for now", Failed: true})
 	if err != nil || v.Status != task.StatusCooldown || v.Failures != 1 {
 		t.Fatalf("%+v %v", v, err)
 	}
@@ -260,11 +260,11 @@ func TestReleaseAndCooldown(t *testing.T) {
 		t.Fatalf("%+v", s2.Handoff)
 	}
 	// Released without --failed: immediately claimable, no failure.
-	v, _ = f.e.Release(f.ctx, s2.Token, app.ReleaseOptions{})
+	v, _ = f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s2.Token})
 	if v.Status != task.StatusReady || v.Failures != 1 {
 		t.Fatalf("%+v", v)
 	}
-	_, err = f.e.Release(f.ctx, s2.Token, app.ReleaseOptions{})
+	_, err = f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s2.Token})
 	wantCode(t, err, fault.CodeSessionSuperseded)
 }
 
@@ -291,7 +291,7 @@ func TestHandoffCarriesPrerequisiteLearningsAndLastFailure(t *testing.T) {
 	f.commit(sc.Workspace, "c.txt", "c")
 	_, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeVerificationFailed)
-	if _, err := f.e.Release(f.ctx, sc.Token, app.ReleaseOptions{Note: "stuck"}); err != nil {
+	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sc.Token, Note: "stuck"}); err != nil {
 		t.Fatal(err)
 	}
 	sc2 := f.claim(string(c))
@@ -370,7 +370,7 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	wantCode(t, err, fault.CodeSessionSuperseded)
 	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeSessionSuperseded)
-	_, err = f.e.Release(f.ctx, sA.Token, app.ReleaseOptions{})
+	_, err = f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sA.Token})
 	wantCode(t, err, fault.CodeSessionSuperseded)
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sA.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}}); err == nil {
 		t.Fatal("stale session could add a blocker")

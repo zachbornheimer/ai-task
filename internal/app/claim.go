@@ -398,29 +398,37 @@ func (e *Engine) Renew(ctx context.Context, token execution.Token) (time.Time, e
 	return expires, err
 }
 
-// ReleaseOptions controls Release.
-type ReleaseOptions struct {
-	Note string
-	// Failed records a failed attempt (retry bookkeeping and cooldown).
+// ReleaseRequest names the claim to give back. Failed charges the attempt
+// against the task's budget (retry bookkeeping and cooldown); without it the
+// attempt is not counted.
+type ReleaseRequest struct {
+	Token  execution.Token
+	Note   string
 	Failed bool
 }
 
-// Release gives a task back without submitting. The handoff survives and
+// Release gives a task back without submitting; see ReleaseTask.
+func (e *Engine) Release(ctx context.Context, q ReleaseRequest) error {
+	_, err := e.ReleaseTask(ctx, q)
+	return err
+}
+
+// ReleaseTask is Release that also returns the task as it stands afterwards. The handoff survives and
 // the task is claimable again at once (or blocked, if a prerequisite was
 // added meanwhile).
-func (e *Engine) Release(ctx context.Context, token execution.Token, opts ReleaseOptions) (TaskView, error) {
+func (e *Engine) ReleaseTask(ctx context.Context, q ReleaseRequest) (TaskView, error) {
 	now := e.now()
 	var v TaskView
 	var note string
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		a, expired, err := e.authorizeRelease(tx, token, now)
+		a, expired, err := e.authorizeRelease(tx, q.Token, now)
 		if err != nil {
 			return err
 		}
 		if expired {
 			note = "lease had already expired; the task was already unowned and is released"
 		}
-		if entry := (execution.LogEntry{Note: opts.Note}); entry.Validate() == nil {
+		if entry := (execution.LogEntry{Note: q.Note}); entry.Validate() == nil {
 			if _, err := tx.InsertLog(a.TaskID, a.ID, entry, now); err != nil {
 				return err
 			}
@@ -436,7 +444,7 @@ func (e *Engine) Release(ctx context.Context, token execution.Token, opts Releas
 		if err != nil {
 			return err
 		}
-		if opts.Failed {
+		if q.Failed {
 			if _, err := tx.RecordFailure(a.TaskID, a.ID, proj.RetryCooldown, now); err != nil {
 				return err
 			}
