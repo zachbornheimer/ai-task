@@ -99,7 +99,7 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 
 func retryable(err error) bool {
 	switch fault.CodeOf(err) {
-	case fault.CodeNotReady, fault.CodeConflict:
+	case fault.CodeNotReady, fault.CodeConflict, fault.CodeBaseConflict:
 		// Not takeable right now, or the failed task is now excluded from
 		// selection: keep scanning. Infrastructure failures stop the scan.
 		return !fault.IsInternal(err)
@@ -117,6 +117,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	var proj project.Project
 	var attempt execution.Attempt
 	quarantineSeq := 0
+	var required []workspace.Requirement
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		var r sqlite.Record
 		var err error
@@ -168,6 +169,9 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		if prev := r.Attempt; prev != nil && prev.EndedAt == nil {
 			quarantineSeq = prev.Seq
 		}
+		if required, err = completedRequirements(tx, r.Task.ID); err != nil {
+			return err
+		}
 		attempt, err = tx.StartAttempt(r.Task.ID, r.Attempt, token.Digest(), now, lease)
 		if err != nil {
 			return err
@@ -218,7 +222,14 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	// quarantined first, so a stale process keeps only its own expired
 	// token and can never reach this attempt's files or branch.
 	mgr := e.manager(proj)
-	info, werr := mgr.EnsureTask(ctx, string(sess.Task.ID), proj.TargetBranch, quarantineSeq)
+	base, werr := proj.TargetBranch, error(nil)
+	if !mgr.BranchExists(ctx, workspace.TaskBranch(string(sess.Task.ID))) {
+		base, werr = mgr.Base(ctx, proj.TargetBranch, required)
+	}
+	var info workspace.Info
+	if werr == nil {
+		info, werr = mgr.EnsureTask(ctx, string(sess.Task.ID), base, quarantineSeq)
+	}
 	if werr == nil {
 		werr = workspace.StoreToken(ctx, info.Path, string(token))
 	}
@@ -234,6 +245,9 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			return tx.SetWorkspaceError(sess.Task.ID, fault.MessageOf(werr), now)
 		})
 		e.notify()
+		if fault.CodeOf(werr) == fault.CodeBaseConflict {
+			return Session{}, fault.New(fault.CodeBaseConflict, "%s: required tasks cannot be combined: %s; the task stays out of automatic claims until the conflict is resolved (rework one required task) and `atask claim %s` succeeds", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID)
+		}
 		return Session{}, fault.New(fault.CodeNotReady, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
 	}
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
@@ -253,6 +267,22 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		sess.Task.Attempt.Workspace, sess.Task.Attempt.Branch = info.Path, info.Branch
 	}
 	return sess, nil
+}
+
+// completedRequirements lists the completed revisions of the tasks id
+// requires, in requirement order.
+func completedRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, error) {
+	recs, err := tx.Requirements(id)
+	if err != nil {
+		return nil, err
+	}
+	var out []workspace.Requirement
+	for _, r := range recs {
+		if r.CompletedRevision != "" {
+			out = append(out, workspace.Requirement{Task: string(r.Task.ID), Revision: r.CompletedRevision})
+		}
+	}
+	return out, nil
 }
 
 // inheritContext adds prerequisite learnings and the last failure to a
