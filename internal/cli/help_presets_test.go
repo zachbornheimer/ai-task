@@ -23,7 +23,7 @@ func presetsOutput(t *testing.T, args ...string) string {
 	t.Helper()
 	var out, errb bytes.Buffer
 	code := Main(Env{
-		Args:   append(args, "presets"),
+		Args:   append(args, "help", "add"),
 		Stdout: &out,
 		Stderr: &errb,
 		Cwd:    t.TempDir(),
@@ -40,7 +40,7 @@ func presetsOutput(t *testing.T, args ...string) string {
 	return out.String()
 }
 
-func TestPresetsCommandLists(t *testing.T) {
+func TestHelpAddListsPresets(t *testing.T) {
 	builtins := proof.DefaultRegistry()
 
 	text := presetsOutput(t)
@@ -49,7 +49,7 @@ func TestPresetsCommandLists(t *testing.T) {
 			t.Fatalf("text output lacks built-in %q:\n%s", name, text)
 		}
 	}
-	for _, col := range []string{"NAME", "SUBJECT", "OPTIONS", "SIZE"} {
+	for _, col := range []string{"NAME", "SUBJECT", "OPTIONS", "SIZE", "PRESET: SUBJECT"} {
 		if !strings.Contains(text, col) {
 			t.Fatalf("text output lacks column %q:\n%s", col, text)
 		}

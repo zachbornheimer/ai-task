@@ -31,7 +31,6 @@ atask projects
 atask project [FLAGS]
 atask doctor
 atask prune
-atask presets
 ```
 
 **Task flags** (`add` and `update`)
@@ -77,8 +76,8 @@ Every task declares two proofs: `--proof` proves this task works, `--regression`
 proves it broke nothing else. Every command is `"PRESET: SUBJECT [key=value ...]"`.
 The subject is the one thing the preset is about; options are `key=value`.
 `run` is the preset for a raw command. Presets run in the task worktree, inside
-`mise exec` when the repo has a mise config. `atask presets` lists built-ins and
-custom presets with their options and default sizes. `atask show` prints both
+`mise exec` when the repo has a mise config. `atask help add` lists built-ins and
+custom presets with their subjects, options and default sizes. `atask show` prints both
 proofs verbatim.
 
 | Preset                                           | Passes when                                                                                                            | Size   |
@@ -101,7 +100,7 @@ proofs verbatim.
 | `pr_merged: NUMBER\|URL`                         | the PR is merged into the target branch                                                                                | small  |
 
 Custom presets live in `~/.config/atask/config.toml` and are listed by
-`atask presets` beside the built-ins. `{subject}` and `{option}` substitute
+`atask help add` beside the built-ins. `{subject}` and `{option}` substitute
 into the argv; a missing required option is `INVALID_INPUT` at add.
 
 ```toml

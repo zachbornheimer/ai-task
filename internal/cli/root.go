@@ -328,7 +328,6 @@ atask version                         build version
 atask add "title" --proof "run: cmd" --regression "run: cmd" [--claim] [--parent ID] [--requires ID] [--group]
 atask update ID [--title ...] [--proof ...] [--regression ...] [--archive --reason ...]
 atask list [project] [ready|blocked|complete|archived|open]
-atask presets
 atask show [ID] [--full]
 atask claim [ID] [--wait]
 atask claim renew [token]
@@ -360,6 +359,9 @@ func init() {
 			if err := c.parse(args); err != nil {
 				return err
 			}
+		}
+		if len(c.args) == 1 {
+			return runCommandHelp(c, c.args[0])
 		}
 		type cmd struct {
 			Name    string `json:"name"`
@@ -424,4 +426,28 @@ func buildVersion(linked string, read func() (*debug.BuildInfo, bool)) string {
 		rev += "-dirty"
 	}
 	return "dev+" + rev
+}
+
+// runCommandHelp is `atask help NAME`: the command's summary, plus the
+// preset table for `add`.
+func runCommandHelp(c *ctxt, name string) error {
+	cmd, ok := commands[name]
+	if !ok {
+		return usage("unknown command %q", name)
+	}
+	out := map[string]any{"command": cmd.name, "usage": cmd.summary}
+	var rows []presetRow
+	if name == "add" {
+		var err error
+		if rows, err = addHelpPresets(); err != nil {
+			return err
+		}
+		out["presets"] = rows
+	}
+	return c.emit(out, func(w io.Writer) {
+		fmt.Fprintf(w, "Usage: atask %s\n  %s\n", cmd.name, cmd.summary)
+		if rows != nil {
+			renderPresets(w, rows)
+		}
+	})
 }

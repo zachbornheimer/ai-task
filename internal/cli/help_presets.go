@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -9,10 +8,6 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/proof"
 )
-
-func init() {
-	register("presets", "list every proof preset with its subject, options, and default size: built-ins, then custom", runPresets)
-}
 
 // presetSources returns the built-in and custom registries. Custom presets
 // come from config.toml; until proof.LoadConfig exists the custom registry
@@ -32,19 +27,14 @@ type presetRow struct {
 	Custom  bool     `json:"custom"`
 }
 
-func runPresets(_ context.Context, c *ctxt, args []string) error {
-	if err := c.parse(args); err != nil {
-		return err
-	}
-	if len(c.args) > 0 {
-		return usage("presets takes no arguments")
-	}
+// addHelpPresets is the presets section of `atask help add`: built-ins,
+// then custom, straight from the registries.
+func addHelpPresets() ([]presetRow, error) {
 	builtin, custom, err := presetSources()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	rows := append(presetRows(builtin, false), presetRows(custom, true)...)
-	return c.emit(map[string]any{"presets": rows}, func(w io.Writer) { renderPresets(w, rows) })
+	return append(presetRows(builtin, false), presetRows(custom, true)...), nil
 }
 
 func presetRows(r *proof.Registry, custom bool) []presetRow {
@@ -62,6 +52,7 @@ func presetRows(r *proof.Registry, custom bool) []presetRow {
 }
 
 func renderPresets(w io.Writer, rows []presetRow) {
+	fmt.Fprintln(w, "\nPresets (--proof / --regression \"PRESET: SUBJECT [k=v]\"):")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSUBJECT\tOPTIONS\tSIZE")
 	for _, r := range rows {
