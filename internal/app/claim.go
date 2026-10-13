@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
@@ -214,8 +215,11 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	// token and can never reach this attempt's files or branch.
 	mgr := e.manager(proj)
 	base, werr := proj.TargetBranch, error(nil)
+	var baseNotes []string
 	if !mgr.BranchExists(ctx, workspace.TaskBranch(string(sess.Task.ID))) {
-		base, werr = mgr.Base(ctx, proj.TargetBranch, required)
+		var resolved workspace.BaseResult
+		resolved, werr = mgr.ResolveBase(ctx, proj.TargetBranch, required)
+		base, baseNotes = resolved.Revision, resolved.Explain()
 	}
 	var info workspace.Info
 	if werr == nil {
@@ -244,6 +248,12 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := tx.SetWorkspace(attempt.ID, info.Path, info.Branch); err != nil {
 			return err
+		}
+		if len(baseNotes) > 0 {
+			entry := execution.LogEntry{Note: strings.Join(baseNotes, "\n")}
+			if _, err := tx.InsertLog(sess.Task.ID, attempt.ID, entry, e.now()); err != nil {
+				return err
+			}
 		}
 		return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
 	}); err != nil {
