@@ -161,3 +161,5 @@ func ParseTaskID(s string) (TaskID, error) { return task.ParseID(s) }
 
 // ParseSessionToken validates an external session token.
 func ParseSessionToken(s string) (SessionToken, error) { return execution.ParseToken(s) }
+
+// timing probe
