@@ -39,7 +39,7 @@ type ClaimRequest struct {
 // after the transaction (Git never runs inside one) and recorded by a
 // second short transaction.
 func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
-	lease, err := execution.LeaseDuration(req.Lease)
+	lease, err := execution.LeaseDurationAtLeast(req.Lease, e.minLease)
 	if err != nil {
 		return Session{}, err
 	}
@@ -521,14 +521,14 @@ func (e *Engine) Whoami(ctx context.Context, token execution.Token) (TaskView, e
 // gone, and a transient error (busy database) is retried sooner than the
 // normal interval. stop ends the heartbeat and returns the terminal error,
 // if any, so the caller can report why the work was aborted.
-func (e *Engine) heartbeat(ctx context.Context, token execution.Token) (context.Context, func() error) {
+func (e *Engine) heartbeat(ctx context.Context, token execution.Token, lease time.Duration) (context.Context, func() error) {
 	opCtx, cancelOp := context.WithCancel(ctx)
 	hctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	var terminal error
 	go func() {
 		defer close(done)
-		interval := e.heartbeatEvery
+		interval := e.renewalInterval(lease)
 		t := time.NewTimer(interval)
 		defer t.Stop()
 		var expiry time.Time
@@ -565,6 +565,16 @@ func (e *Engine) heartbeat(ctx context.Context, token execution.Token) (context.
 		}
 	}()
 	return opCtx, func() error { cancel(); <-done; cancelOp(); return terminal }
+}
+
+// renewalInterval is how often a long operation renews a lease of the given
+// length: a third of the lease, capped by the configured interval, so two
+// consecutive renewals can fail before the lease runs out.
+func (e *Engine) renewalInterval(lease time.Duration) time.Duration {
+	if lease <= 0 {
+		lease = execution.DefaultLease
+	}
+	return min(e.heartbeatEvery, lease/3)
 }
 
 // terminalAuthority reports errors no retry can fix.

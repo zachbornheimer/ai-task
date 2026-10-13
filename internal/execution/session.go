@@ -59,11 +59,17 @@ const (
 // LeaseDuration resolves a requested lease length against the bounds.
 // Zero means DefaultLease.
 func LeaseDuration(requested time.Duration) (time.Duration, error) {
+	return LeaseDurationAtLeast(requested, MinLease)
+}
+
+// LeaseDurationAtLeast is LeaseDuration with a caller-chosen lower bound,
+// the seam that lets tests exercise leases shorter than a real minimum.
+func LeaseDurationAtLeast(requested, min time.Duration) (time.Duration, error) {
 	if requested == 0 {
 		return DefaultLease, nil
 	}
-	if requested < MinLease || requested > MaxLease {
-		return 0, fault.New(fault.CodeInvalidInput, "lease must be between %s and %s", MinLease, MaxLease)
+	if requested < min || requested > MaxLease {
+		return 0, fault.New(fault.CodeInvalidInput, "lease must be between %s and %s", min, MaxLease)
 	}
 	return requested, nil
 }

@@ -47,6 +47,9 @@ type Config struct {
 	// HeartbeatInterval is how often a long operation renews its lease.
 	// Zero means execution.HeartbeatInterval.
 	HeartbeatInterval time.Duration
+	// MinLease lowers the shortest lease a claim may request. Zero means
+	// execution.MinLease; only tests need a smaller value.
+	MinLease time.Duration
 	// Switch creates task worktrees. Nil means WorktrunkSwitcher.
 	Switch workspace.Switcher
 	// Actor is recorded on newly created tasks (ATASK_ACTOR or USER).
@@ -69,6 +72,7 @@ type Engine struct {
 	poll    time.Duration
 	// heartbeatEvery is the lease renewal interval of long operations.
 	heartbeatEvery time.Duration
+	minLease       time.Duration
 	swt            workspace.Switcher
 	actor          string
 	cwd            string
@@ -118,11 +122,15 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if hb <= 0 {
 		hb = execution.HeartbeatInterval
 	}
+	minLease := cfg.MinLease
+	if minLease <= 0 {
+		minLease = execution.MinLease
+	}
 	// Storage keeps millisecond precision; truncating here keeps values the
 	// caller sees identical to what a later read returns.
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
-		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, changed: make(chan struct{}),
+		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, minLease: minLease, changed: make(chan struct{}),
 		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget,
 	}, nil
 }

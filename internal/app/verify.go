@@ -127,7 +127,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	opCtx, stop := e.heartbeat(ctx, token)
+	opCtx, stop := e.heartbeat(ctx, token, p.attempt.Lease)
 	fence := func(tx *sqlite.Tx) error { _, err := e.authorize(tx, token, e.now()); return err }
 	changed, _ := workspace.ChangedFiles(ctx, p.dir, "refs/heads/"+p.proj.TargetBranch)
 	if st, err := workspace.Inspect(ctx, p.dir); err == nil {
@@ -438,7 +438,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		return VerifyResult{}, err
 	}
 	e.notify()
-	opCtx, stop := e.heartbeat(ctx, token)
+	opCtx, stop := e.heartbeat(ctx, token, p.attempt.Lease)
 	fr.checkCtx = opCtx
 	res, err := e.executeFinal(ctx, fr)
 	if terr := stop(); terr != nil && err != nil && opCtx.Err() != nil && ctx.Err() == nil {
