@@ -138,7 +138,7 @@ func TestRunnerKeepsLast64KiB(t *testing.T) {
 }
 
 func TestRunnerUnknownPreset(t *testing.T) {
-	res := NewRunner().Run(context.Background(), CheckProof, ProofSpec{Preset: "ci"}, t.TempDir())
+	res := NewRunner().Run(context.Background(), CheckProof, ProofSpec{Preset: "no-such-preset"}, t.TempDir())
 	if res.Passed || res.ReturnCode != nil || !strings.Contains(res.Output, "unknown preset") {
 		t.Errorf("result = %+v", res)
 	}
