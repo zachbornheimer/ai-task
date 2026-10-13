@@ -335,8 +335,8 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
-		if len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *onCompleteJSON != "" {
-			return usage("--group takes --key, --parent, --check (the epic's own checks, run on the target once every member is complete) and --size; prerequisites, blockers, cohort, outcome, acceptance and pins belong to tasks")
+		if *claim || len(requires)+len(blocks)+len(accept)+len(constraints)+len(pins) > 0 || *cohort != "" || *outcome != "" || *onCompleteJSON != "" {
+			return usage("--group takes --key, --parent, --check (the epic's own checks, run on the target once every member is complete) and --size; prerequisites, blockers, cohort, outcome, acceptance, pins and --claim belong to tasks")
 		}
 		g := plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent), Size: *size}
 		for i, raw := range checks {
