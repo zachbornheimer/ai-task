@@ -78,7 +78,8 @@ func (f *proofFlags) parse(size string) (proofSpec, regression *proof.ProofSpec,
 	return proofSpec, regression, nil
 }
 
-// requireBoth reports which flag is missing when a task is added.
+// requireBoth reports which flag is missing when a group is given proofs.
+// Tasks do not use it: a task missing either proof is a draft.
 func (f *proofFlags) requireBoth() error {
 	switch {
 	case f.proof == "" && f.regression == "":

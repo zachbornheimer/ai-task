@@ -383,9 +383,6 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 				return err
 			}
 		} else {
-			if err := pfl.requireBoth(); err != nil {
-				return err
-			}
 			if t.Proof, t.Regression, err = pfl.parse(*size); err != nil {
 				return err
 			}
@@ -749,7 +746,7 @@ func renderProjects(w io.Writer, ps []project.Project) error {
 
 func listFilter(s string) (app.Filter, bool) {
 	switch s {
-	case "ready", "blocked", "complete", "archived", "open", "all":
+	case "ready", "blocked", "draft", "complete", "archived", "open", "all":
 		return app.Filter(s), true
 	}
 	return "", false

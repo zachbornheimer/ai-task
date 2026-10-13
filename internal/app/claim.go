@@ -337,6 +337,8 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 		return fault.New(fault.CodeInvalidInput, "%s is a group and cannot be claimed", id)
 	case task.StatusArchived:
 		return fault.New(fault.CodeNotFound, "%s is archived", id)
+	case task.StatusDraft:
+		return fault.New(fault.CodeNotReady, "%s is a draft: it needs both proofs before it can be claimed; run `atask update %s --proof \"run: ...\" --regression \"run: ...\"`", id, id)
 	case task.StatusBlocked:
 		return fault.New(fault.CodeNotReady, "%s is blocked by %d incomplete prerequisite(s); see `atask show %s`", id, r.UnmetRequires, id)
 	case task.StatusClaimed:
@@ -349,8 +351,6 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 		return fault.New(fault.CodeConflict, "%s is complete", id)
 	case task.StatusNeedsAttention:
 		switch {
-		case !verification.HasRequired(r.Task.Verification.TaskChecks):
-			return fault.New(fault.CodeInvalidInput, "%s has no required task check (legacy or edited policy); a planner must `atask update %s --proof ...` before it can be claimed", id, id)
 		case facts.Exhausted:
 			return fault.New(fault.CodeStalled, "%s exhausted its attempts (%d failures); a planner must `atask update %s --reset-attempts`", id, r.Failures, id)
 		}

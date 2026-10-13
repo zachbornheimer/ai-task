@@ -8,7 +8,7 @@ atask help [COMMAND]
 atask version
 atask context [TASK_ID]
 
-atask list [all|open|ready|blocked|complete|archived]
+atask list [all|open|ready|blocked|draft|complete|archived]
 atask show [TASK_ID] [--full]
 atask status
 
@@ -300,6 +300,7 @@ const (
     FilterOpen     ListFilter = "open"
     FilterReady    ListFilter = "ready"
     FilterBlocked  ListFilter = "blocked"
+    FilterDraft    ListFilter = "draft"
     FilterComplete ListFilter = "complete"
     FilterArchived ListFilter = "archived"
 )
@@ -308,7 +309,7 @@ const (
 **Contract semantics**
 
 - `Apply`: atomic creation, updates, parent relationships, dependencies, both
-  proofs, and `on_complete` configuration. A task without both proofs is rejected. Adding an open title that already exists
+  proofs, and `on_complete` configuration. A task filed without both proofs is a draft: listed under its own glyph, never claimable, no attempt budget. Giving it both proofs makes it ready. Vacuity rules apply once proofs are supplied. A task missing any required field is a draft; the required fields are proof and regression (the title is required at add). Adding an open title that already exists
   returns the existing task.
 - `List` / `Show`: task state, hierarchy, history, every `RunResult`, and
   action results. `List` is scoped to one project; `general` when none is given.

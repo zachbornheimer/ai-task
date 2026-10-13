@@ -116,6 +116,15 @@ type Policy struct {
 	OnComplete      []proof.ActionSpec `json:"on_complete,omitempty"`
 }
 
+// IsDraft reports whether the policy is still missing a proof: it has no
+// required task check (no --proof), or a --proof without its --regression.
+// A task with a drafted policy is listed but never claimable. Policies from
+// before proofs existed (a required check, neither proof recorded) are not
+// drafts. The SQL pre-filter in sqlite.claimableWhere must agree.
+func (p Policy) IsDraft() bool {
+	return !HasRequired(p.TaskChecks) || (p.Proof != nil && p.RegressionProof == nil)
+}
+
 // Validate enforces structural rules. It does not judge whether the checks
 // prove anything; see docs/verification.md for that limitation.
 func (p Policy) Validate() error {

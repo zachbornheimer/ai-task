@@ -30,8 +30,11 @@ func TestBareVerifyIsInvalid(t *testing.T) {
 func TestEmptyChecksFailClosed(t *testing.T) {
 	f := newGitFixture(t)
 	// A task without checks cannot be planned, and checks cannot be removed.
+	// A task without checks is a draft, and checks cannot be removed.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "nc", Title: "no checks"}}})
-	wantCode(t, err, fault.CodeInvalidInput)
+	if err != nil {
+		t.Fatal(err)
+	}
 	a := f.add("a")
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{})}}})
 	wantCode(t, err, fault.CodeInvalidInput)
@@ -381,7 +384,9 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	}
 	// Planning boundaries.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "o", Title: "o", TaskChecks: []verification.CheckSpec{opt("o1")}}}})
-	wantCode(t, err, fault.CodeInvalidInput)
+	if err != nil { // optional-only checks gate nothing: the task is a draft
+		t.Fatal(err)
+	}
 	a := f.add("a")
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{opt("o2")})}}})
 	wantCode(t, err, fault.CodeInvalidInput)
@@ -398,7 +403,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 		}
 	}
 	setPolicy(a, optJSON("o3"))
-	if st := f.status(string(a)); st != task.StatusNeedsAttention {
+	if st := f.status(string(a)); st != task.StatusDraft {
 		t.Fatalf("vacuous task status %s", st)
 	}
 	snap, _ := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterReady})
@@ -410,7 +415,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
 	wantCode(t, err, fault.CodeNotReady)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeInvalidInput)
+	wantCode(t, err, fault.CodeNotReady)
 	// Checks made vacuous underneath a live claim: completion still refuses.
 	b := f.add("b")
 	s := f.claim(string(b))

@@ -52,8 +52,11 @@ func (h *proofHarness) failsWith(want []string, args ...string) {
 
 func TestAddRequiresBothProofs(t *testing.T) {
 	h := newProofHarness(t)
-	h.failsWith([]string{"--regression"}, "add", "t", "--proof", "run: go version")
-	h.failsWith([]string{"--proof"}, "add", "t", "--regression", "run: go version")
+	for _, args := range [][]string{{"add", "t1", "--proof", "run: go version"}, {"add", "t2", "--regression", "run: go version"}} {
+		if code, out, _ := h.run(append([]string{"--json"}, args...)...); code != ExitOK || !strings.Contains(out, `"status":"draft"`) {
+			t.Fatalf("%v must file a draft: %d %s", args, code, out)
+		}
+	}
 	h.failsWith([]string{"--proof"}, "add", "t", "--check", "x: y")
 
 	if code, _, errOut := h.run("add", "ok", "--key", "ok", "--proof", "run: go version", "--regression", "run: go version", "--size", "small"); code != ExitOK {

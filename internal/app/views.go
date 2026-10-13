@@ -345,8 +345,6 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	if st == task.StatusNeedsAttention {
 		facts := r.Facts(now, p.MaxAttempts)
 		switch {
-		case facts.Unverifiable:
-			v.AttentionReason = "no required task check; add one with `atask update --proof`"
 		case facts.Exhausted:
 			v.AttentionReason = fmt.Sprintf("attempts exhausted (%d failures); `atask update --reset-attempts` after fixing the cause", r.Failures)
 		case facts.WorkspaceBlocked:

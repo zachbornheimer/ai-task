@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
-	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
+	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
 func openBoard(t *testing.T) (*app.Engine, context.Context) {
@@ -77,8 +77,14 @@ func TestGeneralAddRequiresCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.Apply(ctx, plan.ChangeSet{ProjectID: p.ID, Operations: []plan.Change{plan.AddTask{Title: "file this from ~/.agents"}}})
-	wantCode(t, err, fault.CodeInvalidInput)
+	res, err := e.Apply(ctx, plan.ChangeSet{ProjectID: p.ID, Operations: []plan.Change{plan.AddTask{Title: "file this from ~/.agents"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Show(ctx, p.ID, string(res.Created["#0"]), false)
+	if err != nil || v.Status != task.StatusDraft {
+		t.Fatalf("a task without proofs is a draft: %v %v", v.Status, err)
+	}
 }
 
 func TestGeneralAddStampsOrigin(t *testing.T) {
@@ -102,8 +108,14 @@ func TestGeneralAddStampsOrigin(t *testing.T) {
 
 func TestCodeProjectAddWithoutCheckStillFails(t *testing.T) {
 	f := newGitFixture(t)
-	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "needs a gate"}}})
-	wantCode(t, err, fault.CodeInvalidInput)
+	res, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "needs a gate"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := f.e.Show(f.ctx, f.proj.ID, string(res.Created["#0"]), false)
+	if err != nil || v.Status != task.StatusDraft {
+		t.Fatalf("a task without proofs is a draft: %v %v", v.Status, err)
+	}
 }
 
 func TestGlobalListIncludesGeneralAndNamed(t *testing.T) {

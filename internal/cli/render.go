@@ -71,7 +71,7 @@ func branch(p painter, s string) string { return p.dim(s) }
 
 // renderList prints the hierarchy (list) or a flat filtered list.
 func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter, p painter) {
-	if filter == app.FilterReady || filter == app.FilterBlocked || filter == app.FilterArchived || filter == app.FilterComplete {
+	if filter == app.FilterReady || filter == app.FilterBlocked || filter == app.FilterDraft || filter == app.FilterArchived || filter == app.FilterComplete {
 		for _, t := range snap.Tasks {
 			fmt.Fprintln(w, line(t, p))
 			if filter == app.FilterBlocked {

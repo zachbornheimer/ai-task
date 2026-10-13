@@ -290,11 +290,8 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 		a.result.Created[name] = existing.Task.ID
 		return nil
 	}
-	// A task is implementable only with a required check of its own:
-	// completion fails closed without one, so planning fails closed too.
-	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
-		return fault.New(fault.CodeInvalidInput, "task %q: %v (--proof defines the required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
-	}
+	// A task without both proofs is a draft: it is stored, listed and never
+	// claimable. Vacuity is judged on whatever proofs were supplied.
 	if err := vacuityError(spec); err != nil {
 		return err
 	}

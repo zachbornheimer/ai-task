@@ -14,6 +14,7 @@ const (
 	StatusAwaitingVerification Status = "awaiting_verification"
 	StatusClaimed              Status = "claimed"
 	StatusBlocked              Status = "blocked"
+	StatusDraft                Status = "draft"
 	StatusNeedsAttention       Status = "needs_attention"
 	StatusVerificationFailed   Status = "verification_failed"
 	StatusCooldown             Status = "cooldown"
@@ -49,10 +50,10 @@ type Facts struct {
 	VerificationFailed bool
 	// Exhausted: failures reached the project's attempt limit.
 	Exhausted bool
-	// Unverifiable: the task's stored checks cannot act as a gate (no
-	// required check), so no attempt could ever complete it. A planner
-	// must repair the checks; it is never handed out.
-	Unverifiable bool
+	// Draft: the task is missing its proof or its regression proof, so no
+	// attempt could ever complete it. It is listed, never handed out, and
+	// becomes ready when both proofs are supplied.
+	Draft bool
 	// WorkspaceBlocked: the task's worktree could not be prepared at the
 	// last claim. Automatic selection skips it so the queue keeps moving;
 	// an explicit claim retries; a planner reset clears it.
@@ -65,7 +66,7 @@ type Facts struct {
 // Derive applies the precedence documented in docs/invariants.md:
 //
 //	archived > complete > awaiting_integration > verifying
-//	> awaiting_verification > claimed > blocked > needs_attention
+//	> awaiting_verification > claimed > draft > blocked > needs_attention
 //	> cooldown > verification_failed > interrupted > ready
 //
 // Cooldown outranks verification_failed so that a task whose newest proof
@@ -87,9 +88,11 @@ func Derive(f Facts) Status {
 		return StatusAwaitingVerification
 	case f.LeaseActive:
 		return StatusClaimed
+	case f.Draft:
+		return StatusDraft
 	case f.UnmetRequires > 0:
 		return StatusBlocked
-	case f.Exhausted, f.Unverifiable, f.WorkspaceBlocked:
+	case f.Exhausted, f.WorkspaceBlocked:
 		return StatusNeedsAttention
 	case f.CooldownUntil.After(f.Now):
 		return StatusCooldown
@@ -131,7 +134,7 @@ func (s Status) Open() bool {
 // Glyph is the Beads-style progress glyph: ○ never started, ◐ started but
 // not complete (claimed, verifying, submitted, awaiting integration,
 // interrupted, failed or cooling, or any state after an attempt existed),
-// ● complete. It is a progress indicator, not a liveness indicator; the
+// ● complete, ◌ draft (missing a proof). It is a progress indicator, not a liveness indicator; the
 // annotation says why a ◐ task is not complete. started reports whether
 // any attempt ever existed, which the status alone cannot tell for
 // blocked, ready and needs_attention tasks.
@@ -141,6 +144,9 @@ func Glyph(s Status, started bool) string {
 		return "●"
 	case StatusClaimed, StatusVerifying, StatusAwaitingVerification, StatusAwaitingIntegration, StatusInterrupted, StatusVerificationFailed, StatusCooldown:
 		return "◐"
+	}
+	if s == StatusDraft {
+		return "◌"
 	}
 	if started && s != StatusArchived && s != StatusGroup {
 		return "◐"
@@ -157,6 +163,8 @@ func (s Status) Annotation() string {
 	switch s {
 	case StatusBlocked:
 		return "[blocked]"
+	case StatusDraft:
+		return "[draft]"
 	case StatusAwaitingVerification:
 		return "[awaiting verification]"
 	case StatusVerifying:
@@ -181,7 +189,7 @@ func (s Status) Annotation() string {
 func ParseStatus(s string) (Status, bool) {
 	switch Status(s) {
 	case StatusArchived, StatusComplete, StatusAwaitingIntegration, StatusVerifying, StatusAwaitingVerification,
-		StatusClaimed, StatusBlocked, StatusNeedsAttention, StatusVerificationFailed, StatusCooldown, StatusInterrupted, StatusReady, StatusGroup:
+		StatusClaimed, StatusBlocked, StatusDraft, StatusNeedsAttention, StatusVerificationFailed, StatusCooldown, StatusInterrupted, StatusReady, StatusGroup:
 		return Status(s), true
 	}
 	return "", false

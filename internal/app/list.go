@@ -22,6 +22,8 @@ const (
 	FilterReady Filter = "ready"
 	// FilterBlocked: tasks with unmet hard prerequisites.
 	FilterBlocked Filter = "blocked"
+	// FilterDraft: tasks still missing a proof or regression proof.
+	FilterDraft Filter = "draft"
 	// FilterAll: everything live, complete included.
 	FilterAll Filter = "all"
 	// FilterComplete: completed live tasks and groups.
@@ -133,6 +135,10 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				}
 			case FilterBlocked:
 				if st != task.StatusBlocked {
+					continue
+				}
+			case FilterDraft:
+				if st != task.StatusDraft {
 					continue
 				}
 			case FilterComplete:
@@ -258,7 +264,7 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 	if err != nil {
 		return s, err
 	}
-	var exhausted, blockedByExhausted, workspaceBlocked, unverifiable int
+	var exhausted, blockedByExhausted, workspaceBlocked, drafts int
 	var epicsPending, epicsFailed, epicsErrored int
 	var epicErrors []string
 	for _, r := range records {
@@ -318,13 +324,13 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 			s.Active++
 		case st == task.StatusNeedsAttention:
 			switch facts := r.Facts(n, proj.MaxAttempts); {
-			case facts.Unverifiable:
-				unverifiable++
 			case facts.Exhausted:
 				exhausted++
 			default:
 				workspaceBlocked++
 			}
+		case st == task.StatusDraft:
+			drafts++
 		case st == task.StatusBlocked:
 			blockedByExhausted++
 		}
@@ -343,8 +349,8 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 		if workspaceBlocked > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have an unusable workspace; fix the worktree and `atask claim <task>`, or `atask update <task> --reset-attempts`", workspaceBlocked))
 		}
-		if unverifiable > 0 {
-			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) have no required task check; `atask update <task> --proof ...`", unverifiable))
+		if drafts > 0 {
+			s.Reasons = append(s.Reasons, fmt.Sprintf("%d draft task(s) need both proofs; `atask update <task> --proof ... --regression ...`", drafts))
 		}
 		if blockedByExhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) blocked behind work that cannot progress", blockedByExhausted))

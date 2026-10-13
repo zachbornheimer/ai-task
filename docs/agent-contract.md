@@ -28,7 +28,7 @@ stdout (an envelope in JSON mode) and exits `0`.
 
 | Code                   | Meaning |
 | ---------------------- | ------- |
-| `INVALID_INPUT`        | malformed argument, reference, spec, or dependency edge (cycle, self, duplicate, cross-project); `atask verify` without a mode; `add` without `--proof` and `--regression`, `claim` in a project without regression checks, or a check set emptied under a live claim |
+| `INVALID_INPUT`        | malformed argument, reference, spec, or dependency edge (cycle, self, duplicate, cross-project); `atask verify` without a mode; `claim` in a project without regression checks, or a check set emptied under a live claim |
 | `NOT_FOUND`            | unknown task, key, project, or no project for this directory (`--project` or `atask init`) |
 | `CONFLICT`             | the request clashes with current state: stale `--expect-rev`, edit to a completed or claimed contract, illegal archive, key reused with a different definition, task already claimed (live lease) or complete, `verify complete` still running for this attempt |
 | `INVALID_SESSION`      | the token is unknown, expired, superseded, or finished: stop editing and `atask claim <task>` again |
@@ -43,7 +43,7 @@ stdout (an envelope in JSON mode) and exits `0`.
 ````
 
 atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]*
-[--outcome ..] [--constraint ..]*[--accept ..]* --proof "PRESET: SUBJECT" --regression "PRESET: SUBJECT"
+[--outcome ..] [--constraint ..]*[--accept ..]* [--proof "PRESET: SUBJECT" --regression "PRESET: SUBJECT"]
 (groups: --proof and --regression, same as tasks)
 [--on-complete "PRESET: SUBJECT"]*[--on-complete-detach "PRESET: SUBJECT"]*
 [--pin PATH]*[--claim]
@@ -82,8 +82,7 @@ stale `--expect-rev`), a different request under the same key is
 
 - Every task carries both a proof (`--proof "PRESET: SUBJECT"`, proves
   the task works) and a regression (`--regression "PRESET: SUBJECT"`, proves
-  nothing else broke; `--size` sets its time class). `add` with only one
-  is `INVALID_INPUT` naming the missing flag; `--check` on a task is
+  nothing else broke; `--size` sets its time class). A task missing either one is a draft: `add` creates it, `list draft` shows it with `◌`, and `claim` is `NOT_READY` naming `--proof` and `--regression`. Never claim a draft; supply both with `update` and it becomes ready. `--check` on a task is
   `INVALID_INPUT` naming `--proof`. `update --proof` / `--regression`
   replace either one. `atask show` lists both under TASK CHECKS and
   `show --json` carries `proof` and `regression` objects
@@ -337,7 +336,7 @@ atask prune remove worktrees of complete/archived tasks and quarantined director
 Glyphs are progress, not liveness: `○` never started (ready or blocked
 work with no attempt yet), `◐` started but not complete (claimed,
 verifying, awaiting integration, interrupted,
-failed, cooling, or any task that once had an attempt), `●` complete.
+failed, cooling, or any task that once had an attempt), `●` complete, `◌` draft (missing proof or regression).
 The bracketed annotation (`[blocked]`, `[failed]`, `[awaiting
 verification]`, …) says why a task is not complete. A group shows
 `(n/m complete)`: `●` only when a nonempty member set is complete, `◐`

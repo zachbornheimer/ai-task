@@ -92,7 +92,7 @@ claimed, verifying, and submissions whose cohort can be verified.
   a live claim's worktree or any branch. (`TestPruneWorkspaces`)
 - Glyphs reflect historical progress: ○ never started, ◐ started but not
   complete (including awaiting verification, failed, and a blocked task
-  with a past attempt), ● complete; a group is ◐ as soon as one member
+  with a past attempt), ● complete, ◌ draft (missing proof or regression); a group is ◐ as soon as one member
   started. (`cli.TestListGolden`: list.txt, list_glyphs.txt, list_nested.txt)
 - An idempotency key is bound to the request's content digest; a replay
   under a stable key compares blockers as well; a change set that changes
