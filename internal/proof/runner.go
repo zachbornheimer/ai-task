@@ -122,10 +122,10 @@ func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, c
 		log = io.MultiWriter(tail, cmd.Log)
 	}
 	out := checkexec.Run(ctx, checkexec.Spec{Argv: cmd.Argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: budget, Log: log})
-	return finishRun(res, spec, out, tail), out
+	return r.finishRun(res, spec, cmd.Dir, out, tail), out
 }
 
-func finishRun(res RunResult, spec ProofSpec, out checkexec.Result, tail *tailBuffer) RunResult {
+func (r *Runner) finishRun(res RunResult, spec ProofSpec, workdir string, out checkexec.Result, tail *tailBuffer) RunResult {
 	res.StartedAt = out.StartedAt
 	res.ElapsedMS = out.FinishedAt.Sub(out.StartedAt).Milliseconds()
 	res.TimedOut = out.TimedOut
