@@ -411,10 +411,14 @@ type ReleaseOptions struct {
 func (e *Engine) Release(ctx context.Context, token execution.Token, opts ReleaseOptions) (TaskView, error) {
 	now := e.now()
 	var v TaskView
+	var note string
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		a, err := e.authorize(tx, token, now)
+		a, expired, err := e.authorizeRelease(tx, token, now)
 		if err != nil {
 			return err
+		}
+		if expired {
+			note = "lease had already expired; the task was already unowned and is released"
 		}
 		if entry := (execution.LogEntry{Note: opts.Note}); entry.Validate() == nil {
 			if _, err := tx.InsertLog(a.TaskID, a.ID, entry, now); err != nil {
@@ -441,12 +445,28 @@ func (e *Engine) Release(ctx context.Context, token execution.Token, opts Releas
 			}
 		}
 		v, err = e.buildView(tx, r, proj, now, false, targetHead{})
+		v.Note = note
 		return err
 	})
 	if err == nil {
 		e.notify()
 	}
 	return v, err
+}
+
+// authorizeRelease is authorize, except that an expired lease on the current
+// attempt is accepted: the task is already unowned, so giving it back is
+// idempotent. expired reports that case.
+func (e *Engine) authorizeRelease(tx *sqlite.Tx, token execution.Token, now time.Time) (a execution.Attempt, expired bool, err error) {
+	a, err = e.authorize(tx, token, now)
+	if fault.CodeOf(err) != fault.CodeLeaseExpired {
+		return a, false, err
+	}
+	auth, lookupErr := tx.AttemptByDigest(token.Digest())
+	if lookupErr != nil {
+		return a, false, lookupErr
+	}
+	return auth.Attempt, true, nil
 }
 
 // Log appends an entry under a session's authority.

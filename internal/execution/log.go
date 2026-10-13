@@ -136,7 +136,7 @@ func (h Handoff) ComputeWarnings() []string {
 		w = append(w, "this task has an unusually long log; consider whether its scope is one semantic outcome or whether handoffs are repeating work")
 	}
 	if len(h.RecentLogs) < h.TotalLogs {
-		w = append(w, "history truncated; run `tasks history <task>` for the full log")
+		w = append(w, "history truncated; run `atask show <task> --json` for the full log")
 	}
 	return w
 }

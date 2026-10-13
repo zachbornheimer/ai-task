@@ -234,6 +234,9 @@ func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 		}
 		return c.emit(v, func(w io.Writer) {
 			fmt.Fprintf(w, "✓ Released %s · %s\nState:    %s %s\n", v.ID, v.Title, v.Status.Glyph(), stateLabel(v.Status))
+			if v.Note != "" {
+				fmt.Fprintf(w, "Note:     %s\n", v.Note)
+			}
 		})
 	}
 }

@@ -89,6 +89,9 @@ type History struct {
 
 // TaskView is the read model for one task or group.
 type TaskView struct {
+	// Note explains an outcome the caller might not expect, e.g. a release of an
+	// already-expired lease.
+	Note        string                     `json:"note,omitempty"`
 	ID          task.ID                    `json:"id"`
 	Kind        task.Kind                  `json:"kind"`
 	Key         string                     `json:"key,omitempty"`

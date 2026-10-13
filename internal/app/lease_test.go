@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -121,4 +122,35 @@ func TestHeartbeatRecoversFromTransientAndAbortsOnTerminal(t *testing.T) {
 
 func terminalCode(c fault.Code) bool {
 	return c == fault.CodeSessionSuperseded || c == fault.CodeLeaseExpired || c == fault.CodeSessionFinished
+}
+
+// Releasing after the lease ran out succeeds: the task is already unowned,
+// so release is idempotent and says so. Failed still counts the attempt.
+func TestReleaseAfterExpiry(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		f := newFixture(t)
+		a := f.add("a")
+		s, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a, Lease: 5 * time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.c.Advance(10 * time.Minute)
+		v, err := f.e.Release(f.ctx, s.Token, app.ReleaseOptions{Failed: failed})
+		if err != nil {
+			t.Fatalf("failed=%v: release after expiry: %v", failed, err)
+		}
+		if !strings.Contains(v.Note, "expired") {
+			t.Fatalf("failed=%v: note %q does not mention expiry", failed, v.Note)
+		}
+		wantFailures := 0
+		if failed {
+			wantFailures = 1
+		}
+		if v.Failures != wantFailures {
+			t.Fatalf("failed=%v: failures %d, want %d", failed, v.Failures, wantFailures)
+		}
+		if !failed && v.Status != task.StatusReady {
+			t.Fatalf("status %s, want ready", v.Status)
+		}
+	}
 }
