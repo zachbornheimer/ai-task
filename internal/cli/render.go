@@ -411,9 +411,34 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			fmt.Fprintf(w, "  run %d %s %s %s\n", r.ID, r.Mode, r.Status, r.Summary)
 			renderEvidence(w, r.Evidence, true)
 		}
+		renderRunResults(w, v.RunResults)
 		for _, i := range v.History.Integrations {
 			fmt.Fprintf(w, "  %s — Promoted %s to %s as %s.\n", i.CreatedAt.Format("15:04"), short(i.SourceRevision), i.TargetBranch, short(i.ResultRevision))
 		}
+	}
+}
+
+// renderRunResults prints one line per recorded run: type, preset, elapsed
+// against budget, and how it ended.
+func renderRunResults(w io.Writer, results []proof.RunResult) {
+	if len(results) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  run results")
+	for _, r := range results {
+		fmt.Fprintf(w, "    %s %s %s/%s %s\n", r.CheckType, r.Preset,
+			(time.Duration(r.ElapsedMS) * time.Millisecond).String(), (time.Duration(r.BudgetMS) * time.Millisecond).String(), runOutcome(r))
+	}
+}
+
+func runOutcome(r proof.RunResult) string {
+	switch {
+	case r.TimedOut:
+		return "timed_out"
+	case r.Passed:
+		return "passed"
+	default:
+		return "failed"
 	}
 }
 

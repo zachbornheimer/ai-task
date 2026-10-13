@@ -54,6 +54,8 @@ type Config struct {
 	// Cwd is the working directory of the process that opened the engine,
 	// stamped onto newly created tasks.
 	Cwd string
+	// ProofBudget, when > 0, replaces every run's contract budget (tests).
+	ProofBudget time.Duration
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -70,6 +72,7 @@ type Engine struct {
 	swt            workspace.Switcher
 	actor          string
 	cwd            string
+	proofBudget    time.Duration
 
 	mu      sync.Mutex
 	changed chan struct{}
@@ -120,7 +123,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
 		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, changed: make(chan struct{}),
-		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd,
+		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget,
 	}, nil
 }
 

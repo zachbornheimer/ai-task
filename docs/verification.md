@@ -15,8 +15,10 @@ Check IDs are separate namespaces; a task check whose ID matches a
 regression check is rejected, and vice versa. A task missing either
 category cannot complete (`MISSING_VERIFICATION`).
 
-Each check is an argv array (no shell), optional directory, timeout
-(default 30 min, stored as `timeout_ms`), and `required` flag. Policies are
+Each check is an argv array (no shell), optional directory, optional
+timeout (stored as `timeout_ms`; it can only shorten the contract budget),
+and `required` flag. A task check runs under the 30 s proof budget; a
+regression check under its size budget (60/300/900 s). Policies are
 canonical JSON with a `sha256:` digest; the digest in force is recorded on
 every run.
 
@@ -183,3 +185,14 @@ whole-system verification lives, paid once per epic rather than once per
 task. A failed epic stalls the plan with its reason and is answered with
 follow-up member tasks (which reopen the group) or a corrected check; it
 does not rerun on the same revision and contract by itself.
+
+## Run results
+
+Every executed check runs through `proof.Runner` and records one
+`RunResult` (`check_type`, `preset`, `subject`, `options`, `started_at`,
+`elapsed_ms`, `budget_ms`, `timed_out`, `return_code`, `passed`, `output`
+tail) in the `run_results` table, keyed by task, attempt and run. A run
+over its budget is killed (whole process group) and fails with
+`timed_out=true` and `return_code=null`. `atask show --full` prints one line
+per result (and returns them as `run_results`); `verify proof|regression|
+complete --json` returns the `run_results` of that run.

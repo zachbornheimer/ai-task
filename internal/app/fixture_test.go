@@ -47,6 +47,8 @@ type fixture struct {
 	path string
 	proj project.Project
 	repo string
+	// proofBudget, when set, fixes every run's budget (app.Config.ProofBudget).
+	proofBudget time.Duration
 }
 
 // newFixture is newGitFixture: every project is a Git project.
@@ -83,7 +85,7 @@ func newGitFixture(t *testing.T) *fixture {
 // open opens another engine on the same database, simulating a separate
 // process (separate connection pool, same file).
 func (f *fixture) open() *app.Engine {
-	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, PollInterval: 50 * time.Millisecond, Switch: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")}})
+	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, PollInterval: 50 * time.Millisecond, ProofBudget: f.proofBudget, Switch: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")}})
 	if err != nil {
 		f.t.Fatal(err)
 	}

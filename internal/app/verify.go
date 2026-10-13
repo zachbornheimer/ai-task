@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/checkexec"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -240,7 +240,7 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 func (e *Engine) runChecksSkipping(ctx context.Context, policy verification.Policy, runID int64, revision, digest string, fence func(*sqlite.Tx) error) ([]verification.Evidence, error) {
 	var out []verification.Evidence
 	for _, step := range verification.Plan(policy) {
-		ev := e.execStep(ctx, "", step, runID, revision, digest, true, 0, nil, "")
+		ev := e.execStep(ctx, "", step, runID, revision, digest, true, stepRun{})
 		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 			if err := fence(tx); err != nil {
 				return err
@@ -267,6 +267,8 @@ type runOpts struct {
 	target     string
 	// logDir receives each check's full output; empty writes none.
 	logDir string
+	// size picks the regression budget (small, medium, large).
+	size proof.Size
 }
 
 // suiteOpts derives the task-check and regression budgets for a task
@@ -276,119 +278,9 @@ func suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, r
 	if size == "" {
 		size = task.SizeSmall
 	}
-	taskOpts = runOpts{budget: proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch}
-	regOpts = runOpts{budget: proj.Budgets.RegressionBudget(), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch}
+	taskOpts = runOpts{budget: proj.Budgets.ForSize(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: proof.Size(size)}
+	regOpts = runOpts{budget: proj.Budgets.RegressionBudget(), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch, size: proof.Size(size)}
 	return taskOpts, regOpts
-}
-
-// runChecks executes a policy's checks in dir in planner order, committing
-// each evidence row as it lands. fence is evaluated in each evidence
-// transaction; a failure (lost authority, superseded run) stops the run.
-// The suite shares one budget: a check that would start after it is spent
-// is recorded as timed out without running.
-func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.Policy, runID int64, revision string, fence func(*sqlite.Tx) error, opts runOpts) ([]verification.Evidence, error) {
-	var out []verification.Evidence
-	requiredTaskFailed := false
-	var deadline time.Time
-	if opts.budget > 0 {
-		deadline = time.Now().Add(opts.budget)
-	}
-	extra := changedFilesEnv(dir, opts)
-	for _, step := range verification.Plan(policy) {
-		if err := ctx.Err(); err != nil {
-			return out, fault.Wrap(err, fault.CodeInternal, "verification interrupted")
-		}
-		limit := step.Check.EffectiveTimeout()
-		budgetLimited := false
-		if !deadline.IsZero() {
-			if left := time.Until(deadline); left < limit {
-				limit, budgetLimited = left, true
-			}
-		}
-		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed, limit, extra, opts.logDir)
-		// A check recorded without running (limit <= 0; execStep says why)
-		// keeps its own message: these describe a check that started.
-		if limit > 0 && ev.Outcome == verification.OutcomeTimeout {
-			if budgetLimited {
-				ev.Message = fmt.Sprintf("exceeded %s (%s for the whole suite); the check is too slow for the task's size, or the code it runs hangs", opts.budgetName, opts.budget)
-			} else {
-				ev.Message = fmt.Sprintf("exceeded the check's own timeout (%s)", limit)
-			}
-		}
-		if !step.Regression && step.Check.Required && ev.Outcome != verification.OutcomePassed {
-			requiredTaskFailed = true
-		}
-		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-			if err := fence(tx); err != nil {
-				return err
-			}
-			id, err := tx.InsertEvidence(ev)
-			ev.ID = id
-			return err
-		}); err != nil {
-			return out, err
-		}
-		out = append(out, ev)
-	}
-	return out, nil
-}
-
-func (e *Engine) execStep(ctx context.Context, dir string, step verification.Step, runID int64, revision, policyDigest string, skipRegression bool, timeout time.Duration, extraEnv []string, logDir string) verification.Evidence {
-	c := step.Check
-	now := e.now()
-	ev := verification.Evidence{RunID: runID, CheckID: c.ID, CheckVersion: c.Version, CheckDigest: c.Digest(), Required: c.Required, Revision: revision, PolicyDigest: policyDigest, StartedAt: now, FinishedAt: now, ExitCode: -1}
-	if step.Regression && skipRegression {
-		ev.Outcome = verification.OutcomeSkipped
-		ev.Message = "skipped: a required task check failed"
-		return ev
-	}
-	if timeout <= 0 && extraEnv != nil {
-		// The suite's budget is spent: nothing left for this check.
-		ev.Outcome = verification.OutcomeTimeout
-		ev.Message = "not run: the suite's budget was spent by earlier checks"
-		return ev
-	}
-	if timeout <= 0 {
-		timeout = c.EffectiveTimeout()
-	}
-	spec := checkexec.Spec{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Timeout: timeout, Env: append(checkEnv(dir), extraEnv...)}
-	logFile, logPath := openCheckLog(logDir, c.ID)
-	if logFile != nil {
-		defer logFile.Close()
-		where := c.Dir
-		if where == "" {
-			where = "."
-		}
-		fmt.Fprintf(logFile, "$ %s\n# check %s in %s at %s\n\n", shellJoin(c.Command), c.ID, where, revision)
-		spec.Log, ev.Log = logFile, logPath
-	}
-	res := checkexec.Run(ctx, spec)
-	ev.StartedAt, ev.FinishedAt = res.StartedAt, res.FinishedAt
-	ev.ExitCode, ev.Stdout, ev.Stderr = res.ExitCode, res.Stdout, res.Stderr
-	switch {
-	case !res.Started:
-		ev.Outcome = verification.OutcomeError
-		ev.Message = "could not start check: " + res.Err.Error()
-	case res.TimedOut:
-		ev.Outcome = verification.OutcomeTimeout
-		ev.Message = res.Err.Error()
-	case res.ExitCode == 0:
-		ev.Outcome = verification.OutcomePassed
-	default:
-		ev.Outcome = verification.OutcomeFailed
-		ev.Message = fmt.Sprintf("exit status %d", res.ExitCode)
-		if res.Err != nil {
-			ev.Message = res.Err.Error()
-		}
-	}
-	if logFile != nil {
-		fmt.Fprintf(logFile, "\n# %s: exit=%d after %s", ev.Outcome, ev.ExitCode, ev.FinishedAt.Sub(ev.StartedAt).Round(time.Millisecond))
-		if ev.Message != "" {
-			fmt.Fprintf(logFile, " (%s)", ev.Message)
-		}
-		fmt.Fprintln(logFile)
-	}
-	return ev
 }
 
 // checkEnv is the environment checks run with: the parent environment

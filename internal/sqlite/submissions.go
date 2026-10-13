@@ -202,6 +202,11 @@ func (t *Tx) InsertEvidence(e verification.Evidence) (int64, error) {
 		return 0, wrapInternal(err, "insert evidence")
 	}
 	id, _ := res.LastInsertId()
+	if e.Run != nil {
+		if err := t.InsertRunResult(e.RunID, id, *e.Run); err != nil {
+			return 0, err
+		}
+	}
 	return id, nil
 }
 
@@ -235,7 +240,11 @@ func (t *Tx) EvidenceForRun(runID int64) ([]verification.Evidence, error) {
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return out, t.attachRunResults(runID, out)
 }
 
 // ReconcileRuns closes final runs whose owning attempt's lease has expired
