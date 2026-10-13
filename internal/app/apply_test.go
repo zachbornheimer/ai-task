@@ -266,6 +266,48 @@ func TestIdempotencyIsBoundToThePayload(t *testing.T) {
 	}
 }
 
+// An idempotency key is bound to the full request body: different Blocks
+// or checks under the same key are IDEMPOTENCY_CONFLICT; an exact replay
+// returns the original result and does not bump the plan revision.
+func TestIdempotencyBindsBody(t *testing.T) {
+	f := newFixture(t)
+	base := f.add("base")
+	other := f.add("other")
+	orig := plan.AddTask{Key: "body", Title: "body", Blocks: []plan.Ref{plan.Ref(base)}, TaskChecks: okChecks()}
+	r1, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K-body", Operations: []plan.Change{orig}})
+	if err != nil || r1.Changed != 1 {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	rev := r1.PlanRev
+
+	diffBlocks := orig
+	diffBlocks.Blocks = []plan.Ref{plan.Ref(other)}
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K-body", Operations: []plan.Change{diffBlocks}})
+	wantCode(t, err, fault.CodeIdempotencyConflict)
+	if v := f.show(string(other)); len(v.Requires) != 0 {
+		t.Fatal("conflicting Blocks body added an edge")
+	}
+	if _, err := f.e.Show(f.ctx, f.proj.ID, "body", false); err != nil {
+		t.Fatal("original task missing after conflict")
+	}
+
+	diffChecks := orig
+	diffChecks.TaskChecks = []verification.CheckSpec{check("other-check", "true", true)}
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K-body", Operations: []plan.Change{diffChecks}})
+	wantCode(t, err, fault.CodeIdempotencyConflict)
+	if v := f.show("body"); len(v.Checks) != 1 || v.Checks[0].ID != "u" {
+		t.Fatalf("original checks mutated: %+v", v.Checks)
+	}
+
+	r2, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K-body", Operations: []plan.Change{orig}})
+	if err != nil || !r2.Replayed || r2.Created["body"] != r1.Created["body"] || r2.PlanRev != rev {
+		t.Fatalf("%+v %v", r2, err)
+	}
+	if p, _ := f.e.Project(f.ctx, f.proj.ID); p.PlanRev != rev {
+		t.Fatalf("plan rev moved: %d -> %d", rev, p.PlanRev)
+	}
+}
+
 // A group whose remaining members are all complete can be archived; the
 // completed members keep their history attached.
 func TestArchiveGroupWithCompletedMembers(t *testing.T) {
