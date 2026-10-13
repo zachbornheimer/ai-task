@@ -220,7 +220,7 @@ func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	if !errors.As(err, &fe) || fe.Details == nil {
 		t.Fatal("stall details missing")
 	}
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true, TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-x", "true", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true, TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-x", "test -d .", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	// The reset clears the strikes, so the old failure is no longer charged

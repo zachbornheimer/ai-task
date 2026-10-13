@@ -49,7 +49,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	for _, want := range []string{
 		"# Task " + string(a),
 		"`sh -c 'test -f store.go && grep -q '\\''func Open'\\'' store.go'`", // the check, shell-quoted
-		"regress: `sh -c true`",
+		"regress: `sh -c 'test -d .'`",
 		"promotes it to main",        // target branch
 		"Workspace: " + s2.Workspace, // where to work
 		"Lease until",                // when to log

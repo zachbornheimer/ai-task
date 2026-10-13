@@ -60,7 +60,7 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 
 func TestStableKeysAndIdempotency(t *testing.T) {
 	f := newFixture(t)
-	op := plan.AddTask{Key: "oauth", Title: "OAuth endpoint", Acceptance: []string{"400 on bad code"}, TaskChecks: []verification.CheckSpec{check("unit", "true", true)}}
+	op := plan.AddTask{Key: "oauth", Title: "OAuth endpoint", Acceptance: []string{"400 on bad code"}, TaskChecks: []verification.CheckSpec{check("unit", "test -d .", true)}}
 	r1, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "plan-1", Operations: []plan.Change{op}})
 	if err != nil || r1.Changed != 1 {
 		t.Fatalf("%+v %v", r1, err)
@@ -96,8 +96,8 @@ func TestReviewMutationIsOneRevisionWithOptimisticConcurrency(t *testing.T) {
 	snap, _ := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterAll})
 	// A reviewer splits a into a1/a2, repoints b, archives a: one revision.
 	res, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, ExpectedPlanRev: snap.Revision, Operations: []plan.Change{
-		plan.AddTask{Key: "a1", Title: "a part 1", TaskChecks: []verification.CheckSpec{check("u1", "true", true)}},
-		plan.AddTask{Key: "a2", Title: "a part 2", Requires: []plan.Ref{"a1"}, TaskChecks: []verification.CheckSpec{check("u2", "true", true)}},
+		plan.AddTask{Key: "a1", Title: "a part 1", TaskChecks: []verification.CheckSpec{check("u1", "test -d .", true)}},
+		plan.AddTask{Key: "a2", Title: "a part 2", Requires: []plan.Ref{"a1"}, TaskChecks: []verification.CheckSpec{check("u2", "test -d .", true)}},
 		plan.UpdateTask{Target: plan.Ref(b), Requires: plan.Replace([]plan.Ref{"a2"})},
 		plan.ArchiveTask{Target: plan.Ref(a), Reason: "test"},
 	}})
@@ -144,8 +144,8 @@ func TestGroupsAreOrganizationalOnly(t *testing.T) {
 	f := newFixture(t)
 	res := f.apply(
 		plan.AddGroup{Key: "identity", Title: "Identity Core"},
-		plan.AddTask{Key: "t1", Title: "t1", Parent: "identity", TaskChecks: []verification.CheckSpec{check("u", "true", true)}},
-		plan.AddTask{Key: "t2", Title: "t2", Parent: "identity", Requires: []plan.Ref{"t1"}, TaskChecks: []verification.CheckSpec{check("u", "true", true)}},
+		plan.AddTask{Key: "t1", Title: "t1", Parent: "identity", TaskChecks: []verification.CheckSpec{check("u", "test -d .", true)}},
+		plan.AddTask{Key: "t2", Title: "t2", Parent: "identity", Requires: []plan.Ref{"t1"}, TaskChecks: []verification.CheckSpec{check("u", "test -d .", true)}},
 		plan.AddGroup{Key: "sub", Title: "Sub", Parent: "identity"},
 		plan.AddTask{Key: "t3", Title: "t3", Parent: "sub", TaskChecks: okChecks()},
 	)
@@ -178,12 +178,12 @@ func refptr(s string) *plan.Ref { r := plan.Ref(s); return &r }
 
 func TestRegressionNamespaceIsSeparate(t *testing.T) {
 	f := newFixture(t)
-	f.setRegression(check("lint", "true", true))
+	f.setRegression(check("lint", "test -d .", true))
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", TaskChecks: []verification.CheckSpec{check("lint", "exit 1", true)}}}})
 	wantCode(t, err, fault.CodeInvalidInput)
 	f.add("ok")
 	p, _ := f.e.Project(f.ctx, f.proj.ID)
-	p.Regression = []verification.CheckSpec{check("unit-ok", "true", true)}
+	p.Regression = []verification.CheckSpec{check("unit-ok", "test -d .", true)}
 	wantCode(t, f.e.UpdateProject(f.ctx, p), fault.CodeInvalidInput)
 }
 

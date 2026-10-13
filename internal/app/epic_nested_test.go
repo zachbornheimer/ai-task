@@ -13,7 +13,7 @@ import (
 func TestNestedEpicWaitsThroughPlainGroups(t *testing.T) {
 	f := newGitFixture(t)
 	res := f.apply(
-		plan.AddGroup{Key: "a", Title: "A", TaskChecks: []verification.CheckSpec{check("outer", "true", true)}},
+		plan.AddGroup{Key: "a", Title: "A", TaskChecks: []verification.CheckSpec{check("outer", "test -d .", true)}},
 		plan.AddGroup{Key: "b", Title: "B", Parent: "a"},
 		plan.AddGroup{Key: "c", Title: "C", Parent: "b", TaskChecks: []verification.CheckSpec{check("inner", "false", true)}},
 		plan.AddTask{Key: "t", Title: "t", Parent: "c", TaskChecks: []verification.CheckSpec{check("unit", "test -f t.txt", true)}},

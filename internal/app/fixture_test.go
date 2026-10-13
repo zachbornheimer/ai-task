@@ -53,7 +53,9 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture { t.Helper(); return newGitFixture(t) }
 
 // okChecks is the minimal task check set every task must carry.
-func okChecks() []verification.CheckSpec { return []verification.CheckSpec{check("u", "true", true)} }
+func okChecks() []verification.CheckSpec {
+	return []verification.CheckSpec{check("u", "test -d .", true)}
+}
 
 // newGitFixture creates a project whose root is a Git repository with one
 // commit on main and a passing regression check.
@@ -74,7 +76,7 @@ func newGitFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.setRegression(check("regress", "true", true))
+	f.setRegression(check("regress", "test -d .", true))
 	return f
 }
 
@@ -135,7 +137,7 @@ func (f *fixture) apply(ops ...plan.Change) plan.Result {
 // add creates a task with a trivially passing check and returns its ID.
 func (f *fixture) add(key string, requires ...plan.Ref) task.ID {
 	f.t.Helper()
-	res := f.apply(plan.AddTask{Key: key, Title: key, Requires: requires, TaskChecks: []verification.CheckSpec{check("unit-"+key, "true", true)}})
+	res := f.apply(plan.AddTask{Key: key, Title: key, Requires: requires, TaskChecks: []verification.CheckSpec{check("unit-"+key, "test -d .", true)}})
 	return res.Created[key]
 }
 

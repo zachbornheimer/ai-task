@@ -28,7 +28,7 @@ func benchEngine(b *testing.B) (*app.Engine, project.Project) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	p.Regression = []verification.CheckSpec{{ID: "regress", Command: []string{"true"}, Required: true}}
+	p.Regression = []verification.CheckSpec{{ID: "regress", Command: []string{"test", "-d", "."}, Required: true}}
 	if err := e.UpdateProject(context.Background(), p); err != nil {
 		b.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func layered(b *testing.B, e *app.Engine, pid project.ID, n, width int) {
 	ctx := context.Background()
 	var ops []plan.Change
 	for i := 0; i < n; i++ {
-		t := plan.AddTask{Key: fmt.Sprintf("t%d", i), Title: fmt.Sprintf("task %d", i), TaskChecks: []verification.CheckSpec{{ID: "u", Command: []string{"true"}, Required: true}}}
+		t := plan.AddTask{Key: fmt.Sprintf("t%d", i), Title: fmt.Sprintf("task %d", i), TaskChecks: []verification.CheckSpec{{ID: "u", Command: []string{"test", "-d", "."}, Required: true}}}
 		if i >= width {
 			start := (i/width - 1) * width
 			for j := start; j < start+width; j++ {
@@ -67,7 +67,7 @@ func BenchmarkApply200Tasks(b *testing.B) {
 		b.StartTimer()
 		var ops []plan.Change
 		for j := 0; j < 200; j++ {
-			t := plan.AddTask{Title: "t", TaskChecks: []verification.CheckSpec{{ID: "u", Command: []string{"true"}, Required: true}}}
+			t := plan.AddTask{Title: "t", TaskChecks: []verification.CheckSpec{{ID: "u", Command: []string{"test", "-d", "."}, Required: true}}}
 			ops = append(ops, t)
 		}
 		if _, err := e.Apply(context.Background(), plan.ChangeSet{ProjectID: pid, Operations: ops}); err != nil {

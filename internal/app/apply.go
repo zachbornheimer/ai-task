@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +14,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -290,7 +291,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
 		return fault.New(fault.CodeMissingVerification, "task %q: %v (--proof defines the required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
 	}
-	if err := planBudgetError(spec, a.proj); err != nil {
+	if err := vacuityError(spec); err != nil {
 		return err
 	}
 	id, err := a.insert(spec)
@@ -645,7 +646,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 		t.Pins, t.Size = spec.Pins, spec.Size
 		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Size != nil) {
-			if err := planBudgetError(spec, a.proj); err != nil {
+			if err := vacuityError(spec); err != nil {
 				return err
 			}
 		}
@@ -885,27 +886,24 @@ func referenceOrder(ops []plan.Change) ([]int, error) {
 	return order, nil
 }
 
-// runFilter matches a go test -run (or -test.run) flag in a check command.
-var runFilter = regexp.MustCompile(`(^|\s)-{1,2}(test\.)?run([=\s]|$)`)
-
-// goTestCmd matches a go test invocation, including inside sh -c.
-var goTestCmd = regexp.MustCompile(`(^|\s)go\s+test(\s|$)`)
-
-// planBudgetError rejects a small task whose check is go test without
-// -run: the small budget is 30s and a package test is routinely longer.
-func planBudgetError(spec task.Spec, proj project.Project) error {
-	if spec.Kind != task.KindTask || spec.Size != task.SizeSmall {
+// vacuityError rejects a task whose checks prove nothing (see proof.Vacuity).
+// A check's argv is read as a run proof; sh -c SCRIPT is judged by its script.
+func vacuityError(spec task.Spec) error {
+	if spec.Kind != task.KindTask {
 		return nil
 	}
+	size := proof.Size(spec.Size)
 	for _, c := range spec.Verification.TaskChecks {
-		cmd := strings.Join(c.Command, " ")
-		if runFilter.MatchString(cmd) {
-			continue
+		if err := proof.Vacuity(proof.ProofSpec{Preset: "run", Subject: checkSubject(c.Command), Size: size}); err != nil {
+			return fault.New(fault.CodeInvalidInput, "check %q: %s", c.ID, fault.MessageOf(err))
 		}
-		if !goTestCmd.MatchString(cmd) {
-			continue
-		}
-		return fault.New(fault.CodeInvalidInput, "check %q is go test without -run; a small task's checks must finish within %s. Narrow with -run so it proves only this outcome, or set --size medium|large", c.ID, proj.Budgets.ForSize(task.SizeSmall))
 	}
 	return nil
+}
+
+func checkSubject(argv []string) string {
+	if len(argv) == 3 && argv[1] == "-c" && filepath.Base(argv[0]) == "sh" {
+		return argv[2]
+	}
+	return strings.Join(argv, " ")
 }

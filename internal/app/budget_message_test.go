@@ -18,7 +18,7 @@ func TestSpentBudgetChecksSayNotRun(t *testing.T) {
 	if err := f.e.UpdateProject(f.ctx, f.proj); err != nil {
 		t.Fatal(err)
 	}
-	f.setRegression(check("slow", "sleep 1", true), check("after", "true", true), check("last", "true", false))
+	f.setRegression(check("slow", "sleep 1", true), check("after", "test -d .", true), check("last", "test -d .", false))
 	a := f.add("a")
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")

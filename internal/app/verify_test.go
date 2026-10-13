@@ -43,7 +43,7 @@ func TestEmptyChecksFailClosed(t *testing.T) {
 	wantCode(t, err, fault.CodeMissingVerification)
 	// Regression checks removed under a live claim: verification still fails
 	// closed and the claim survives.
-	f.setRegression(check("regress", "true", true))
+	f.setRegression(check("regress", "test -d .", true))
 	sa := f.claim(string(a))
 	f.setRegression()
 	f.commit(sa.Workspace, "a.txt", "a")
@@ -194,7 +194,7 @@ func TestFinalFailureKeepsClaimAndBlocksDownstream(t *testing.T) {
 	}
 	// The claim is live: the planner relaxes the check, the agent commits a
 	// fix and verifies again -> complete; a second submission supersedes.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "true", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "test -d .", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	f.commit(s.Workspace, "fix.txt", "fix")
@@ -212,7 +212,7 @@ func TestLateBlockerPreventsCompletion(t *testing.T) {
 	a := f.add("a")
 	s := f.claim(string(a))
 	// Discovered blocker added by the holder while working.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: []verification.CheckSpec{check("u", "true", true)}}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(s.Token), Operations: []plan.Change{plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: []verification.CheckSpec{check("u", "test -d .", true)}}}}); err != nil {
 		t.Fatal(err)
 	}
 	f.commit(s.Workspace, "a.txt", "a")
@@ -420,7 +420,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	wantCode(t, err, fault.CodeMissingVerification)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
 	wantCode(t, err, fault.CodeMissingVerification)
-	f.setRegression(check("regress", "true", true))
+	f.setRegression(check("regress", "test -d .", true))
 	setPolicy(a, optJSON("o3"))
 	if st := f.status(string(a)); st != task.StatusNeedsAttention {
 		t.Fatalf("vacuous task status %s", st)
@@ -444,7 +444,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	wantCode(t, err, fault.CodeMissingVerification)
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 	wantCode(t, err, fault.CodeMissingVerification)
-	good, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("u", "true", true)}})
+	good, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("u", "test -d .", true)}})
 	setPolicy(b, string(good))
 	setRegression(string(regOpt))
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
@@ -455,7 +455,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 		t.Fatal("claim must survive the refusal")
 	}
 	// With real gates on both sides the same task completes normally.
-	f.setRegression(check("regress", "true", true))
+	f.setRegression(check("regress", "test -d .", true))
 	f.complete(s)
 }
 

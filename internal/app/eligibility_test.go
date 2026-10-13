@@ -137,7 +137,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	}
 	// unverifiable (legacy policy) and workspace-blocked, via direct SQL
 	unverifiable := f.add("unverifiable")
-	opt, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("o", "true", false)}})
+	opt, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("o", "test -d .", false)}})
 	if _, err := db.Exec(`UPDATE tasks SET policy_json = ? WHERE id = ?`, string(opt), unverifiable); err != nil {
 		t.Fatal(err)
 	}
