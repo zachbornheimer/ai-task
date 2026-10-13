@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"time"
+
+	"github.com/zachbornheimer/ai-task/internal/proof"
 )
 
 // Outcome is what happened when a check ran.
@@ -45,6 +47,10 @@ type Evidence struct {
 	// Stderr keep only its head and tail); empty when none was written.
 	// Old run logs are pruned, so the file may be gone.
 	Log string `json:"log,omitempty"`
+	// Run is the RunResult of the execution that produced this evidence; nil
+	// for skipped or reused rows and for evidence recorded before run results
+	// existed. It is exposed as the result's run_results, not inline.
+	Run *proof.RunResult `json:"-"`
 }
 
 // Digest identifies the content of a check: command, directory, timeout,

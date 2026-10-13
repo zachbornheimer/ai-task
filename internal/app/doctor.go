@@ -11,6 +11,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
@@ -144,7 +145,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID, opts DoctorOptions)
 			var failed []verification.Evidence
 			started := time.Now()
 			for _, step := range verification.Plan(regression) {
-				ev := e.execStep(ctx, dir, step, 0, rep.TargetRevision, regression.Digest(), false, 0, nil, "")
+				ev := e.execStep(ctx, dir, step, 0, rep.TargetRevision, regression.Digest(), false, stepRun{runner: e.runner(), size: proof.SizeLarge})
 				if ev.Required && ev.Outcome != verification.OutcomePassed {
 					failed = append(failed, ev)
 				}

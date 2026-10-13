@@ -1,11 +1,13 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -125,6 +127,9 @@ type TaskView struct {
 	// (or was) promoted; completion follows.
 	Integration *IntentView `json:"integration,omitempty"`
 	Failures    int         `json:"failures,omitempty"`
+	// RunResults is every recorded check run of the task, oldest first
+	// (full depth only).
+	RunResults []proof.RunResult `json:"run_results,omitempty"`
 	// LastError is the most recent environment or authority problem that
 	// stopped a verification without counting as a failure.
 	LastError string `json:"last_error,omitempty"`
@@ -254,6 +259,17 @@ type VerifyResult struct {
 	// LogDir is the run's directory: one <check>.log per executed check
 	// with its complete output, and result.json with this result.
 	LogDir string `json:"log_dir,omitempty"`
+}
+
+// MarshalJSON adds run_results: the RunResult of every executed check, in
+// evidence order. It is derived so every path that returns a result,
+// including a failure carried in an error's Details, reports it.
+func (r VerifyResult) MarshalJSON() ([]byte, error) {
+	type plain VerifyResult
+	return json.Marshal(struct {
+		plain
+		RunResults []proof.RunResult `json:"run_results"`
+	}{plain(r), runResultsOf(r.Evidence)})
 }
 
 func rel(r sqlite.Record, st task.Status) Rel {
@@ -490,6 +506,9 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 			hist.Integrations = []sqlite.Integration{}
 		}
 		v.History = hist
+		if v.RunResults, err = tx.RunResultsForTask(string(t.ID)); err != nil {
+			return v, err
+		}
 	}
 	return v, nil
 }

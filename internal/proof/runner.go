@@ -3,6 +3,7 @@ package proof
 import (
 	"bytes"
 	"context"
+	"io"
 	"regexp"
 	"sync"
 	"time"
@@ -36,6 +37,22 @@ func NewRunner(opts ...RunnerOption) *Runner {
 	return r
 }
 
+// Command is a stored check that already is an argv: it runs as given, in
+// Dir with Env, teeing its output to Log, under the budget of its CheckType
+// (Cap, when positive, can only shorten it).
+type Command struct {
+	Argv []string
+	Dir  string
+	Env  []string
+	Log  io.Writer
+	Cap  time.Duration
+}
+
+// Budget returns the allowance a run of this check type and spec gets.
+func (r *Runner) Budget(ct CheckType, spec ProofSpec) time.Duration {
+	return r.budgetFor(ct, spec)
+}
+
 func (r *Runner) budgetFor(ct CheckType, spec ProofSpec) time.Duration {
 	switch {
 	case r.budget > 0:
@@ -52,7 +69,21 @@ func (r *Runner) budgetFor(ct CheckType, spec ProofSpec) time.Duration {
 // Passed=false and the reason in Output. A run past its budget is killed
 // (whole process group) and fails with TimedOut set.
 func (r *Runner) Run(ctx context.Context, ct CheckType, spec ProofSpec, workdir string) RunResult {
-	budget := r.budgetFor(ct, spec)
+	argv, err := r.argv(spec, workdir)
+	if err != nil {
+		return r.rejected(ct, spec, err)
+	}
+	res, _ := r.RunCommand(ctx, ct, spec, Command{Argv: argv, Dir: workdir})
+	return res
+}
+
+func (r *Runner) rejected(ct CheckType, spec ProofSpec, err error) RunResult {
+	res := newRunResult(ct, spec, r.budgetFor(ct, spec))
+	res.Output = err.Error()
+	return res
+}
+
+func newRunResult(ct CheckType, spec ProofSpec, budget time.Duration) RunResult {
 	res := RunResult{
 		CheckType: ct, Preset: spec.Preset, Subject: spec.Subject, Options: spec.Options,
 		StartedAt: time.Now().UTC(), BudgetMS: budget.Milliseconds(),
@@ -60,13 +91,28 @@ func (r *Runner) Run(ctx context.Context, ct CheckType, spec ProofSpec, workdir 
 	if res.Options == nil {
 		res.Options = map[string]string{}
 	}
-	argv, err := r.argv(spec, workdir)
-	if err != nil {
-		res.Output = err.Error()
-		return res
+	return res
+}
+
+// RunCommand executes cmd as the proof of spec, with the same budget,
+// kill, and recording rules as Run. The raw process result comes back too,
+// for callers that keep stdout and stderr apart.
+func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, cmd Command) (RunResult, checkexec.Result) {
+	budget := r.budgetFor(ct, spec)
+	if r.budget <= 0 && cmd.Cap > 0 && cmd.Cap < budget {
+		budget = cmd.Cap
 	}
+	res := newRunResult(ct, spec, budget)
 	tail := &tailBuffer{limit: OutputTail}
-	out := checkexec.Run(ctx, checkexec.Spec{Argv: argv, Dir: workdir, Timeout: budget, Log: tail})
+	var log io.Writer = tail
+	if cmd.Log != nil {
+		log = io.MultiWriter(tail, cmd.Log)
+	}
+	out := checkexec.Run(ctx, checkexec.Spec{Argv: cmd.Argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: budget, Log: log})
+	return finishRun(res, spec, out, tail), out
+}
+
+func finishRun(res RunResult, spec ProofSpec, out checkexec.Result, tail *tailBuffer) RunResult {
 	res.StartedAt = out.StartedAt
 	res.ElapsedMS = out.FinishedAt.Sub(out.StartedAt).Milliseconds()
 	res.TimedOut = out.TimedOut
