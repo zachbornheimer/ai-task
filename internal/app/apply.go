@@ -329,7 +329,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	}
 	a.result.Created[a.createdName(i, c.Key)] = id
 	a.result.Changed++
-	if a.proj.Unscoped() {
+	if a.proj.IsGeneral() {
 		if a.result.Warnings == nil {
 			a.result.Warnings = map[string][]string{}
 		}

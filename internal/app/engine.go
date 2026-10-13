@@ -350,10 +350,14 @@ func (e *Engine) UpdateProject(ctx context.Context, p project.Project) error {
 //  1. selector: a project ID or unique name (from --project / ATASK_PROJECT);
 //  2. the Git repository containing dir, by registered main-worktree root;
 //  3. the longest registered root that contains dir;
-//  4. the unscoped board (id ""), created if needed.
+//  4. the general project, created on first use. The selector "general"
+//     names it directly.
 func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (project.Project, error) {
 	var out project.Project
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		if selector == project.GeneralName {
+			return errUseGeneral
+		}
 		if selector != "" {
 			if id, err := project.ParseID(selector); err == nil {
 				p, err := tx.GetProject(id)
@@ -371,7 +375,7 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 			return nil
 		}
 		if dir == "" {
-			return errUseUnscoped
+			return errUseGeneral
 		}
 		root, err := project.LocateRoot(dir)
 		if err != nil {
@@ -402,17 +406,17 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 			out = p
 			return err
 		}
-		return errUseUnscoped
+		return errUseGeneral
 	})
-	if errors.Is(err, errUseUnscoped) {
-		return e.EnsureUnscoped(ctx)
+	if errors.Is(err, errUseGeneral) {
+		return e.EnsureGeneral(ctx)
 	}
 	return out, err
 }
 
-// errUseUnscoped is an in-process signal from the read lookup to create
-// or load the default board. It is never returned to callers.
-var errUseUnscoped = fault.New(fault.CodeNoProject, "use unscoped")
+// errUseGeneral is an in-process signal from the read lookup to create
+// or load the general project. It is never returned to callers.
+var errUseGeneral = fault.New(fault.CodeNoProject, "use general")
 
 // manager returns the Git workspace manager for a project.
 func (e *Engine) manager(p project.Project) workspace.Manager {

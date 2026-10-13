@@ -8,16 +8,16 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
-func TestUnscopedProjectValidates(t *testing.T) {
-	p := Project{ID: UnscopedID, Integration: IntegrationNone, MaxAttempts: DefaultMaxAttempts}
+func TestGeneralProjectValidates(t *testing.T) {
+	p := Project{Name: GeneralName, Integration: IntegrationNone, MaxAttempts: DefaultMaxAttempts}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if !p.Unscoped() {
-		t.Fatal("empty id must be unscoped")
+	if !p.IsGeneral() {
+		t.Fatal("name general with no root must be the default project")
 	}
-	if err := (Project{ID: UnscopedID, Integration: IntegrationPromote}).Validate(); err == nil {
-		t.Fatal("unscoped promote must be rejected")
+	if err := (Project{Name: GeneralName, Integration: IntegrationPromote}).Validate(); err == nil {
+		t.Fatal("general promote must be rejected")
 	}
 }
 

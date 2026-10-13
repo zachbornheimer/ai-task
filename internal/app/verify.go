@@ -186,7 +186,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // leaves behind can be the reason a regression check passes.
 func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project, workDir string) ([]verification.Evidence, error) {
 	var out []verification.Evidence
-	inPlace := proj.Unscoped() || proj.RootPath == ""
+	inPlace := proj.IsGeneral() || proj.RootPath == ""
 	var changed []string
 	if !inPlace {
 		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
@@ -399,8 +399,8 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 	if p.rec.UnmetRequires > 0 {
 		return VerifyResult{}, fault.New(fault.CodeTaskBlocked, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
 	}
-	revision := "unscoped"
-	if !p.proj.Unscoped() && p.proj.RootPath != "" {
+	revision := "general"
+	if !p.proj.IsGeneral() && p.proj.RootPath != "" {
 		st, err := workspace.RequireClean(ctx, p.dir)
 		if err != nil {
 			return VerifyResult{}, err
@@ -521,7 +521,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	}
 	// Pinned paths are part of the contract: a submission that changed one
 	// fails as the attempt's own failure, before any check runs.
-	if len(fr.rec.Task.Pins) > 0 && !fr.proj.Unscoped() && fr.proj.RootPath != "" {
+	if len(fr.rec.Task.Pins) > 0 && !fr.proj.IsGeneral() && fr.proj.RootPath != "" {
 		changed, err := workspace.ChangedBetween(ctx, fr.proj.RootPath, "refs/heads/"+fr.proj.TargetBranch, fr.revision)
 		if err != nil {
 			return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, "list changed files: "+fault.MessageOf(err), nil)

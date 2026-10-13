@@ -232,7 +232,7 @@ func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 		var byID map[project.ID]project.Project
 		var err error
 		if pid == "" {
-			proj = project.Project{ID: project.UnscopedID, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+			proj = project.Project{Name: project.GeneralName, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
 			ps, err := tx.ListProjects()
 			if err != nil {
 				return err

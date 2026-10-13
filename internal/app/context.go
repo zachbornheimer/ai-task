@@ -154,7 +154,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 		}
 		proj = p
 	} else {
-		proj = project.Project{ID: project.UnscopedID, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+		proj = project.Project{Name: project.GeneralName, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
 	}
 	sum, err := e.Summary(ctx, pid)
 	if err != nil {
@@ -171,7 +171,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	_, wtErr := exec.LookPath("wt")
 	c.Worktrunk = wtErr == nil
 	var w strings.Builder
-	if proj.Unscoped() {
+	if proj.IsGeneral() {
 		w.WriteString("# Board: no task in hand\n\n")
 	} else {
 		fmt.Fprintf(&w, "# Project %s: no task in hand\n\n", proj.Name)
@@ -184,7 +184,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	switch {
 	case sum.Total == 0:
 		w.WriteString("Nothing is planned yet. Turn the request into tasks, each with a proof and a regression (`atask add \"title\" --proof \"run: cmd\" --regression \"run: cmd\"`, several at once with `atask add -f plan.yaml` or `--plan`), then claim one. `atask add ... --claim` adds and claims a single task in one step.")
-		if !proj.Unscoped() {
+		if !proj.IsGeneral() {
 			w.WriteString(" Run `atask doctor` first in a repository you have not worked in.")
 		}
 		w.WriteByte('\n')
@@ -206,7 +206,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	if proj.TargetBranch != "" {
 		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask show` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
 	} else {
-		w.WriteString("\nClaim with `atask claim <id>`. Unscoped work completes without git.\n")
+		w.WriteString("\nClaim with `atask claim <id>`. Work in general completes without git.\n")
 	}
 	c.Prompt = w.String()
 	if withRules {

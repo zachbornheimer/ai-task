@@ -136,22 +136,22 @@ func effective(v, def time.Duration) time.Duration {
 // DefaultMaxAttempts applies to new projects.
 const DefaultMaxAttempts = 5
 
-// UnscopedID is the default board: a project whose id is empty. Tasks
-// filed outside an enrolled repo land here. Attaching a named project is
+// GeneralName is the reserved name of the default project. Tasks filed
+// outside a registered repo land here. Attaching a named project is
 // recommended so claim can use a worktree.
-const UnscopedID ID = ""
+const GeneralName = "general"
 
-// Unscoped reports whether p is the default board.
-func (p Project) Unscoped() bool { return p.ID == UnscopedID }
+// IsGeneral reports whether p is the default project.
+func (p Project) IsGeneral() bool { return p.Name == GeneralName && p.RootPath == "" }
 
 // Validate enforces structural rules on a project record.
 func (p Project) Validate() error {
-	if p.Unscoped() {
+	if p.Name == GeneralName {
 		if p.Integration != IntegrationNone {
-			return fault.New(fault.CodeInvalidInput, "unscoped board must use integration none")
+			return fault.New(fault.CodeInvalidInput, "project %s must use integration none", GeneralName)
 		}
 		if p.RootPath != "" {
-			return fault.New(fault.CodeInvalidInput, "unscoped board must not have a root path")
+			return fault.New(fault.CodeInvalidInput, "project name %s is reserved for the default project, which has no root path", GeneralName)
 		}
 		return nil
 	}

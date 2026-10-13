@@ -84,7 +84,7 @@ func TestListEmptyDatabase(t *testing.T) {
 	}
 }
 
-func TestListFromUnregisteredDirIsInboxTasks(t *testing.T) {
+func TestListFromUnregisteredDirIsGeneralTasks(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "at.db")
 	cwd := t.TempDir()
 	getenv := func(k string) string {
@@ -109,7 +109,7 @@ func TestListFromUnregisteredDirIsInboxTasks(t *testing.T) {
 		t.Fatalf("list from unregistered dir: %s %s", out, errOut)
 	}
 	if !strings.Contains(out, "file the tracker") {
-		t.Fatalf("list should show inbox tasks:\n%s", out)
+		t.Fatalf("list should show general tasks:\n%s", out)
 	}
 }
 

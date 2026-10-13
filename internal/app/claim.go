@@ -44,7 +44,7 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 		return Session{}, err
 	}
 	if req.TaskID == nil && req.ProjectID == "" {
-		if _, err := e.EnsureUnscoped(ctx); err != nil {
+		if _, err := e.EnsureGeneral(ctx); err != nil {
 			return Session{}, err
 		}
 	}
@@ -193,7 +193,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
-	if proj.Unscoped() || proj.RootPath == "" {
+	if proj.IsGeneral() || proj.RootPath == "" {
 		dir := sess.Task.CreatedCwd
 		if dir == "" {
 			dir = e.cwd
@@ -302,7 +302,7 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 // regressionGate refuses to hand out work in a project whose regression
 // checks cannot act as a gate: nothing claimed there could ever complete.
 func regressionGate(proj project.Project) error {
-	if proj.Unscoped() || proj.Integration != project.IntegrationPromote {
+	if proj.IsGeneral() || proj.Integration != project.IntegrationPromote {
 		return nil
 	}
 	if err := verification.RequireGate(proj.Regression, "project regression checks"); err != nil {

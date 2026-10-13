@@ -3,27 +3,27 @@ package app
 import (
 	"context"
 
-	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 )
 
 const recommendProject = "no project attached; run `atask init` here or pass --project so claim can use a worktree"
 
-// EnsureUnscoped returns the default board (project id ""), creating it
-// if needed. Filing work never requires an enrolled repo.
-func (e *Engine) EnsureUnscoped(ctx context.Context) (project.Project, error) {
+// EnsureGeneral returns the default project (named general), creating it
+// on first use. Filing work never requires an enrolled repo.
+func (e *Engine) EnsureGeneral(ctx context.Context) (project.Project, error) {
 	var out project.Project
 	now := e.now()
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		if p, err := tx.GetProject(project.UnscopedID); err == nil {
+		if p, ok, err := tx.GetProjectByName(project.GeneralName); err != nil {
+			return err
+		} else if ok {
 			out = p
 			return nil
-		} else if fault.CodeOf(err) != fault.CodeNotFound {
-			return err
 		}
 		p := project.Project{
-			ID:          project.UnscopedID,
+			ID:          project.NewID(),
+			Name:        project.GeneralName,
 			Integration: project.IntegrationNone,
 			MaxAttempts: project.DefaultMaxAttempts,
 			CreatedAt:   now,
@@ -33,11 +33,6 @@ func (e *Engine) EnsureUnscoped(ctx context.Context) (project.Project, error) {
 			return err
 		}
 		if err := tx.InsertProject(p); err != nil {
-			if sqlite.IsUniqueViolation(err) {
-				existing, gerr := tx.GetProject(project.UnscopedID)
-				out = existing
-				return gerr
-			}
 			return err
 		}
 		out = p

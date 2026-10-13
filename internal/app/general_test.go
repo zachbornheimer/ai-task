@@ -8,7 +8,6 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
-	"github.com/zachbornheimer/ai-task/internal/project"
 )
 
 func openBoard(t *testing.T) (*app.Engine, context.Context) {
@@ -26,18 +25,18 @@ func openBoard(t *testing.T) (*app.Engine, context.Context) {
 	return e, ctx
 }
 
-func TestResolveProjectFallsBackToUnscoped(t *testing.T) {
+func TestResolveProjectFallsBackToGeneral(t *testing.T) {
 	e, ctx := openBoard(t)
 	p, err := e.ResolveProject(ctx, "", t.TempDir())
 	if err != nil {
 		t.Fatalf("unregistered dir: %v", err)
 	}
-	if !p.Unscoped() {
-		t.Fatalf("want unscoped, got %+v", p)
+	if !p.IsGeneral() {
+		t.Fatalf("want general, got %+v", p)
 	}
 	again, err := e.ResolveProject(ctx, "", t.TempDir())
 	if err != nil || again.ID != p.ID {
-		t.Fatalf("unscoped must be stable: %v %+v", err, again)
+		t.Fatalf("general must be stable: %v %+v", err, again)
 	}
 }
 
@@ -72,7 +71,7 @@ func TestAddSameOpenTitleReusesTask(t *testing.T) {
 	}
 }
 
-func TestUnscopedAddRequiresCheck(t *testing.T) {
+func TestGeneralAddRequiresCheck(t *testing.T) {
 	e, ctx := openBoard(t)
 	p, err := e.ResolveProject(ctx, "", t.TempDir())
 	if err != nil {
@@ -82,7 +81,7 @@ func TestUnscopedAddRequiresCheck(t *testing.T) {
 	wantCode(t, err, fault.CodeMissingVerification)
 }
 
-func TestUnscopedAddStampsOrigin(t *testing.T) {
+func TestGeneralAddStampsOrigin(t *testing.T) {
 	e, ctx := openBoard(t)
 	p, err := e.ResolveProject(ctx, "", t.TempDir())
 	if err != nil {
@@ -107,12 +106,12 @@ func TestCodeProjectAddWithoutCheckStillFails(t *testing.T) {
 	wantCode(t, err, fault.CodeMissingVerification)
 }
 
-func TestGlobalListIncludesUnscopedAndNamed(t *testing.T) {
+func TestGlobalListIncludesGeneralAndNamed(t *testing.T) {
 	f := newGitFixture(t)
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "from git", TaskChecks: okChecks()}}}); err != nil {
 		t.Fatal(err)
 	}
-	u, err := f.e.EnsureUnscoped(f.ctx)
+	u, err := f.e.EnsureGeneral(f.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,5 +136,4 @@ func TestGlobalListIncludesUnscopedAndNamed(t *testing.T) {
 	if sum.Open < 2 {
 		t.Fatalf("board-wide summary should count both projects: %+v", sum)
 	}
-	_ = project.UnscopedID
 }
