@@ -37,7 +37,7 @@ func TestContractDocParses(t *testing.T) {
 		present []string
 		absent  []string
 	}{
-		{"verbs", s.Verbs, []string{"list", "claim renew", "claim release", "verify proof", "verify regression", "verify complete", "presets"}, nil},
+		{"verbs", s.Verbs, []string{"list", "claim renew", "claim release", "verify proof", "verify regression", "verify complete"}, []string{"presets"}},
 		{"task flags", s.TaskFlags, []string{"--proof", "--regression", "--size", "--on-complete", "--on-complete-detach"}, []string{"--check"}},
 		{"project flags", s.ProjectFlags, []string{"--target-branch", "--attempts"}, nil},
 		{"global flags", s.GlobalFlags, []string{"--project", "--db", "--json"}, nil},
