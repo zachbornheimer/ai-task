@@ -25,7 +25,7 @@ import (
 // cyclic hard edges, cross-project links, duplicate keys with conflicting
 // definitions, illegal archives, and edits to claimed or completed
 // contracts. A replay with the same IdempotencyKey returns the stored
-// result; a stale ExpectedPlanRev is rejected with PLAN_CONFLICT.
+// result; a stale ExpectedPlanRev is rejected with CONFLICT.
 func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, error) {
 	if err := cs.Validate(); err != nil {
 		return plan.Result{}, err
@@ -49,7 +49,7 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 					return fault.New(fault.CodeIdempotencyConflict, "idempotency key %q was already used for a different change set; use a new key", cs.IdempotencyKey)
 				}
 				if err := json.Unmarshal([]byte(body), &result); err != nil {
-					return fault.Wrap(err, fault.CodeInternal, "decode stored plan result")
+					return fault.WrapInternal(err, "decode stored plan result")
 				}
 				result.Replayed = true
 				return nil
@@ -116,7 +116,7 @@ func (a *applier) resolve(r plan.Ref) (sqlite.Record, error) {
 			return rec, err
 		}
 		if rec.Task.ProjectID != a.cs.ProjectID {
-			return rec, fault.New(fault.CodeCrossProject, "%s belongs to another project", r)
+			return rec, fault.New(fault.CodeInvalidInput, "%s belongs to another project", r)
 		}
 		return rec, nil
 	}
@@ -181,7 +181,7 @@ func (a *applier) addGroup(i int, c plan.AddGroup) error {
 				a.refs[c.Key] = existing.Task.ID
 				return nil // identical replay
 			}
-			return fault.New(fault.CodeDuplicateKey, "key %q already names %s with a different definition", c.Key, existing.Task.ID)
+			return fault.New(fault.CodeConflict, "key %q already names %s with a different definition", c.Key, existing.Task.ID)
 		}
 	}
 	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Size: c.Size}
@@ -224,11 +224,11 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 		// A key collision cannot be an ID collision retry; report it.
 		if spec.Key != "" {
 			if _, ok, _ := a.tx.GetByKey(a.cs.ProjectID, spec.Key); ok {
-				return "", fault.New(fault.CodeDuplicateKey, "key %q already exists", spec.Key)
+				return "", fault.New(fault.CodeConflict, "key %q already exists", spec.Key)
 			}
 		}
 	}
-	return "", fault.New(fault.CodeInternal, "could not allocate a unique task id")
+	return "", fault.NewInternal("could not allocate a unique task id")
 }
 
 const taskIDWidth = 6
@@ -273,7 +273,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 				a.refs[c.Key] = existing.Task.ID
 				return nil
 			}
-			return fault.New(fault.CodeDuplicateKey, "key %q already names %s with a different definition; use an update to change it", c.Key, existing.Task.ID)
+			return fault.New(fault.CodeConflict, "key %q already names %s with a different definition; use an update to change it", c.Key, existing.Task.ID)
 		}
 	} else if existing, ok, err := a.tx.GetOpenByTitle(c.Title); err != nil {
 		return err
@@ -285,7 +285,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	// A task is implementable only with a required check of its own:
 	// completion fails closed without one, so planning fails closed too.
 	if err := verification.RequireGate(spec.Verification.TaskChecks, "task checks"); err != nil {
-		return fault.New(fault.CodeMissingVerification, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
+		return fault.New(fault.CodeInvalidInput, "task %q: %v (--check defines a required check; a task without one can never complete)", c.Title, fault.MessageOf(err))
 	}
 	if err := planBudgetError(spec, a.proj); err != nil {
 		return err
@@ -307,7 +307,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 			return err
 		}
 		if rec.CompletedAt != nil {
-			return fault.New(fault.CodePlanConflict, "%s is complete; a new prerequisite cannot be added to a completed task", rec.Task.ID)
+			return fault.New(fault.CodeConflict, "%s is complete; a new prerequisite cannot be added to a completed task", rec.Task.ID)
 		}
 		if err := a.authorizeEligibilityChange(rec); err != nil {
 			return err
@@ -417,7 +417,7 @@ func (a *applier) integrating(id task.ID) error {
 		return err
 	}
 	if in != nil {
-		return fault.New(fault.CodePlanConflict, "%s is being integrated (candidate %s onto %s); it cannot change until completion is recorded", id, short(in.CandidateRevision), in.TargetBranch)
+		return fault.New(fault.CodeConflict, "%s is being integrated (candidate %s onto %s); it cannot change until completion is recorded", id, short(in.CandidateRevision), in.TargetBranch)
 	}
 	return nil
 }
@@ -447,9 +447,9 @@ func (a *applier) authorizeEligibilityChange(target sqlite.Record) error {
 		if auth.Attempt.TaskID == target.Task.ID && execution.Authorize(auth.Attempt, auth.CurrentSeq, a.now) == nil {
 			return nil
 		}
-		return fault.New(fault.CodeSessionSuperseded, "session does not hold %s", target.Task.ID)
+		return fault.New(fault.CodeInvalidSession, "session does not hold %s", target.Task.ID)
 	}
-	return fault.New(fault.CodePlanConflict, "%s is claimed; changing its prerequisites needs its session token (ATASK_SESSION) or planner authority (--planner)", target.Task.ID)
+	return fault.New(fault.CodeConflict, "%s is claimed; changing its prerequisites needs its session token (ATASK_SESSION) or planner authority (--planner)", target.Task.ID)
 }
 
 func (a *applier) insertEdges(ctx context.Context, edges []dependency.Edge) error {
@@ -466,7 +466,7 @@ func (a *applier) insertEdges(ctx context.Context, edges []dependency.Edge) erro
 			return fault.New(fault.CodeInvalidInput, "dependencies connect executable tasks only; %s or %s is a group", edge.Task, edge.Requires)
 		}
 		if archA || archB {
-			return fault.New(fault.CodePlanConflict, "dependency on an archived task (%s requires %s)", edge.Task, edge.Requires)
+			return fault.New(fault.CodeConflict, "dependency on an archived task (%s requires %s)", edge.Task, edge.Requires)
 		}
 		if err := dependency.Validate(ctx, edge, pa == pb, a.tx); err != nil {
 			return err
@@ -485,7 +485,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	}
 	t := rec.Task
 	if t.Archived() {
-		return fault.New(fault.CodePlanConflict, "%s is archived", t.ID)
+		return fault.New(fault.CodeConflict, "%s is archived", t.ID)
 	}
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
@@ -493,7 +493,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	contract := c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
-		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
+		return fault.New(fault.CodeConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
 	}
 	if contract || edges {
 		if err := a.integrating(t.ID); err != nil {
@@ -502,7 +502,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	}
 	claimed := rec.Attempt != nil && rec.Attempt.EndedAt == nil && rec.Attempt.LeaseActive(a.now)
 	if claimed && contract && !a.cs.Planner {
-		return fault.New(fault.CodePlanConflict, "%s is claimed; its contract can only change with planner authority (--planner), and a running verification will fail closed", t.ID)
+		return fault.New(fault.CodeConflict, "%s is claimed; its contract can only change with planner authority (--planner), and a running verification will fail closed", t.ID)
 	}
 	changed := false
 	// A submission waiting for its cohort peers pins the contract it will
@@ -518,11 +518,11 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			// members at once, so a member's contract is pinned outright
 			// while the job runs.
 			if s.Run != nil && s.Run.Mode == verification.ModeCohort {
-				return fault.New(fault.CodePlanConflict, "%s is being verified by a cohort job; its contract is pinned until the job ends", t.ID)
+				return fault.New(fault.CodeConflict, "%s is being verified by a cohort job; its contract is pinned until the job ends", t.ID)
 			}
 		case sqlite.RunPending:
 			if !c.WithdrawSubmission || !a.cs.Planner {
-				return fault.New(fault.CodePlanConflict, "%s has a submission awaiting its cohort peers; its contract is pinned. To change it, withdraw the submission explicitly (planner authority: --planner --withdraw-submission); the member will have to resubmit", t.ID)
+				return fault.New(fault.CodeConflict, "%s has a submission awaiting its cohort peers; its contract is pinned. To change it, withdraw the submission explicitly (planner authority: --planner --withdraw-submission); the member will have to resubmit", t.ID)
 			}
 			if s.Run != nil {
 				if err := a.tx.FinishRun(s.Run.ID, sqlite.RunFailed, "withdrawn by the planner: the contract changed before cohort verification", a.now); err != nil {
@@ -574,7 +574,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if c.TaskChecks.Set {
 		if t.Kind == task.KindTask {
 			if err := verification.RequireGate(c.TaskChecks.Value, "task checks"); err != nil {
-				return fault.New(fault.CodeMissingVerification, "%s: %v; archive the task instead of removing its gate", t.ID, fault.MessageOf(err))
+				return fault.New(fault.CodeInvalidInput, "%s: %v; archive the task instead of removing its gate", t.ID, fault.MessageOf(err))
 			}
 		}
 		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value}
@@ -590,7 +590,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 				if cyc, err := a.tx.ParentChainContains(parent, t.ID); err != nil {
 					return err
 				} else if cyc {
-					return fault.New(fault.CodeDependencyCycle, "group %s cannot be nested inside itself", t.ID)
+					return fault.New(fault.CodeInvalidInput, "group %s cannot be nested inside itself", t.ID)
 				}
 			}
 		}
@@ -694,7 +694,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	}
 	if c.ResetAttempts {
 		if !a.cs.Planner {
-			return fault.New(fault.CodePlanConflict, "%s: resetting attempts restarts a retry budget and needs planner authority (--planner)", t.ID)
+			return fault.New(fault.CodeConflict, "%s: resetting attempts restarts a retry budget and needs planner authority (--planner)", t.ID)
 		}
 		if err := a.tx.ResetAttempts(t.ID, a.now); err != nil {
 			return err
@@ -718,13 +718,13 @@ func (a *applier) archive(c plan.ArchiveTask) error {
 		return nil
 	}
 	if rec.CompletedAt != nil {
-		return fault.New(fault.CodePlanConflict, "%s is complete and cannot be archived", t.ID)
+		return fault.New(fault.CodeConflict, "%s is complete and cannot be archived", t.ID)
 	}
 	if att := rec.Attempt; att != nil && att.EndedAt == nil && att.LeaseActive(a.now) {
-		return fault.New(fault.CodePlanConflict, "%s is claimed; release it before archiving", t.ID)
+		return fault.New(fault.CodeConflict, "%s is claimed; release it before archiving", t.ID)
 	}
 	if rec.Submission != nil && rec.Submission.RunStatus() == sqlite.RunPending {
-		return fault.New(fault.CodePlanConflict, "%s has a submission awaiting verification; it cannot be archived", t.ID)
+		return fault.New(fault.CodeConflict, "%s has a submission awaiting verification; it cannot be archived", t.ID)
 	}
 	if err := a.integrating(t.ID); err != nil {
 		return err
@@ -748,7 +748,7 @@ func (a *applier) checkArchives() error {
 		}
 		for _, d := range deps {
 			if !d.Task.Archived() {
-				return fault.New(fault.CodePlanConflict, "archiving %s would leave %s with a dangling prerequisite; remove that edge or archive %s in the same change set", id, d.Task.ID, d.Task.ID)
+				return fault.New(fault.CodeConflict, "archiving %s would leave %s with a dangling prerequisite; remove that edge or archive %s in the same change set", id, d.Task.ID, d.Task.ID)
 			}
 		}
 		children, err := a.tx.Children(id)
@@ -764,7 +764,7 @@ func (a *applier) checkArchives() error {
 			}
 		}
 		if live > 0 {
-			return fault.New(fault.CodePlanConflict, "archiving group %s would orphan %d unfinished member(s); move or archive them in the same change set", id, live)
+			return fault.New(fault.CodeConflict, "archiving group %s would orphan %d unfinished member(s); move or archive them in the same change set", id, live)
 		}
 	}
 	return nil
@@ -774,7 +774,7 @@ func (a *applier) checkArchives() error {
 // that refers to a key created in the same set (parent, requires,
 // blocks) comes after that key's add, so a plan file can list tasks in
 // any order. Operations that refer to nothing in the set keep their
-// relative order; a cycle among the set's own keys is DEPENDENCY_CYCLE.
+// relative order; a cycle among the set's own keys is INVALID_INPUT.
 func referenceOrder(ops []plan.Change) ([]int, error) {
 	byKey := map[string]int{}
 	for i, op := range ops {
@@ -841,7 +841,7 @@ func referenceOrder(ops []plan.Change) ([]int, error) {
 					}
 				}
 			}
-			return nil, fault.New(fault.CodeDependencyCycle, "the change set's own tasks depend on each other in a cycle: %s", strings.Join(names, ", "))
+			return nil, fault.New(fault.CodeInvalidInput, "the change set's own tasks depend on each other in a cycle: %s", strings.Join(names, ", "))
 		}
 		done[next] = true
 		order = append(order, next)

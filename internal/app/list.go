@@ -198,7 +198,7 @@ func (e *Engine) lookup(tx *sqlite.Tx, pid project.ID, ref string) (sqlite.Recor
 		return tx.GetRecord(task.ID(ref))
 	}
 	if pid == "" {
-		return sqlite.Record{}, fault.New(fault.CodeNoProject, "a key needs a project; pass --project or run inside the repository")
+		return sqlite.Record{}, fault.New(fault.CodeNotFound, "a key needs a project; pass --project or run inside the repository")
 	}
 	r, ok, err := tx.GetByKey(pid, ref)
 	if err != nil {

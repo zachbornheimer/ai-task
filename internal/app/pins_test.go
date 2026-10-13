@@ -29,7 +29,7 @@ func TestPinnedPathsCannotChange(t *testing.T) {
 	f.commit(s.Workspace, "checks/unit.sh", "exit 0 # weakened\n")
 	f.commit(s.Workspace, "a.txt", "work")
 	r, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeVerificationFailed || !strings.Contains(r.Summary, "checks/unit.sh") || len(r.Evidence) != 0 {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Summary, "checks/unit.sh") || len(r.Evidence) != 0 {
 		t.Fatalf("pinned change must fail before any check runs: %v %+v", err, r)
 	}
 	if v := f.show(string(a)); v.Failures != 1 {

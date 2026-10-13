@@ -45,7 +45,7 @@ func TestWriteCancelledByContextIsNotInternal(t *testing.T) {
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("got %v, want an error wrapping %v", err, tc.want)
 			}
-			if fault.CodeOf(err) == fault.CodeInternal {
+			if fault.IsInternal(err) {
 				t.Fatalf("a cancelled write must not be INTERNAL: %v", err)
 			}
 		})

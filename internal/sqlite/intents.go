@@ -155,7 +155,7 @@ func (t *Tx) FinishIntent(id int64, status, summary string, now time.Time) error
 		return wrapInternal(err, "finish intent")
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fault.New(fault.CodePlanConflict, "integration intent %d is no longer open", id)
+		return fault.New(fault.CodeConflict, "integration intent %d is no longer open", id)
 	}
 	return nil
 }

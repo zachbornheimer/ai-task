@@ -36,7 +36,7 @@ func runDoctor(ctx context.Context, c *ctxt, args []string) error {
 	}
 	rep.Checks = append(rep.Checks, worktrunkChecks(ctx, rep.Root)...)
 	if !rep.Healthy {
-		return &fault.Error{Code: fault.CodeUnhealthy, Message: "the project is not ready to be worked; see the report", Details: rep}
+		return &fault.Error{Code: fault.CodeNotReady, Message: "the project is not ready to be worked; see the report", Details: rep}
 	}
 	return c.emit(rep, func(w io.Writer) { renderDoctor(w, rep) })
 }

@@ -21,7 +21,7 @@ func TestPinnedFileRenamedAwayIsRefused(t *testing.T) {
 	f.git(s.Workspace, "mv", "f.txt", "g.txt")
 	f.git(s.Workspace, "commit", "-m", "move the pinned file")
 	r, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeVerificationFailed || !strings.Contains(r.Summary, "f.txt") || len(r.Evidence) != 0 {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Summary, "f.txt") || len(r.Evidence) != 0 {
 		t.Fatalf("renaming a pinned file away must be refused naming it: %v %+v", err, r)
 	}
 }

@@ -71,15 +71,15 @@ func (e *Engine) recheckForCompletion(tx *sqlite.Tx, s intentSpec, final string)
 	}
 	switch {
 	case r.UnmetRequires > 0:
-		return r, fault.New(fault.CodeTaskBlocked, "%s: a prerequisite became incomplete during verification", r.Task.ID)
+		return r, fault.New(fault.CodeNotReady, "%s: a prerequisite became incomplete during verification", r.Task.ID)
 	case r.Task.ContractRev != s.contractRev:
-		return r, fault.New(fault.CodePlanConflict, "%s: the task contract changed during verification; verify again", r.Task.ID)
+		return r, fault.New(fault.CodeConflict, "%s: the task contract changed during verification; verify again", r.Task.ID)
 	case (verification.Policy{Regression: proj.Regression}).Digest() != s.regression:
-		return r, fault.New(fault.CodePlanConflict, "%s: the project regression policy changed during verification; verify again", r.Task.ID)
+		return r, fault.New(fault.CodeConflict, "%s: the project regression policy changed during verification; verify again", r.Task.ID)
 	case r.Task.Archived():
-		return r, fault.New(fault.CodePlanConflict, "%s was archived during verification", r.Task.ID)
+		return r, fault.New(fault.CodeConflict, "%s was archived during verification", r.Task.ID)
 	case r.Submission == nil || r.Submission.ID != s.submission:
-		return r, fault.New(fault.CodePlanConflict, "%s was resubmitted during verification", r.Task.ID)
+		return r, fault.New(fault.CodeConflict, "%s was resubmitted during verification", r.Task.ID)
 	}
 	stored, err := tx.EvidenceForRun(s.runID)
 	if err != nil {
@@ -92,7 +92,7 @@ func (e *Engine) recheckForCompletion(tx *sqlite.Tx, s intentSpec, final string)
 		}
 	}
 	if v := verification.Judge(s.policy, onFinal); !v.Passed {
-		return r, fault.New(fault.CodeVerificationFailed, "stored evidence does not prove revision %s: %s", short(final), v.Summary)
+		return r, fault.New(fault.CodeCheckFailed, "stored evidence does not prove revision %s: %s", short(final), v.Summary)
 	}
 	return r, nil
 }
@@ -143,7 +143,7 @@ func (e *Engine) abandonIntent(ctx context.Context, id int64, summary string) {
 func (e *Engine) completeIntentTx(tx *sqlite.Tx, in sqlite.Intent, owner string, summary string) error {
 	now := e.now()
 	if owner != "" && in.OwnerDigest != owner {
-		return fault.New(fault.CodeSessionSuperseded, "integration intent %d is owned by another verifier", in.ID)
+		return fault.New(fault.CodeInvalidSession, "integration intent %d is owned by another verifier", in.ID)
 	}
 	if err := tx.FinishIntent(in.ID, sqlite.IntentCompleted, summary, now); err != nil {
 		return err
@@ -152,7 +152,7 @@ func (e *Engine) completeIntentTx(tx *sqlite.Tx, in sqlite.Intent, owner string,
 		return err
 	}
 	if in.AttemptID != 0 {
-		if err := tx.EndAttempt(in.AttemptID, execution.EndFinished, now); err != nil && fault.CodeOf(err) != fault.CodeSessionFinished {
+		if err := tx.EndAttempt(in.AttemptID, execution.EndFinished, now); err != nil && fault.CodeOf(err) != fault.CodeInvalidSession {
 			return err
 		}
 	}
@@ -218,7 +218,7 @@ func (e *Engine) reconcileIntents(ctx context.Context) error {
 			return tx.FinishRun(cur.RunID, sqlite.RunError, "integration interrupted before promotion (verifier died); verify again", now)
 		})
 		if err != nil {
-			return fault.Wrap(err, fault.CodeInternal, "reconcile integration intent %d", in.ID)
+			return fault.WrapInternal(err, "reconcile integration intent %d", in.ID)
 		}
 		e.notify()
 	}

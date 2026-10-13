@@ -92,7 +92,7 @@ func TaskBranch(taskID string) string { return "atask/" + taskID }
 func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, quarantineSeq int) (Info, error) {
 	info := Info{Branch: TaskBranch(taskID)}
 	if err := os.MkdirAll(m.Root, 0o755); err != nil {
-		return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create workspace root")
+		return info, fault.Wrap(err, fault.CodeNotReady, "create workspace root")
 	}
 	existing, err := m.worktreeFor(ctx, info.Branch)
 	if err != nil {
@@ -108,10 +108,10 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 		}
 		stale := fmt.Sprintf("%s.stale-%d", info.Path, quarantineSeq)
 		if _, err := gitRetry(ctx, m.Repo, "worktree", "move", info.Path, stale); err != nil {
-			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "quarantine worktree of attempt %d", quarantineSeq)
+			return info, fault.Wrap(err, fault.CodeNotReady, "quarantine worktree of attempt %d", quarantineSeq)
 		}
 		if _, err := git(ctx, stale, "checkout", "-q", "--detach"); err != nil {
-			return info, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "detach quarantined worktree %s", stale)
+			return info, fault.Wrap(err, fault.CodeNotReady, "detach quarantined worktree %s", stale)
 		}
 		info.Quarantined = stale
 		info.Path = ""
@@ -123,7 +123,7 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 	}
 	info.Path = path
 	if head := CurrentBranch(ctx, info.Path); head != info.Branch {
-		return info, fault.New(fault.CodeWorkspaceUnavailable, "%s exists but is not the worktree for %s (HEAD is %q)", info.Path, info.Branch, head)
+		return info, fault.New(fault.CodeNotReady, "%s exists but is not the worktree for %s (HEAD is %q)", info.Path, info.Branch, head)
 	}
 	if !info.Dirty {
 		if st, err := Inspect(ctx, info.Path); err == nil {
@@ -160,7 +160,7 @@ func (m Manager) Prune(ctx context.Context, taskID string, keepLive bool) ([]str
 	for _, path := range matches {
 		_, _ = git(ctx, m.Repo, "worktree", "remove", "--force", path)
 		if err := os.RemoveAll(path); err != nil {
-			return removed, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "remove %s", path)
+			return removed, fault.Wrap(err, fault.CodeNotReady, "remove %s", path)
 		}
 		// The checks' private TMPDIR beside the worktree goes with it.
 		_ = os.RemoveAll(path + ".tmp")
@@ -185,14 +185,14 @@ func (m Manager) Contains(ctx context.Context, branch, revision string) (bool, e
 		return false, nil
 	}
 	// git prints nothing on a plain "no" (exit 1); any message is a real error.
-	return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "compare %s with %s", short(revision), branch)
+	return false, fault.Wrap(err, fault.CodeNotReady, "compare %s with %s", short(revision), branch)
 }
 
 // Revision resolves a branch or revision to a full commit hash.
 func (m Manager) Revision(ctx context.Context, ref string) (string, error) {
 	out, err := git(ctx, m.Repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	if err != nil {
-		return "", fault.Wrap(err, fault.CodeWorkspaceUnavailable, "resolve %s", ref)
+		return "", fault.Wrap(err, fault.CodeNotReady, "resolve %s", ref)
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -201,15 +201,15 @@ func (m Manager) Revision(ctx context.Context, ref string) (string, error) {
 // checks run against immutable inputs. The caller must call cleanup.
 func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cleanup func(), err error) {
 	if err := os.MkdirAll(filepath.Join(m.Root, "snapshots"), 0o755); err != nil {
-		return "", nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create snapshot root")
+		return "", nil, fault.Wrap(err, fault.CodeNotReady, "create snapshot root")
 	}
 	path, err = os.MkdirTemp(filepath.Join(m.Root, "snapshots"), "snap-")
 	if err != nil {
-		return "", nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create snapshot dir")
+		return "", nil, fault.Wrap(err, fault.CodeNotReady, "create snapshot dir")
 	}
 	os.Remove(path) // git worktree add wants to create it
 	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", "--detach", path, revision); err != nil {
-		return "", nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "snapshot %s", revision)
+		return "", nil, fault.Wrap(err, fault.CodeNotReady, "snapshot %s", revision)
 	}
 	cleanup = func() {
 		_, _ = git(context.Background(), m.Repo, "worktree", "remove", "--force", path)
@@ -235,7 +235,7 @@ func (c Candidate) Cleanup() {
 
 // PrepareMerge merges sources, in order, onto the target branch's current
 // revision in a scratch worktree, without touching the target. A conflict
-// fails with INTEGRATION_FAILED naming the conflicting source.
+// fails with BASE_CONFLICT naming the conflicting source.
 func (m Manager) PrepareMerge(ctx context.Context, target string, sources []string, message string) (Candidate, error) {
 	base, err := m.Revision(ctx, "refs/heads/"+target)
 	if err != nil {
@@ -270,13 +270,13 @@ func (m Manager) PrepareMerge(ctx context.Context, target string, sources []stri
 					ce.Files = append(ce.Files, f)
 				}
 			}
-			return Candidate{}, fault.Wrap(ce, fault.CodeIntegrationFailed, "%s", ce.Error())
+			return Candidate{}, fault.Wrap(ce, fault.CodeBaseConflict, "%s", ce.Error())
 		}
 	}
 	rev, err := git(ctx, path, "rev-parse", "HEAD")
 	if err != nil {
 		cleanup()
-		return Candidate{}, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "read candidate revision")
+		return Candidate{}, fault.Wrap(err, fault.CodeNotReady, "read candidate revision")
 	}
 	cand.Revision = strings.TrimSpace(rev)
 	return cand, nil
@@ -284,7 +284,7 @@ func (m Manager) PrepareMerge(ctx context.Context, target string, sources []stri
 
 // Promote advances the target branch from candidate.Base to
 // candidate.Revision. If another promotion moved the target first, it
-// fails with INTEGRATION_FAILED wrapping ErrTargetMoved and nothing
+// fails with BASE_CONFLICT wrapping ErrTargetMoved and nothing
 // changes. When the target is checked out in a worktree, that worktree
 // must be clean and is fast-forwarded in place; otherwise the ref is
 // updated with a compare-and-swap.
@@ -310,7 +310,7 @@ func (m Manager) Promote(ctx context.Context, target string, cand Candidate) err
 			return err
 		}
 		if st.Revision != cand.Base {
-			return fault.Wrap(ErrTargetMoved, fault.CodeIntegrationFailed, "target branch %s moved from %s to %s during verification", target, short(cand.Base), short(st.Revision))
+			return fault.Wrap(ErrTargetMoved, fault.CodeBaseConflict, "target branch %s moved from %s to %s during verification", target, short(cand.Base), short(st.Revision))
 		}
 		// A developer's checkout may carry unrelated edits and untracked
 		// files; only paths the fast-forward would touch are an obstacle,
@@ -318,21 +318,21 @@ func (m Manager) Promote(ctx context.Context, target string, cand Candidate) err
 		if !st.Clean() {
 			changed, err := git(ctx, m.Repo, "diff", "--name-only", cand.Base, cand.Revision)
 			if err != nil {
-				return fault.Wrap(err, fault.CodeWorkspaceUnavailable, "diff %s..%s", short(cand.Base), short(cand.Revision))
+				return fault.Wrap(err, fault.CodeNotReady, "diff %s..%s", short(cand.Base), short(cand.Revision))
 			}
 			if clash := localClashes(st.Dirty, strings.Split(strings.TrimSpace(changed), "\n")); len(clash) > 0 {
-				return fault.New(fault.CodeIntegrationFailed, "target branch %s is checked out in %s and the promotion would touch files with local changes (%s); commit, stash or move them, then verify again", target, wt, strings.Join(clash, ", "))
+				return fault.New(fault.CodeBaseConflict, "target branch %s is checked out in %s and the promotion would touch files with local changes (%s); commit, stash or move them, then verify again", target, wt, strings.Join(clash, ", "))
 			}
 		}
 		// Git's own guard is the second net: a fast-forward never
 		// overwrites local changes or untracked files.
 		if _, err := git(ctx, wt, "merge", "--ff-only", cand.Revision); err != nil {
-			return fault.Wrap(err, fault.CodeIntegrationFailed, "fast-forward %s in %s", target, wt)
+			return fault.Wrap(err, fault.CodeBaseConflict, "fast-forward %s in %s", target, wt)
 		}
 		return nil
 	}
 	if _, err := git(ctx, m.Repo, "update-ref", "refs/heads/"+target, cand.Revision, cand.Base); err != nil {
-		return fault.Wrap(ErrTargetMoved, fault.CodeIntegrationFailed, "target branch %s moved during verification (%v)", target, err)
+		return fault.Wrap(ErrTargetMoved, fault.CodeBaseConflict, "target branch %s moved during verification (%v)", target, err)
 	}
 	return nil
 }
@@ -373,19 +373,19 @@ func localClashes(dirty []string, changed []string) []string {
 func (m Manager) promoteLock(ctx context.Context) (func(), error) {
 	common, err := git(ctx, m.Repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
-		return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "locate git directory")
+		return nil, fault.Wrap(err, fault.CodeNotReady, "locate git directory")
 	}
 	path := filepath.Join(strings.TrimSpace(common), "at-promote.lock")
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "open promotion lock")
+		return nil, fault.Wrap(err, fault.CodeNotReady, "open promotion lock")
 	}
 	delay := 10 * time.Millisecond
 	for {
 		locked, err := tryLockFile(f)
 		if err != nil {
 			f.Close()
-			return nil, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "take promotion lock")
+			return nil, fault.Wrap(err, fault.CodeNotReady, "take promotion lock")
 		}
 		if locked {
 			fmt.Fprintf(f, "%d\n", os.Getpid())
@@ -394,7 +394,7 @@ func (m Manager) promoteLock(ctx context.Context) (func(), error) {
 		select {
 		case <-ctx.Done():
 			f.Close()
-			return nil, fault.Wrap(ctx.Err(), fault.CodeIntegrationFailed, "waiting for the promotion lock %s", path)
+			return nil, fault.Wrap(ctx.Err(), fault.CodeBaseConflict, "waiting for the promotion lock %s", path)
 		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
 		}
 		if delay < 200*time.Millisecond {
@@ -408,7 +408,7 @@ func (m Manager) promoteLock(ctx context.Context) (func(), error) {
 func (m Manager) worktreeFor(ctx context.Context, branch string) (string, error) {
 	out, err := git(ctx, m.Repo, "worktree", "list", "--porcelain")
 	if err != nil {
-		return "", fault.Wrap(err, fault.CodeWorkspaceUnavailable, "list worktrees")
+		return "", fault.Wrap(err, fault.CodeNotReady, "list worktrees")
 	}
 	var path string
 	for _, line := range strings.Split(out, "\n") {
@@ -451,7 +451,7 @@ func InitRepo(ctx context.Context, dir string) (bool, error) {
 	}
 	if _, err := git(ctx, dir, "init", "-q", "-b", "main"); err != nil {
 		if _, err2 := git(ctx, dir, "init", "-q"); err2 != nil {
-			return false, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "git init in %s", dir)
+			return false, fault.Wrap(err, fault.CodeNotReady, "git init in %s", dir)
 		}
 	}
 	if err := rootCommit(ctx, dir); err != nil {
@@ -469,7 +469,7 @@ func rootCommit(ctx context.Context, dir string) error {
 		args = append([]string{"-c", "user.name=at", "-c", "user.email=at@localhost"}, args...)
 	}
 	if _, err := git(ctx, dir, args...); err != nil {
-		return fault.Wrap(err, fault.CodeWorkspaceUnavailable, "create initial commit in %s", dir)
+		return fault.Wrap(err, fault.CodeNotReady, "create initial commit in %s", dir)
 	}
 	return nil
 }

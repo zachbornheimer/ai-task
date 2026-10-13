@@ -48,10 +48,10 @@ func TestAuthorize(t *testing.T) {
 		code fault.Code
 	}{
 		{"ok", live, 2, ""},
-		{"superseded", live, 3, fault.CodeSessionSuperseded},
-		{"expired", Attempt{Seq: 2, LeaseExpiresAt: now}, 2, fault.CodeLeaseExpired},
-		{"finished", Attempt{Seq: 2, LeaseExpiresAt: now.Add(time.Hour), EndedAt: &ended, EndReason: EndFinished}, 2, fault.CodeSessionFinished},
-		{"ended other", Attempt{Seq: 2, LeaseExpiresAt: now.Add(time.Hour), EndedAt: &ended, EndReason: EndSuperseded}, 2, fault.CodeSessionSuperseded},
+		{"superseded", live, 3, fault.CodeInvalidSession},
+		{"expired", Attempt{Seq: 2, LeaseExpiresAt: now}, 2, fault.CodeInvalidSession},
+		{"finished", Attempt{Seq: 2, LeaseExpiresAt: now.Add(time.Hour), EndedAt: &ended, EndReason: EndFinished}, 2, fault.CodeInvalidSession},
+		{"ended other", Attempt{Seq: 2, LeaseExpiresAt: now.Add(time.Hour), EndedAt: &ended, EndReason: EndSuperseded}, 2, fault.CodeInvalidSession},
 	}
 	for _, c := range cases {
 		if got := fault.CodeOf(Authorize(c.a, c.cur, now)); got != c.code {

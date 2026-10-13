@@ -94,7 +94,7 @@ func (t *Tx) RenewJob(id int64, ownerDigest string, lease time.Time) error {
 		return wrapInternal(err, "renew job")
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fault.New(fault.CodeSessionSuperseded, "verification job %d is no longer owned by this verifier", id)
+		return fault.New(fault.CodeInvalidSession, "verification job %d is no longer owned by this verifier", id)
 	}
 	return nil
 }
@@ -106,7 +106,7 @@ func (t *Tx) FinishJob(id int64, ownerDigest, status, candidate, summary string,
 		return wrapInternal(err, "finish job")
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fault.New(fault.CodeSessionSuperseded, "verification job %d is no longer owned by this verifier", id)
+		return fault.New(fault.CodeInvalidSession, "verification job %d is no longer owned by this verifier", id)
 	}
 	return nil
 }

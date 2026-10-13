@@ -17,7 +17,7 @@ func TestDoctorHumanReportOnFailure(t *testing.T) {
 	if r.code == 0 {
 		t.Fatalf("doctor succeeded on a failing baseline: %s", r.stdout)
 	}
-	for _, want := range []string{"error [UNHEALTHY]", "baseline", "regress", "baseline-went-wrong", "fix:", "○ not ready"} {
+	for _, want := range []string{"error [NOT_READY]", "baseline", "regress", "baseline-went-wrong", "fix:", "○ not ready"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, r.stderr)
 		}
@@ -26,7 +26,7 @@ func TestDoctorHumanReportOnFailure(t *testing.T) {
 		t.Errorf("human failure wrote to stdout: %s", r.stdout)
 	}
 
-	j := e.fails("UNHEALTHY", "doctor")
+	j := e.fails("NOT_READY", "doctor")
 	det, _ := j.env["error"].(map[string]any)["details"].(map[string]any)
 	if det == nil || det["healthy"] != false || j.stderr != "" {
 		t.Fatalf("JSON doctor changed: stdout=%s stderr=%s", j.stdout, j.stderr)

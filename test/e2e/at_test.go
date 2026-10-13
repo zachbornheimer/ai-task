@@ -158,8 +158,8 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	e := gitEnv(t)
 	a := taskID(e.ok("add", "Parse tokens", "--key", "parse", "--check", "unit: test -f parse.txt"))
 	b := taskID(e.ok("add", "Reject expired access tokens", "--key", "reject", "--requires", "parse", "--accept", "expired -> 401", "--check", "unit: test -f reject.txt"))
-	e.fails("TASK_BLOCKED", "claim", b)
-	e.fails("DEPENDENCY_CYCLE", "update", "parse", "--requires", "reject")
+	e.fails("NOT_READY", "claim", b)
+	e.fails("INVALID_INPUT", "update", "parse", "--requires", "reject")
 	e.fails("INVALID_INPUT", "verify")
 	e.fails("INVALID_INPUT", "verify", "complete") // no session anywhere -> usage
 	sess := e.ok("claim")
@@ -206,7 +206,7 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	}
 	// Provisional checks run and never complete.
 	r := e.runIn(e.cwd, "", with, "verify", "task")
-	if r.env["ok"] != false || r.env["error"].(map[string]any)["code"] != "VERIFICATION_FAILED" {
+	if r.env["ok"] != false || r.env["error"].(map[string]any)["code"] != "CHECK_FAILED" {
 		t.Fatalf("verify task before work: %s", r.stdout)
 	}
 	e.commit(ws, "parse.txt", "p")
@@ -227,7 +227,7 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.cwd, "parse.txt")); err != nil {
 		t.Fatal("not promoted to main")
 	}
-	if r := e.runIn(e.cwd, "", with, "log", "--done", "late"); r.env["error"].(map[string]any)["code"] != "SESSION_FINISHED" {
+	if r := e.runIn(e.cwd, "", with, "log", "--done", "late"); r.env["error"].(map[string]any)["code"] != "INVALID_SESSION" {
 		t.Fatalf("%s", r.stdout)
 	}
 	// Dependent is ready; outside a worktree, renew/release need a token.
@@ -243,7 +243,7 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 		t.Fatalf("token for %s accepted in %s's worktree: %s", a, b, r.stdout)
 	}
 	e.fails("INVALID_SESSION", "claim", "renew", "sess-0000000000000000000000000000000a")
-	e.fails("SESSION_FINISHED", "claim", "release", tok)
+	e.fails("INVALID_SESSION", "claim", "release", tok)
 	rel := e.ok("claim", "release", sb["token"].(string), "--note", "later")
 	if rel["status"] != "ready" {
 		t.Fatalf("%v", rel)
@@ -277,15 +277,15 @@ func TestPlanningCommands(t *testing.T) {
 	g := taskID(e.ok("--project", "p", "add", "Identity Core", "--group", "--key", "identity"))
 	a := taskID(e.ok("--project", "p", "add", "Rotate creds", "--key", "rotate", "--check", "u: true"))
 	b := taskID(e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--check", "u: true"))
-	e.fails("DUPLICATE_KEY", "--project", "p", "add", "Token store v2", "--key", "store", "--check", "u: true")
-	e.fails("MISSING_VERIFICATION", "--project", "p", "add", "No checks", "--key", "nochecks")
+	e.fails("CONFLICT", "--project", "p", "add", "Token store v2", "--key", "store", "--check", "u: true")
+	e.fails("INVALID_INPUT", "--project", "p", "add", "No checks", "--key", "nochecks")
 	rep := e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--check", "u: true")
 	if rep["changed"].(float64) != 0 {
 		t.Fatalf("identical replay changed the plan: %v", rep)
 	}
-	e.fails("PLAN_CONFLICT", "--project", "p", "update", "store", "--title", "x", "--expect-rev", "1")
-	e.fails("INVALID_INPUT", "--project", "p", "update", "rotate", "--archive")                               // reason required
-	e.fails("PLAN_CONFLICT", "--project", "p", "update", "rotate", "--archive", "--reason", "done elsewhere") // store requires it
+	e.fails("CONFLICT", "--project", "p", "update", "store", "--title", "x", "--expect-rev", "1")
+	e.fails("INVALID_INPUT", "--project", "p", "update", "rotate", "--archive")                          // reason required
+	e.fails("CONFLICT", "--project", "p", "update", "rotate", "--archive", "--reason", "done elsewhere") // store requires it
 	up := e.ok("--project", "p", "update", "store", "--remove-requires", "rotate", "--accept", "works")
 	if up["changed"].(float64) != 1 {
 		t.Fatalf("%v", up)
@@ -318,7 +318,7 @@ func TestPlanningCommands(t *testing.T) {
 func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	e := newEnv(t)
 	e.ok("init", "--name", "c")
-	e.fails("MISSING_VERIFICATION", "claim") // no regression checks yet
+	e.fails("INVALID_INPUT", "claim") // no regression checks yet
 	e.ok("project", "--regression-check", "regress: true")
 	const n = 6
 	ids := map[string]bool{}
@@ -337,7 +337,7 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	for _, r := range results {
 		if r.code == 0 {
 			seen[taskID(r.env["result"].(map[string]any))]++
-		} else if r.env["error"].(map[string]any)["code"] == "NO_ELIGIBLE_WORK" {
+		} else if r.env["error"].(map[string]any)["code"] == "NOT_READY" {
 			none++
 		} else {
 			t.Errorf("unexpected: %s %s", r.stdout, r.stderr)
@@ -374,15 +374,15 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 // checks are informational and JSON without "required" means required.
 func TestVacuousChecksRejectedByCLI(t *testing.T) {
 	e := gitEnv(t)
-	e.fails("MISSING_VERIFICATION", "add", "opt only", "--optional-check", "o: false")
-	e.fails("MISSING_VERIFICATION", "add", "json false", "--policy-json", `{"task_checks":[{"id":"j","command":["true"],"required":false}]}`)
+	e.fails("INVALID_INPUT", "add", "opt only", "--optional-check", "o: false")
+	e.fails("INVALID_INPUT", "add", "json false", "--policy-json", `{"task_checks":[{"id":"j","command":["true"],"required":false}]}`)
 	x := taskID(e.ok("add", "json absent", "--policy-json", `{"task_checks":[{"id":"j","command":["true"]}]}`))
 	checks := e.ok("show", x)["task_checks"].([]any)
 	if len(checks) != 1 || checks[0].(map[string]any)["required"] != true {
 		t.Fatalf("absent required must mean required: %v", checks)
 	}
-	e.fails("MISSING_VERIFICATION", "update", x, "--optional-check", "o: true")
-	e.fails("MISSING_VERIFICATION", "project", "--regression-json", `[{"id":"r2","command":["true"],"required":false}]`)
+	e.fails("INVALID_INPUT", "update", x, "--optional-check", "o: true")
+	e.fails("INVALID_INPUT", "project", "--regression-json", `[{"id":"r2","command":["true"],"required":false}]`)
 	e.ok("project", "--regression-json", `[{"id":"r2","command":["true"]}]`)
 	s := e.ok("claim", x)
 	e.commit(s["workspace"].(string), "x.txt", "x")
@@ -399,8 +399,8 @@ func TestDiscoveredBlockerFromWorktree(t *testing.T) {
 	a := taskID(e.ok("add", "main work", "--key", "main", "--check", "u: true"))
 	s := e.ok("claim", a)
 	ws := s["workspace"].(string)
-	e.fails("PLAN_CONFLICT", "add", "prereq", "--blocks", "main", "--check", "u: true") // from the main checkout, no session
-	if r := e.runIn(ws, "", nil, "add", "prereq", "--blocks", "main"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "MISSING_VERIFICATION" {
+	e.fails("CONFLICT", "add", "prereq", "--blocks", "main", "--check", "u: true") // from the main checkout, no session
+	if r := e.runIn(ws, "", nil, "add", "prereq", "--blocks", "main"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "INVALID_INPUT" {
 		t.Fatalf("blocker without a check accepted: %s", r.stdout)
 	}
 	r := e.runIn(ws, "", nil, "add", "prereq", "--key", "pre", "--blocks", "main", "--check", "u: true")
@@ -454,7 +454,7 @@ func TestCLICorners(t *testing.T) {
 	if r := e.run("update", "x", "--archive", "--reason", "r", "--title", "nope"); r.code != 2 {
 		t.Fatalf("--archive with edits accepted: %s", r.stdout)
 	}
-	e.fails("PLAN_CONFLICT", "update", "x", "--reset-attempts")
+	e.fails("CONFLICT", "update", "x", "--reset-attempts")
 	e.ok("update", "x", "--reset-attempts", "--planner")
 	e.commit(s["workspace"].(string), "x.txt", "x")
 	if r := e.runIn(s["workspace"].(string), "", nil, "verify", "complete"); r.code != 0 {
@@ -508,7 +508,7 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 		t.Fatalf("parse: %v", parse)
 	}
 	// Atomic: a bad item means nothing is added.
-	e.fails("DEPENDENCY_CYCLE", "add", "--plan", `[{"key":"a","title":"A","requires":["b"],"checks":["u: true"]},{"key":"b","title":"B","requires":["a"],"checks":["u: true"]}]`)
+	e.fails("INVALID_INPUT", "add", "--plan", `[{"key":"a","title":"A","requires":["b"],"checks":["u: true"]},{"key":"b","title":"B","requires":["a"],"checks":["u: true"]}]`)
 	e.fails("NOT_FOUND", "show", "a")
 	// JSON on stdin, one object, and --claim hands back the session.
 	r := e.runIn(e.cwd, `{"key":"docs","title":"Document tokens","checks":["readme: test -f README.md"]}`, nil, "add", "-f", "-", "--claim")
@@ -545,7 +545,7 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 	// Unhealthy: the regression suite fails on main; doctor says so and
 	// names the check, before any task is charged for it.
 	e.ok("project", "--regression-check", "regress: false")
-	rr := e.fails("UNHEALTHY", "doctor")
+	rr := e.fails("NOT_READY", "doctor")
 	det := rr.env["error"].(map[string]any)["details"].(map[string]any)
 	if det["healthy"] != false {
 		t.Fatalf("doctor details: %v", det)
@@ -690,7 +690,7 @@ func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 	e.fails("INVALID_INPUT", "project", "--budget-large", "soon")
 	// A regression gate over its budget is a doctor error, before any task pays for it.
 	e.ok("project", "--regression-budget", "300ms", "--regression-check", "slow: sleep 1")
-	rr := e.fails("UNHEALTHY", "doctor")
+	rr := e.fails("NOT_READY", "doctor")
 	found := false
 	for _, ch := range rr.env["error"].(map[string]any)["details"].(map[string]any)["checks"].([]any) {
 		m := ch.(map[string]any)

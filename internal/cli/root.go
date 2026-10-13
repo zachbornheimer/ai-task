@@ -251,7 +251,7 @@ type errorOut struct {
 	Code    fault.Code `json:"code"`
 	Message string     `json:"message"`
 	// Details carries a structured result for failures that still recorded
-	// facts, e.g. the verification run behind VERIFICATION_FAILED.
+	// facts, e.g. the verification run behind CHECK_FAILED.
 	Details any `json:"details,omitempty"`
 }
 
@@ -276,7 +276,7 @@ func (c *ctxt) fail(err error) int {
 	if asFault(err, &fe) {
 		msg = fe.Message
 		// Tooling failures carry the tool's own words (git's stderr).
-		if fe.Err != nil && (code == fault.CodeInternal || code == fault.CodeWorkspaceUnavailable || code == fault.CodeIntegrationFailed) && !strings.Contains(msg, fe.Err.Error()) {
+		if fe.Err != nil && (fault.IsInternal(err) || code == fault.CodeNotReady || code == fault.CodeBaseConflict) && !strings.Contains(msg, fe.Err.Error()) {
 			msg += ": " + fe.Err.Error()
 		}
 		details = fe.Details

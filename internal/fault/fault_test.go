@@ -13,9 +13,9 @@ func TestCodeOf(t *testing.T) {
 		want Code
 	}{
 		{nil, ""},
-		{base, CodeInternal},
-		{New(CodeTaskBlocked, "blocked"), CodeTaskBlocked},
-		{Wrap(base, CodeLeaseExpired, "expired"), CodeLeaseExpired},
+		{base, CodeNotReady},
+		{New(CodeNotReady, "blocked"), CodeNotReady},
+		{Wrap(base, CodeInvalidSession, "expired"), CodeInvalidSession},
 		{fmt.Errorf("outer: %w", New(CodeNotFound, "x")), CodeNotFound},
 	}
 	for _, c := range cases {
@@ -23,11 +23,11 @@ func TestCodeOf(t *testing.T) {
 			t.Errorf("CodeOf(%v) = %q, want %q", c.err, got, c.want)
 		}
 	}
-	w := Wrap(base, CodeInternal, "ctx")
+	w := WrapInternal(base, "ctx")
 	if !errors.Is(w, base) {
 		t.Error("Wrap must unwrap to the cause")
 	}
-	if !Is(w, CodeInternal) || Is(w, CodeNotFound) {
+	if !IsInternal(w) || Is(w, CodeNotFound) {
 		t.Error("Is must match the carried code only")
 	}
 }

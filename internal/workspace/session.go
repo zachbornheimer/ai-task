@@ -41,7 +41,7 @@ func gitDir(ctx context.Context, dir string) (string, error) {
 func StoreToken(ctx context.Context, dir, token string) error {
 	g, err := gitDir(ctx, dir)
 	if err != nil {
-		return fault.Wrap(err, fault.CodeWorkspaceUnavailable, "locate git dir of %s", dir)
+		return fault.Wrap(err, fault.CodeNotReady, "locate git dir of %s", dir)
 	}
 	return os.WriteFile(filepath.Join(g, tokenFile), []byte(token+"\n"), 0o600)
 }

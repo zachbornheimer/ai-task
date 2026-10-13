@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
-	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -119,5 +118,4 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 	if v := f.show(string(g)); v.GroupVerification.Status != "failed" || !strings.Contains(v.LastError, "budget") {
 		t.Fatalf("epic timeout must be reported as the epic's construction problem: %+v %q", v.GroupVerification, v.LastError)
 	}
-	_ = fault.CodeInternal
 }

@@ -20,9 +20,9 @@ unless noted).
 
 - A ChangeSet is one atomic revision: any invalid operation leaves the plan
   untouched and the revision unchanged. (`TestAtomicProposalInsertsNothingOnInvalidEdge`)
-- `ExpectedPlanRev` mismatch is `PLAN_CONFLICT`. Identical replays by
+- `ExpectedPlanRev` mismatch is `CONFLICT`. Identical replays by
   idempotency key or by stable key create nothing; conflicting definitions
-  under an existing key are `DUPLICATE_KEY`. (`TestStableKeysAndIdempotency`)
+  under an existing key are `CONFLICT`. (`TestStableKeysAndIdempotency`)
 - Hard edges form a DAG; validation and insertion share the write
   transaction. (`dependency.TestValidate`, `TestReviewMutationIsOneRevisionWithOptimisticConcurrency`)
 - Groups are organizational: never claimable, never an edge endpoint,

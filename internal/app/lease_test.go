@@ -72,7 +72,7 @@ func TestHeartbeatRecoversFromTransientAndAbortsOnTerminal(t *testing.T) {
 	var calls atomic.Int32
 	app.SetFaultHook(e, func(p string) error {
 		if p == "heartbeat:renew" && calls.Add(1) <= 2 {
-			return fault.New(fault.CodeInternal, "database is locked")
+			return fault.NewInternal("database is locked")
 		}
 		return nil
 	})
@@ -101,7 +101,7 @@ func TestHeartbeatRecoversFromTransientAndAbortsOnTerminal(t *testing.T) {
 	f.commit(sb.Workspace, "b.txt", "b")
 	app.SetFaultHook(e, func(p string) error {
 		if p == "heartbeat:renew" {
-			return fault.New(fault.CodeSessionSuperseded, "simulated supersession")
+			return fault.New(fault.CodeInvalidSession, "simulated supersession")
 		}
 		return nil
 	})
@@ -120,5 +120,5 @@ func TestHeartbeatRecoversFromTransientAndAbortsOnTerminal(t *testing.T) {
 }
 
 func terminalCode(c fault.Code) bool {
-	return c == fault.CodeSessionSuperseded || c == fault.CodeLeaseExpired || c == fault.CodeSessionFinished
+	return c == fault.CodeInvalidSession
 }

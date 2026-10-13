@@ -72,7 +72,7 @@ func InstallInstructions(root string) (InstallResult, error) {
 		content = block + "\n" + DefaultGuidelines
 		res.Created, res.Updated = true, true
 	case err != nil:
-		return res, fault.Wrap(err, fault.CodeInternal, "read AGENTS.md")
+		return res, fault.WrapInternal(err, "read AGENTS.md")
 	default:
 		s := string(existing)
 		b, e := strings.Index(s, InstructionsBegin), strings.Index(s, InstructionsEnd)
@@ -92,7 +92,7 @@ func InstallInstructions(root string) (InstallResult, error) {
 	}
 	if res.Updated {
 		if err := writeUnder(root, "AGENTS.md", []byte(content)); err != nil {
-			return res, fault.Wrap(err, fault.CodeInternal, "write AGENTS.md")
+			return res, fault.WrapInternal(err, "write AGENTS.md")
 		}
 	}
 	claude := filepath.Join(root, "CLAUDE.md")
@@ -100,14 +100,14 @@ func InstallInstructions(root string) (InstallResult, error) {
 	switch {
 	case os.IsNotExist(err):
 		if err := writeUnder(root, "CLAUDE.md", []byte("@AGENTS.md\n")); err != nil {
-			return res, fault.Wrap(err, fault.CodeInternal, "write CLAUDE.md")
+			return res, fault.WrapInternal(err, "write CLAUDE.md")
 		}
 		res.ClaudeMD = claude
 	case err != nil:
-		return res, fault.Wrap(err, fault.CodeInternal, "read CLAUDE.md")
+		return res, fault.WrapInternal(err, "read CLAUDE.md")
 	case !strings.Contains(string(cb), "@AGENTS.md"):
 		if err := writeUnder(root, "CLAUDE.md", []byte(strings.TrimRight(string(cb), "\n")+"\n\n@AGENTS.md\n")); err != nil {
-			return res, fault.Wrap(err, fault.CodeInternal, "amend CLAUDE.md")
+			return res, fault.WrapInternal(err, "amend CLAUDE.md")
 		}
 		res.ClaudeMD = claude
 	}
@@ -168,7 +168,7 @@ func InstallClaudeHooks(root string) (string, bool, error) {
 			return path, false, fault.Wrap(err, fault.CodeInvalidInput, "%s is not valid JSON", path)
 		}
 	} else if !os.IsNotExist(err) {
-		return path, false, fault.Wrap(err, fault.CodeInternal, "read %s", path)
+		return path, false, fault.WrapInternal(err, "read %s", path)
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
@@ -192,11 +192,11 @@ func InstallClaudeHooks(root string) (string, bool, error) {
 		return path, false, nil
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return path, false, fault.Wrap(err, fault.CodeInternal, "create %s", dir)
+		return path, false, fault.WrapInternal(err, "create %s", dir)
 	}
 	b, _ := json.MarshalIndent(settings, "", "  ")
 	if err := writeUnder(root, filepath.Join(".claude", "settings.json"), append(b, '\n')); err != nil {
-		return path, false, fault.Wrap(err, fault.CodeInternal, "write %s", path)
+		return path, false, fault.WrapInternal(err, "write %s", path)
 	}
 	return path, true, nil
 }

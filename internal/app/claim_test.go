@@ -35,7 +35,7 @@ func TestClaimIsDeterministicOldestFirst(t *testing.T) {
 		}
 	}
 	_, err := f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeNoAvailableTask)
+	wantCode(t, err, fault.CodeNotReady)
 }
 
 func TestConcurrentClaimsYieldDistinctSessions(t *testing.T) {
@@ -58,7 +58,7 @@ func TestConcurrentClaimsYieldDistinctSessions(t *testing.T) {
 			}
 			s, err := e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
 			if err != nil {
-				if fault.Is(err, fault.CodeNoAvailableTask) {
+				if fault.Is(err, fault.CodeNotReady) {
 					atomic.AddInt32(&none, 1)
 					return
 				}
@@ -86,10 +86,10 @@ func TestExplicitClaimEnforcesEligibility(t *testing.T) {
 	a := f.add("a")
 	b := f.add("b", "a")
 	_, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &b})
-	wantCode(t, err, fault.CodeTaskBlocked)
+	wantCode(t, err, fault.CodeNotReady)
 	f.claim(string(a))
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeTaskAlreadyTaken)
+	wantCode(t, err, fault.CodeConflict)
 }
 
 func TestTokenFencingAcrossExpiryAndSupersession(t *testing.T) {
@@ -110,7 +110,7 @@ func TestTokenFencingAcrossExpiryAndSupersession(t *testing.T) {
 		func() error { _, err := f.e.Release(f.ctx, s1.Token, app.ReleaseOptions{}); return err },
 		func() error { _, err := f.e.Verify(f.ctx, s1.Token, verification.ModeComplete); return err },
 	} {
-		wantCode(t, op(), fault.CodeLeaseExpired)
+		wantCode(t, op(), fault.CodeInvalidSession)
 	}
 	// Another worker resumes with the durable handoff.
 	s2, err := f.open().Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
@@ -122,7 +122,7 @@ func TestTokenFencingAcrossExpiryAndSupersession(t *testing.T) {
 		func() error { _, err := f.e.Renew(f.ctx, s1.Token); return err },
 		func() error { _, err := f.e.Verify(f.ctx, s1.Token, verification.ModeTask); return err },
 	} {
-		wantCode(t, op(), fault.CodeSessionSuperseded)
+		wantCode(t, op(), fault.CodeInvalidSession)
 	}
 	if _, err := f.e.Log(f.ctx, s2.Token, execution.LogEntry{Done: "resumed"}); err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	sx := f.claim(string(x))
 	f.commit(sx.Workspace, "x.txt", "x")
 	_, err = f.e.Verify(f.ctx, sx.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	f.e.Release(f.ctx, sx.Token, app.ReleaseOptions{})
 	if f.status(string(x)) != task.StatusNeedsAttention {
 		v := f.show(string(x))
@@ -220,7 +220,7 @@ func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	if !errors.As(err, &fe) || fe.Details == nil {
 		t.Fatal("stall details missing")
 	}
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true}}}); !fault.Is(err, fault.CodePlanConflict) {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true}}}); !fault.Is(err, fault.CodeConflict) {
 		t.Fatalf("reset without planner authority: %v", err)
 	}
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Planner: true, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(x), ResetAttempts: true, TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-x", "true", true)})}}}); err != nil {
@@ -256,7 +256,7 @@ func TestReleaseAndCooldown(t *testing.T) {
 		t.Fatalf("%+v %v", v, err)
 	}
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeNoAvailableTask)
+	wantCode(t, err, fault.CodeNotReady)
 	f.c.Advance(11 * time.Minute)
 	s2 := f.claim(string(a))
 	if s2.Handoff.RecentLogs[0].Note != "giving up for now" {
@@ -268,7 +268,7 @@ func TestReleaseAndCooldown(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 	_, err = f.e.Release(f.ctx, s2.Token, app.ReleaseOptions{})
-	wantCode(t, err, fault.CodeSessionSuperseded)
+	wantCode(t, err, fault.CodeInvalidSession)
 }
 
 func TestHandoffCarriesPrerequisiteLearningsAndLastFailure(t *testing.T) {
@@ -293,7 +293,7 @@ func TestHandoffCarriesPrerequisiteLearningsAndLastFailure(t *testing.T) {
 	sc := f.claim(string(c))
 	f.commit(sc.Workspace, "c.txt", "c")
 	_, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if _, err := f.e.Release(f.ctx, sc.Token, app.ReleaseOptions{Note: "stuck"}); err != nil {
 		t.Fatal(err)
 	}
@@ -366,15 +366,15 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	}
 	// A wakes up with its own token: every action is refused.
 	_, err := f.e.Renew(f.ctx, sA.Token)
-	wantCode(t, err, fault.CodeSessionSuperseded)
+	wantCode(t, err, fault.CodeInvalidSession)
 	_, err = f.e.Log(f.ctx, sA.Token, execution.LogEntry{Note: "still here"})
-	wantCode(t, err, fault.CodeSessionSuperseded)
+	wantCode(t, err, fault.CodeInvalidSession)
 	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeTask)
-	wantCode(t, err, fault.CodeSessionSuperseded)
+	wantCode(t, err, fault.CodeInvalidSession)
 	_, err = f.e.Verify(f.ctx, sA.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeSessionSuperseded)
+	wantCode(t, err, fault.CodeInvalidSession)
 	_, err = f.e.Release(f.ctx, sA.Token, app.ReleaseOptions{})
-	wantCode(t, err, fault.CodeSessionSuperseded)
+	wantCode(t, err, fault.CodeInvalidSession)
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sA.Token), Operations: []plan.Change{plan.AddTask{Key: "x", Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}}); err == nil {
 		t.Fatal("stale session could add a blocker")
 	}
