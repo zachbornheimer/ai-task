@@ -9,6 +9,8 @@ import (
 // Env is what a preset may know about where it runs.
 type Env struct {
 	Workdir string
+	// TargetBranch is the project's target branch; empty when unknown.
+	TargetBranch string
 }
 
 // Preset turns a ProofSpec into the argv that proves it.
@@ -37,6 +39,14 @@ type Registry struct {
 }
 
 func NewRegistry() *Registry { return &Registry{presets: map[string]Preset{}} }
+
+// Judger lets a preset decide pass or fail from a run's output and exit code.
+type Judger interface {
+	Judge(output []byte, exitCode int) (bool, string)
+}
+
+// EnvBinder is a preset that needs the run's Env when judging.
+type EnvBinder interface{ ForEnv(Env) Preset }
 
 // DefaultRegistry returns a registry holding the built-in presets.
 func DefaultRegistry() *Registry {

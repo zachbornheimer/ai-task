@@ -16,6 +16,7 @@ const OutputTail = 64 * 1024
 // Runner executes specs inside their budget.
 type Runner struct {
 	registry *Registry
+	target   string        // target branch handed to presets
 	budget   time.Duration // when > 0, overrides every budget (tests)
 	hasMise  func(workdir string) bool
 }
@@ -28,6 +29,9 @@ func WithBudget(d time.Duration) RunnerOption { return func(r *Runner) { r.budge
 
 // WithRegistry swaps the preset registry.
 func WithRegistry(reg *Registry) RunnerOption { return func(r *Runner) { r.registry = reg } }
+
+// WithTargetBranch tells presets which branch the project targets.
+func WithTargetBranch(b string) RunnerOption { return func(r *Runner) { r.target = b } }
 
 func NewRunner(opts ...RunnerOption) *Runner {
 	r := &Runner{registry: DefaultRegistry(), hasMise: HasMiseConfig}
@@ -86,6 +90,18 @@ func (r *Runner) Run(ctx context.Context, ct CheckType, spec ProofSpec, workdir 
 		res.ReturnCode = &code
 	}
 	res.Passed = res.ReturnCode != nil && *res.ReturnCode == 0 && matchesExpect(spec, out.Stdout)
+	if p, ok := r.registry.Lookup(spec.Preset); ok && res.ReturnCode != nil {
+		if b, ok := p.(EnvBinder); ok {
+			p = b.ForEnv(Env{Workdir: workdir, TargetBranch: r.target})
+		}
+		if j, ok := p.(Judger); ok {
+			passed, reason := j.Judge([]byte(res.Output), *res.ReturnCode)
+			res.Passed = res.Passed && passed
+			if reason != "" {
+				res.Output += "\n" + reason
+			}
+		}
+	}
 	return res
 }
 
@@ -94,7 +110,7 @@ func (r *Runner) argv(spec ProofSpec, workdir string) ([]string, error) {
 	if !ok {
 		return nil, errUnknownPreset(spec.Preset)
 	}
-	argv, err := p.Argv(spec, Env{Workdir: workdir})
+	argv, err := p.Argv(spec, Env{Workdir: workdir, TargetBranch: r.target})
 	if err == nil && r.hasMise(workdir) {
 		argv = wrapMise(argv)
 	}
