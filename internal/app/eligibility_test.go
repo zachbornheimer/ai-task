@@ -41,7 +41,7 @@ func TestCooldownIsOneRuleEverywhere(t *testing.T) {
 			f.commit(s.Workspace, "a.txt", "a")
 			if via == "failed verification" {
 				_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-				wantCode(t, err, fault.CodeVerificationFailed)
+				wantCode(t, err, fault.CodeCheckFailed)
 				if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token}); err != nil {
 					t.Fatal(err)
 				}
@@ -60,9 +60,9 @@ func TestCooldownIsOneRuleEverywhere(t *testing.T) {
 				t.Fatalf("summary: %+v", sum)
 			}
 			_, err := f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-			wantCode(t, err, fault.CodeNoAvailableTask)
+			wantCode(t, err, fault.CodeNotReady)
 			_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-			wantCode(t, err, fault.CodeNoAvailableTask)
+			wantCode(t, err, fault.CodeNotReady)
 			// A waiting claim waits (here: until its context ends), never STALLED.
 			ctx, cancel := context.WithTimeout(f.ctx, 300*time.Millisecond)
 			_, err = f.e.Claim(ctx, app.ClaimRequest{ProjectID: f.proj.ID, Wait: true})
@@ -112,7 +112,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	failed := f.addWith("failed", "false")
 	sf := f.claim(string(failed))
 	f.commit(sf.Workspace, "f.txt", "f")
-	if _, err := f.e.Verify(f.ctx, sf.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeVerificationFailed {
+	if _, err := f.e.Verify(f.ctx, sf.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeCheckFailed {
 		t.Fatal(err)
 	}
 	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sf.Token})
@@ -160,7 +160,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	fc := f.addWith("failedcooling", "false")
 	sfc := f.claim(string(fc))
 	f.commit(sfc.Workspace, "fc.txt", "fc")
-	if _, err := f.e.Verify(f.ctx, sfc.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeVerificationFailed {
+	if _, err := f.e.Verify(f.ctx, sfc.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeCheckFailed {
 		t.Fatal(err)
 	}
 	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sfc.Token})

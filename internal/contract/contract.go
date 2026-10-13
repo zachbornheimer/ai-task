@@ -167,3 +167,30 @@ func appendUnique(list []string, item string) []string {
 	}
 	return append(list, item)
 }
+
+const errorsMarker = "**Output and errors**"
+
+var errorCode = regexp.MustCompile("`([A-Z][A-Z_]+)`")
+
+// ErrorCodes reads the error codes named in the contract's "Output and
+// errors" paragraph at path.
+func ErrorCodes(path string) ([]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read contract %s: %w", path, err)
+	}
+	_, after, found := strings.Cut(string(raw), errorsMarker)
+	if !found {
+		return nil, fmt.Errorf("contract %s has no %q section", path, errorsMarker)
+	}
+	paragraph, _, _ := strings.Cut(strings.TrimLeft(after, "\n"), "\n\n")
+	_, codes, _ := strings.Cut(paragraph, "Codes:")
+	var out []string
+	for _, m := range errorCode.FindAllStringSubmatch(codes, -1) {
+		out = append(out, m[1])
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("contract %s lists no error codes", path)
+	}
+	return out, nil
+}

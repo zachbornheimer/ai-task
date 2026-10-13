@@ -14,7 +14,7 @@ import (
 // TestWriteCancelledByContextIsNotInternal: when the caller's context
 // ends during a write, database/sql rolls the transaction back on its own;
 // the store must report the cancellation (so a waiting claim's deadline
-// surfaces as context.DeadlineExceeded), never INTERNAL "commit
+// surfaces as context.DeadlineExceeded), never an internal "commit
 // transaction: already committed or rolled back".
 func TestWriteCancelledByContextIsNotInternal(t *testing.T) {
 	ctx := context.Background()
@@ -45,8 +45,8 @@ func TestWriteCancelledByContextIsNotInternal(t *testing.T) {
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("got %v, want an error wrapping %v", err, tc.want)
 			}
-			if fault.CodeOf(err) == fault.CodeInternal {
-				t.Fatalf("a cancelled write must not be INTERNAL: %v", err)
+			if fault.IsInternal(err) {
+				t.Fatalf("a canceled write must not be internal: %v", err)
 			}
 		})
 	}

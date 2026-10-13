@@ -35,17 +35,17 @@ type Checker interface {
 // ownership. The rejection order is cheapest-first.
 func Validate(ctx context.Context, e Edge, sameProject bool, c Checker) error {
 	if e.Task == e.Requires {
-		return fault.New(fault.CodeSelfDependency, "task %s cannot require itself", e.Task)
+		return fault.New(fault.CodeInvalidInput, "task %s cannot require itself", e.Task)
 	}
 	if !sameProject {
-		return fault.New(fault.CodeCrossProject, "tasks %s and %s belong to different projects", e.Task, e.Requires)
+		return fault.New(fault.CodeInvalidInput, "tasks %s and %s belong to different projects", e.Task, e.Requires)
 	}
 	dup, err := c.Exists(ctx, e)
 	if err != nil {
 		return err
 	}
 	if dup {
-		return fault.New(fault.CodeDuplicateDependency, "%s already requires %s", e.Task, e.Requires)
+		return fault.New(fault.CodeInvalidInput, "%s already requires %s", e.Task, e.Requires)
 	}
 	// Adding "Task requires Requires" closes a cycle iff Requires already
 	// (transitively) requires Task.
@@ -54,7 +54,7 @@ func Validate(ctx context.Context, e Edge, sameProject bool, c Checker) error {
 		return err
 	}
 	if cyc {
-		return fault.New(fault.CodeDependencyCycle, "%s already requires %s (directly or transitively); adding the reverse edge would create a cycle", e.Requires, e.Task)
+		return fault.New(fault.CodeInvalidInput, "%s already requires %s (directly or transitively); adding the reverse edge would create a cycle", e.Requires, e.Task)
 	}
 	return nil
 }
@@ -139,7 +139,7 @@ func (g Graph) TopologicalOrder() ([]task.ID, error) {
 		}
 	}
 	if len(out) != len(g.Nodes) {
-		return nil, fault.New(fault.CodeDependencyCycle, "graph contains a cycle")
+		return nil, fault.New(fault.CodeInvalidInput, "graph contains a cycle")
 	}
 	return out, nil
 }

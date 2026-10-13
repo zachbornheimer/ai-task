@@ -69,7 +69,7 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 			return Session{}, err
 		}
 		wait := e.poll
-		if req.ProjectID != "" {
+		if req.ProjectID != "" || req.TaskID == nil { // no project: the unscoped board
 			sum, serr := e.Summary(ctx, req.ProjectID)
 			if serr != nil {
 				return Session{}, serr
@@ -99,11 +99,10 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 
 func retryable(err error) bool {
 	switch fault.CodeOf(err) {
-	case fault.CodeNoAvailableTask, fault.CodeTaskBlocked, fault.CodeTaskAlreadyTaken, fault.CodeTaskAwaitingVerification, fault.CodeTaskAwaitingIntegration:
-		return true
-	case fault.CodeWorkspaceUnavailable:
-		// The task that failed is now excluded from selection; keep scanning.
-		return true
+	case fault.CodeNotReady, fault.CodeConflict:
+		// Not takeable right now, or the failed task is now excluded from
+		// selection: keep scanning. Infrastructure failures stop the scan.
+		return !fault.IsInternal(err)
 	}
 	return false
 }
@@ -152,7 +151,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				return err
 			}
 			if !ok {
-				return fault.New(fault.CodeNoAvailableTask, "no claimable task")
+				return fault.New(fault.CodeNotReady, "no claimable task")
 			}
 			r = cand
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
@@ -161,7 +160,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			// The SQL pre-filter must agree with the domain rule; a
 			// disagreement is a bug, never a silent wrong claim.
 			if err := notClaimable(r, proj, now, false); err != nil {
-				return fault.Wrap(err, fault.CodeInternal, "candidate selection disagreed with status rules")
+				return fault.WrapInternal(err, "candidate selection disagreed with status rules")
 			}
 		}
 		// A previous attempt that never ended (lease ran out) may still have
@@ -235,7 +234,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			return tx.SetWorkspaceError(sess.Task.ID, fault.MessageOf(werr), now)
 		})
 		e.notify()
-		return Session{}, fault.New(fault.CodeWorkspaceUnavailable, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
+		return Session{}, fault.New(fault.CodeNotReady, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
 	}
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := tx.SetWorkspace(attempt.ID, info.Path, info.Branch); err != nil {
@@ -306,7 +305,7 @@ func regressionGate(proj project.Project) error {
 		return nil
 	}
 	if err := verification.RequireGate(proj.Regression, "project regression checks"); err != nil {
-		return fault.New(fault.CodeMissingVerification, "project %s: %v; define them with `atask project --regression-check` before claiming work", proj.ID, fault.MessageOf(err))
+		return fault.New(fault.CodeInvalidInput, "project %s: %v; define them with `atask project --regression-check` before claiming work", proj.ID, fault.MessageOf(err))
 	}
 	return nil
 }
@@ -330,27 +329,27 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 	case task.StatusArchived:
 		return fault.New(fault.CodeNotFound, "%s is archived", id)
 	case task.StatusBlocked:
-		return fault.New(fault.CodeTaskBlocked, "%s is blocked by %d incomplete prerequisite(s); see `atask show %s`", id, r.UnmetRequires, id)
+		return fault.New(fault.CodeNotReady, "%s is blocked by %d incomplete prerequisite(s); see `atask show %s`", id, r.UnmetRequires, id)
 	case task.StatusClaimed:
-		return fault.New(fault.CodeTaskAlreadyTaken, "%s is claimed by attempt %d until %s", id, r.Attempt.Seq, r.Attempt.LeaseExpiresAt.Format(time.RFC3339))
+		return fault.New(fault.CodeConflict, "%s is claimed by attempt %d until %s", id, r.Attempt.Seq, r.Attempt.LeaseExpiresAt.Format(time.RFC3339))
 	case task.StatusVerifying, task.StatusAwaitingVerification:
-		return fault.New(fault.CodeTaskAwaitingVerification, "%s has a submission being verified", id)
+		return fault.New(fault.CodeNotReady, "%s has a submission being verified", id)
 	case task.StatusAwaitingIntegration:
-		return fault.New(fault.CodeTaskAwaitingIntegration, "%s is verified and awaiting integration", id)
+		return fault.New(fault.CodeNotReady, "%s is verified and awaiting integration", id)
 	case task.StatusComplete:
-		return fault.New(fault.CodeTaskComplete, "%s is complete", id)
+		return fault.New(fault.CodeConflict, "%s is complete", id)
 	case task.StatusNeedsAttention:
 		switch {
 		case !verification.HasRequired(r.Task.Verification.TaskChecks):
-			return fault.New(fault.CodeMissingVerification, "%s has no required task check (legacy or edited policy); a planner must `atask update %s --proof ...` before it can be claimed", id, id)
+			return fault.New(fault.CodeInvalidInput, "%s has no required task check (legacy or edited policy); a planner must `atask update %s --proof ...` before it can be claimed", id, id)
 		case facts.Exhausted:
-			return fault.New(fault.CodeNeedsAttention, "%s exhausted its attempts (%d failures); a planner must `atask update %s --reset-attempts`", id, r.Failures, id)
+			return fault.New(fault.CodeStalled, "%s exhausted its attempts (%d failures); a planner must `atask update %s --reset-attempts`", id, r.Failures, id)
 		}
-		return fault.New(fault.CodeNeedsAttention, "%s: workspace unusable (%s); fix the worktree and `atask claim %s`, or `atask update %s --reset-attempts`", id, r.WorkspaceError, id, id)
+		return fault.New(fault.CodeStalled, "%s: workspace unusable (%s); fix the worktree and `atask claim %s`, or `atask update %s --reset-attempts`", id, r.WorkspaceError, id, id)
 	case task.StatusCooldown:
-		return fault.New(fault.CodeNoAvailableTask, "%s is in retry cooldown until %s", id, r.NextEligibleAt.Format(time.RFC3339))
+		return fault.New(fault.CodeNotReady, "%s is in retry cooldown until %s", id, r.NextEligibleAt.Format(time.RFC3339))
 	}
-	return fault.New(fault.CodeInternal, "%s is in unexpected status %s", id, st)
+	return fault.NewInternal("%s is in unexpected status %s", id, st)
 }
 
 // authorize resolves a token to an attempt with live authority. It must be
@@ -467,7 +466,7 @@ func (e *Engine) ReleaseTask(ctx context.Context, q ReleaseRequest) (TaskView, e
 // idempotent. expired reports that case.
 func (e *Engine) authorizeRelease(tx *sqlite.Tx, token execution.Token, now time.Time) (a execution.Attempt, expired bool, err error) {
 	a, err = e.authorize(tx, token, now)
-	if fault.CodeOf(err) != fault.CodeLeaseExpired {
+	if fault.CodeOf(err) != fault.CodeInvalidSession {
 		return a, false, err
 	}
 	auth, lookupErr := tx.AttemptByDigest(token.Digest())
@@ -564,7 +563,7 @@ func (e *Engine) heartbeat(ctx context.Context, token execution.Token, lease tim
 				// meanwhile, the next fenced write refuses anyway; stop the
 				// external work now rather than let it outlive the claim.
 				if !expiry.IsZero() && !e.now().Before(expiry) {
-					terminal = fault.Wrap(err, fault.CodeLeaseExpired, "lease renewal kept failing until the lease expired")
+					terminal = fault.Wrap(err, fault.CodeInvalidSession, "lease renewal kept failing until the lease expired")
 					cancelOp()
 					return
 				}
@@ -588,7 +587,7 @@ func (e *Engine) renewalInterval(lease time.Duration) time.Duration {
 // terminalAuthority reports errors no retry can fix.
 func terminalAuthority(err error) bool {
 	switch fault.CodeOf(err) {
-	case fault.CodeSessionSuperseded, fault.CodeSessionFinished, fault.CodeLeaseExpired, fault.CodeInvalidSession:
+	case fault.CodeInvalidSession:
 		return true
 	}
 	return false

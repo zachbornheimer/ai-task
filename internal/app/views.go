@@ -260,7 +260,7 @@ type VerifyResult struct {
 	Message            string                  `json:"message,omitempty"`
 	Replayed           bool                    `json:"replayed,omitempty"`
 	// Conflicts lists the files that stopped the submitted revision from
-	// merging into the target branch (INTEGRATION_FAILED only).
+	// merging into the target branch (BASE_CONFLICT only).
 	Conflicts []string `json:"conflicts,omitempty"`
 	// Warnings: checks that passed but used more than half their budget.
 	Warnings []string `json:"warnings,omitempty"`

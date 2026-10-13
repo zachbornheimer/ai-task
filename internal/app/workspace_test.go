@@ -53,7 +53,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 		t.Fatalf("summary: %+v", sum)
 	}
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeNoAvailableTask)
+	wantCode(t, err, fault.CodeNotReady)
 	// With the only other work done, a waiting claim reports a stall with
 	// the reason instead of hot-looping on the broken task.
 	f.complete(got)
@@ -65,7 +65,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	// An explicit claim retries; it fails again while the worktree is still
 	// broken, with the exact problem, and nothing is counted.
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &old})
-	wantCode(t, err, fault.CodeWorkspaceUnavailable)
+	wantCode(t, err, fault.CodeNotReady)
 	if v := f.show(string(old)); v.Failures != 0 || v.Status != task.StatusNeedsAttention {
 		t.Fatalf("%+v", v)
 	}
@@ -86,7 +86,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sz.Token})
 	f.git(sz.Workspace, "checkout", "-q", "--detach")
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeWorkspaceUnavailable)
+	wantCode(t, err, fault.CodeNotReady)
 	if f.status(string(z)) != task.StatusNeedsAttention {
 		t.Fatal("not marked")
 	}

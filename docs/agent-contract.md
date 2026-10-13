@@ -15,7 +15,7 @@ indents it):
 
 ````json
 {"ok":true,"result":{...}}
-{"ok":false,"error":{"code":"TASK_BLOCKED","message":"...","details":{...}}}
+{"ok":false,"error":{"code":"NOT_READY","message":"...","details":{...}}}
 ```text
 
 Human mode prints an acknowledgement on stdout after commit and
@@ -26,31 +26,18 @@ stdout (an envelope in JSON mode) and exits `0`.
 
 ## Error codes
 
-| Code                                                                                      | Meaning                                                                                                                                                                                                                            |
-| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `INVALID_INPUT`                                                                           | malformed argument, reference, or spec; `atask verify` without a mode                                                                                                                                                              |
-| `NOT_FOUND`                                                                               | unknown task, key, or project                                                                                                                                                                                                      |
-| `NO_PROJECT`                                                                              | no project for this directory; `--project` or `atask init`                                                                                                                                                                         |
-| `PLAN_CONFLICT`                                                                           | stale `--expect-rev`; edit to a completed or claimed contract; illegal archive                                                                                                                                                     |
-| `DUPLICATE_KEY`                                                                           | key exists with a different definition (blockers included)                                                                                                                                                                         |
-| `IDEMPOTENCY_CONFLICT`                                                                    | the idempotency key was already used for a different change set                                                                                                                                                                    |
-| `DEPENDENCY_CYCLE`, `SELF_DEPENDENCY`, `DUPLICATE_DEPENDENCY`, `CROSS_PROJECT_DEPENDENCY` | hard-edge rules                                                                                                                                                                                                                    |
-| `TASK_BLOCKED`                                                                            | prerequisites incomplete (claim or complete)                                                                                                                                                                                       |
-| `ALREADY_CLAIMED`                                                                         | a live lease exists; on `verify`, an open attempt owns the task                                                                                                                                                                    |
-| `AWAITING_VERIFICATION`, `INTEGRATION_PENDING`, `TASK_COMPLETE`                           | not claimable in that state                                                                                                                                                                                                        |
-| `NO_ELIGIBLE_WORK`                                                                        | nothing claimable now (non-waiting claim, cooldown)                                                                                                                                                                                |
-| `DONE`                                                                                    | every executable task is complete (waiting claim)                                                                                                                                                                                  |
-| `STALLED`                                                                                 | open tasks remain, nothing claimable, nothing in flight, nothing cooling down; `details` carries the summary with reasons                                                                                                          |
-| `NEEDS_ATTENTION`                                                                         | this task needs a planner: attempts exhausted, or its worktree could not be prepared (`attention_reason` says which)                                                                                                               |
-| `INVALID_SESSION`, `LEASE_EXPIRED`, `SESSION_SUPERSEDED`, `SESSION_FINISHED`              | authority failures                                                                                                                                                                                                                 |
-| `MISSING_VERIFICATION`                                                                    | `add` without `--proof` and `--regression`; `claim` in a project without regression checks; a check set emptied under a live claim                                                                                                                    |
-| `VERIFICATION_FAILED`                                                                     | checks ran and a required one did not pass; `details` is the result with evidence; counted against the attempt once                                                                                                                |
-| `VERIFICATION_TIMEOUT`                                                                    | a required check ran out of its budget (`timed_out` evidence): the verification is built too slow for the task's size, or the code hangs; never counted against the attempt; `details.message` says which budget and whose problem |
-| `VERIFICATION_RUNNING`                                                                    | this attempt's `verify complete` is still running; wait for its result                                                                                                                                                             |
-| `INTEGRATION_FAILED`                                                                      | merge conflict (`details.conflicts` lists the files; merge the target branch into the task branch, commit, verify again), moved target that kept moving, or dirty target checkout; never a strike                                  |
-| `WORKSPACE_DIRTY`, `WORKSPACE_UNAVAILABLE`                                                | uncommitted changes at `verify complete` / the worktree is gone                                                                                                                                                                    |
-| `CANCELLED`                                                                               | the caller's context ended mid-operation (a host's deadline or interrupt); nothing was written                                                                                                                                     |
-| `INTERNAL`                                                                                | bug or I/O failure                                                                                                                                                                                                                 |
+| Code                   | Meaning |
+| ---------------------- | ------- |
+| `INVALID_INPUT`        | malformed argument, reference, spec, or dependency edge (cycle, self, duplicate, cross-project); `atask verify` without a mode; `add` without `--proof` and `--regression`, `claim` in a project without regression checks, or a check set emptied under a live claim |
+| `NOT_FOUND`            | unknown task, key, project, or no project for this directory (`--project` or `atask init`) |
+| `CONFLICT`             | the request clashes with current state: stale `--expect-rev`, edit to a completed or claimed contract, illegal archive, key reused with a different definition, task already claimed (live lease) or complete, `verify complete` still running for this attempt |
+| `INVALID_SESSION`      | the token is unknown, expired, superseded, or finished: stop editing and `atask claim <task>` again |
+| `NOT_READY`            | not possible right now: prerequisites incomplete, task awaiting verification or integration, nothing claimable (non-waiting claim, cooldown), uncommitted changes or missing worktree, a cancelled call, a failed doctor check, or an I/O failure; the message says which |
+| `BASE_CONFLICT`        | the target branch moved or the work does not merge onto it (`details.conflicts` lists the files; merge the target into the task branch, commit, verify again) |
+| `CHECK_FAILED`         | checks ran and a required one did not pass or ran out of its budget; `details` is the result with evidence. A failed check counts against the attempt once; a timeout (`timed_out` evidence) never does, since the verification is built too slow for the size or the code hangs |
+| `IDEMPOTENCY_CONFLICT` | the idempotency key was already used for a different change set |
+| `DONE`                 | every executable task is complete (waiting claim) |
+| `STALLED`              | open tasks remain, nothing claimable, nothing in flight, nothing cooling down (`details` carries the summary with reasons); also one task that needs a planner: attempts exhausted or its worktree could not be prepared (`attention_reason` says which) |
 
 ## Planning (planner authority)
 ````
@@ -89,12 +76,12 @@ over half is a warning: CI is slower), so no worker is charged for a
 broken or slow baseline, the
 workspace root is writable, quarantined worktrees, tasks needing
 attention, a stalled plan, and Worktrunk's commit-message setup when
-`wt` is installed. An error-severity finding makes it `UNHEALTHY` with
+`wt` is installed. An error-severity finding makes it `NOT_READY` with
 the report in `details`; JSON carries the report either way. An `--idempotency-key` is bound to the exact
 request: an identical replay returns the committed result (even with a
 stale `--expect-rev`), a different request under the same key is
 `IDEMPOTENCY_CONFLICT`, and a new request with a stale `--expect-rev` is
-`PLAN_CONFLICT`. Rules:
+`CONFLICT`. Rules:
 
 - Every task carries both a proof (`--proof "PRESET: SUBJECT"`, proves
   the task works) and a regression (`--regression "PRESET: SUBJECT"`, proves
@@ -138,7 +125,7 @@ stale `--expect-rev`), a different request under the same key is
 - `--pin PATH` names files, or directories by prefix, the task may not
   change: test files and check scripts it does not own, generated files,
   lockfiles. `verify complete` refuses a submission that touched one
-  (`VERIFICATION_FAILED`, counted as the attempt's failure, before any
+  (`CHECK_FAILED`, counted as the attempt's failure, before any
   check runs), so an agent cannot pass by weakening the checks. Pins are
   part of the contract (`pins` in `atask show` and in the context); `update
   --pin ""` clears them. Cohort members are not pinned yet.
@@ -207,7 +194,7 @@ expiry; `status` reports `cooling` and `next_eligible_at`) and returns
 on to the next task. `atask claim <ref>` on such a task retries the
 preparation (the repair path after fixing the worktree); `atask update <ref>
 --reset-attempts` clears the mark. It refuses with
-`MISSING_VERIFICATION` while the project has no regression checks: work
+`INVALID_INPUT` while the project has no regression checks: work
 that can never complete is never handed out. `--wait` blocks until work is
 claimable, `DONE`, `STALLED`, or interrupted; while waiting the process
 runs any pending cohort verification job it finds.
@@ -232,7 +219,7 @@ Every authenticated command (`log`, `verify`, `claim renew`, a session
 never loses its claim; the host that launched the agent renews it on the
 agent's behalf (`Renew`, or `atask claim renew` with the token) while the
 agent is busy. When a lease does expire the task becomes claimable again;
-the old token answers `LEASE_EXPIRED` (or `SESSION_SUPERSEDED` once a new
+the old token answers `INVALID_SESSION` (or `INVALID_SESSION` once a new
 attempt exists) and the holder must stop editing. The next claim
 quarantines the old worktree (see Token transport), so a holder that does
 not stop can harm nothing but its own quarantined copy.
@@ -250,7 +237,7 @@ it is `interrupted` while its attempt is still open and `ready` once it is
 released. Only a run charged against its attempt derives to
 `verification_failed`. A
 `verify complete` fired while the attempt's previous one is still running
-is refused with `VERIFICATION_RUNNING`; after completion it returns the
+is refused with `CONFLICT`; after completion it returns the
 stored acknowledgement.
 
 **Context.** `atask context` with no arguments prints the agent operating
@@ -298,7 +285,7 @@ authoritative for task state, verification and completion. ATASK_OUTPUT=json is
 set: every `atask` command returns one JSON envelope; inspect error.details when
 one fails. Start with `atask context` and follow the project instructions.
 Commit before `atask verify complete`; only a passing verification completes
-the task. If any `atask` command returns LEASE_EXPIRED or SESSION_SUPERSEDED,
+the task. If any `atask` command returns INVALID_SESSION or INVALID_SESSION,
 stop editing immediately.
 
 ```text
@@ -313,12 +300,12 @@ attempt's worktree, working tree included (the summary says so when it
 has uncommitted changes; `revision` is HEAD). They are diagnostic: they
 never complete, release, or integrate. `verify complete`:
 
-1. refuses unless both categories have checks (`MISSING_VERIFICATION`) and
-   every prerequisite is complete (`TASK_BLOCKED`);
+1. refuses unless both categories have checks (`INVALID_INPUT`) and
+   every prerequisite is complete (`NOT_READY`);
 2. requires a clean worktree and records its HEAD as the immutable
    submission (nothing is committed on your behalf);
 3. in `promote` projects, first merges the revision onto the target branch
-   in a scratch worktree; a conflict is `INTEGRATION_FAILED` before any
+   in a scratch worktree; a conflict is `BASE_CONFLICT` before any
    check runs, with `details.conflicts` naming the files;
 4. runs BOTH suites fresh on a detached snapshot of that revision;
 5. in `promote` projects, re-runs both suites on the merge when it changed
@@ -347,7 +334,7 @@ land (environment) keeps every submission, records the cause as
 `last_error`, and retries with a growing backoff (30s doubling to 30m)
 that `status` reports as cooling, never as a stall.
 
-A failed `verify complete` returns `VERIFICATION_FAILED` with the evidence
+A failed `verify complete` returns `CHECK_FAILED` with the evidence
 in `error.details`; the claim stays live for repair and the task's failure
 count and cooldown are recorded. Evidence keeps each stream's head and
 tail; the complete output is in `details.evidence[].log`, and
@@ -425,7 +412,7 @@ Use `atask log` for progress/discoveries.
 Use `atask verify proof` and `atask verify regression` while iterating.
 When ready, commit the final code revision and call `atask verify complete`.
 It runs BOTH suites again and establishes completion only if all gates pass.
-INTEGRATION_FAILED means the target branch moved against you: merge it into
+BASE_CONFLICT means the target branch moved against you: merge it into
 your branch, resolve `details.conflicts`, commit, and verify again.
 If new prerequisite work is needed, add it as a blocker of the current
 claimed task (`atask add "..." --blocks <task> --proof "run: cmd" --regression "run: cmd"`; your

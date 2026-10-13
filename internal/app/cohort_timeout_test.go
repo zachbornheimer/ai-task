@@ -12,7 +12,7 @@ import (
 
 // TestCohortTimeoutIsNotAStrike: a cohort member whose task check outruns
 // its budget, or a shared regression suite that does, is reported as
-// VERIFICATION_TIMEOUT and never counts against any member, like the
+// CHECK_FAILED and never counts against any member, like the
 // single-task path.
 func TestCohortTimeoutIsNotAStrike(t *testing.T) {
 	submitPair := func(t *testing.T, f *fixture, e2e string) (task.ID, task.ID) {
@@ -32,7 +32,7 @@ func TestCohortTimeoutIsNotAStrike(t *testing.T) {
 		}
 		api, ui := submitPair(t, f, "sleep 1")
 		v := f.show(string(api))
-		if v.Failures != 0 || !strings.HasPrefix(v.LastError, "VERIFICATION_TIMEOUT") {
+		if v.Failures != 0 || !strings.HasPrefix(v.LastError, "CHECK_FAILED") {
 			t.Fatalf("timed-out member: failures=%d last_error=%q", v.Failures, v.LastError)
 		}
 		if u := f.show(string(ui)); u.Failures != 0 {
@@ -50,7 +50,7 @@ func TestCohortTimeoutIsNotAStrike(t *testing.T) {
 		api, ui := submitPair(t, f, "test -f api.txt && test -f ui.txt")
 		for _, id := range []task.ID{api, ui} {
 			v := f.show(string(id))
-			if v.Failures != 0 || !strings.HasPrefix(v.LastError, "VERIFICATION_TIMEOUT") || !strings.Contains(v.LastError, "regress") {
+			if v.Failures != 0 || !strings.HasPrefix(v.LastError, "CHECK_FAILED") || !strings.Contains(v.LastError, "regress") {
 				t.Fatalf("%s: failures=%d last_error=%q", id, v.Failures, v.LastError)
 			}
 		}

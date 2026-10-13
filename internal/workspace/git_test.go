@@ -39,13 +39,13 @@ func TestInspectAndRequireClean(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed"), 0o644)
 	_, err = RequireClean(ctx, dir)
-	if !fault.Is(err, fault.CodeWorkspaceDirty) {
+	if !fault.Is(err, fault.CodeNotReady) {
 		t.Fatalf("tracked change: %v", err)
 	}
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
 	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("x"), 0o644)
 	_, err = RequireClean(ctx, dir)
-	if !fault.Is(err, fault.CodeWorkspaceDirty) {
+	if !fault.Is(err, fault.CodeNotReady) {
 		t.Fatalf("untracked file must count as dirty: %v", err)
 	}
 	os.Remove(filepath.Join(dir, "new.txt"))
@@ -53,7 +53,7 @@ func TestInspectAndRequireClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Inspect(ctx, t.TempDir())
-	if !fault.Is(err, fault.CodeWorkspaceUnavailable) {
+	if !fault.Is(err, fault.CodeNotReady) {
 		t.Fatalf("non-repo: %v", err)
 	}
 }

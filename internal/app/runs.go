@@ -63,7 +63,7 @@ func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.
 	runner := e.runner()
 	for _, step := range verification.Plan(policy) {
 		if err := ctx.Err(); err != nil {
-			return out, fault.Wrap(err, fault.CodeInternal, "verification interrupted")
+			return out, fault.WrapInternal(err, "verification interrupted")
 		}
 		var suiteLeft time.Duration
 		if !deadline.IsZero() {

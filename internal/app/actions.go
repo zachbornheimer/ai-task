@@ -77,7 +77,7 @@ func (e *Engine) runCompletionActions(ctx context.Context, token execution.Token
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return acts, fault.Wrap(err, fault.CodeInternal, "actions of %s interrupted", id)
+			return acts, fault.WrapInternal(err, "actions of %s interrupted", id)
 		}
 		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.StartAction(id, i) }); err != nil {
 			return acts, err
@@ -176,7 +176,7 @@ func (e *Engine) Reverify(ctx context.Context, token execution.Token) (VerifyRes
 	res.Message = "reverified against the recorded revision; the task stays complete"
 	if !res.Passed {
 		res.Message = "reverify FAILED against the recorded revision; the task stays complete, but its proof no longer holds"
-		return res, &fault.Error{Code: fault.CodeVerificationFailed, Message: fmt.Sprintf("%s: %s", id, res.Message), Details: res}
+		return res, &fault.Error{Code: fault.CodeCheckFailed, Message: fmt.Sprintf("%s: %s", id, res.Message), Details: res}
 	}
 	return res, nil
 }

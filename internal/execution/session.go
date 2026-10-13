@@ -143,19 +143,19 @@ func (a Attempt) Interrupted(now time.Time) bool {
 // transaction. The check order gives the most useful error first.
 func Authorize(a Attempt, currentSeq int, now time.Time) error {
 	if a.Seq != currentSeq {
-		return fault.New(fault.CodeSessionSuperseded, "session for %s was superseded by attempt %d; run `atask claim %s` to start a new attempt", a.TaskID, currentSeq, a.TaskID)
+		return fault.New(fault.CodeInvalidSession, "session for %s was superseded by attempt %d; run `atask claim %s` to start a new attempt", a.TaskID, currentSeq, a.TaskID)
 	}
 	if a.EndedAt != nil {
 		switch a.EndReason {
 		case EndFinished:
-			return fault.New(fault.CodeSessionFinished, "session for %s already finished; claim the task again to continue", a.TaskID)
+			return fault.New(fault.CodeInvalidSession, "session for %s already finished; claim the task again to continue", a.TaskID)
 		case EndSubmitted:
-			return fault.New(fault.CodeSessionFinished, "session for %s submitted its implementation; the cohort verifier owns it now", a.TaskID)
+			return fault.New(fault.CodeInvalidSession, "session for %s submitted its implementation; the cohort verifier owns it now", a.TaskID)
 		}
-		return fault.New(fault.CodeSessionSuperseded, "session for %s has ended", a.TaskID)
+		return fault.New(fault.CodeInvalidSession, "session for %s has ended", a.TaskID)
 	}
 	if !now.Before(a.LeaseExpiresAt) {
-		return fault.New(fault.CodeLeaseExpired, "lease for %s expired at %s; run `atask claim %s` to resume with the saved handoff", a.TaskID, a.LeaseExpiresAt.UTC().Format(time.RFC3339), a.TaskID)
+		return fault.New(fault.CodeInvalidSession, "lease for %s expired at %s; run `atask claim %s` to resume with the saved handoff", a.TaskID, a.LeaseExpiresAt.UTC().Format(time.RFC3339), a.TaskID)
 	}
 	return nil
 }

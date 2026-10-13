@@ -13,59 +13,32 @@ import (
 type Code string
 
 const (
-	// Input and lookup failures.
+	// CodeInvalidInput: a malformed argument, reference, spec, or graph.
 	CodeInvalidInput Code = "INVALID_INPUT"
-	CodeNotFound     Code = "NOT_FOUND"
-	CodeNoProject    Code = "NO_PROJECT"
-
-	// Planning failures.
-	CodePlanConflict Code = "PLAN_CONFLICT"
+	// CodeNotFound: the named task, project, or session does not exist.
+	CodeNotFound Code = "NOT_FOUND"
+	// CodeConflict: the request clashes with current state (a plan edit,
+	// a task already claimed or complete, a verification in flight).
+	CodeConflict Code = "CONFLICT"
+	// CodeInvalidSession: the session token is unknown, expired,
+	// superseded, or finished.
+	CodeInvalidSession Code = "INVALID_SESSION"
+	// CodeNotReady: the operation cannot run right now (blocked or
+	// awaiting work, unusable workspace, infrastructure failure).
+	CodeNotReady Code = "NOT_READY"
+	// CodeBaseConflict: the target branch moved or the work cannot be
+	// integrated onto it.
+	CodeBaseConflict Code = "BASE_CONFLICT"
+	// CodeCheckFailed: a required check failed, timed out, or was
+	// unrunnable.
+	CodeCheckFailed Code = "CHECK_FAILED"
 	// CodeIdempotencyConflict: an idempotency key was reused with a
 	// different request.
 	CodeIdempotencyConflict Code = "IDEMPOTENCY_CONFLICT"
-	CodeDuplicateKey        Code = "DUPLICATE_KEY"
-
-	// Dependency graph failures.
-	CodeDependencyCycle     Code = "DEPENDENCY_CYCLE"
-	CodeSelfDependency      Code = "SELF_DEPENDENCY"
-	CodeDuplicateDependency Code = "DUPLICATE_DEPENDENCY"
-	CodeCrossProject        Code = "CROSS_PROJECT_DEPENDENCY"
-
-	// Take failures: the task exists but is not takeable right now.
-	CodeTaskBlocked              Code = "TASK_BLOCKED"
-	CodeTaskAlreadyTaken         Code = "ALREADY_CLAIMED"
-	CodeTaskComplete             Code = "TASK_COMPLETE"
-	CodeTaskAwaitingVerification Code = "AWAITING_VERIFICATION"
-	CodeTaskAwaitingIntegration  Code = "INTEGRATION_PENDING"
-	CodeNoAvailableTask          Code = "NO_ELIGIBLE_WORK"
-	CodeDone                     Code = "DONE"
-	CodeStalled                  Code = "STALLED"
-	// CodeNeedsAttention: one task cannot proceed without a planner
-	// (attempts exhausted, checks unverifiable, workspace unusable).
-	CodeNeedsAttention Code = "NEEDS_ATTENTION"
-
-	// Session authority failures.
-	CodeInvalidSession    Code = "INVALID_SESSION"
-	CodeLeaseExpired      Code = "LEASE_EXPIRED"
-	CodeSessionSuperseded Code = "SESSION_SUPERSEDED"
-	CodeSessionFinished   Code = "SESSION_FINISHED"
-
-	// Verification and workspace failures.
-	CodeVerificationFailed      Code = "VERIFICATION_FAILED"
-	CodeMissingVerification     Code = "MISSING_VERIFICATION"
-	CodeRevisionChanged         Code = "REVISION_CHANGED"
-	CodeIntegrationFailed       Code = "INTEGRATION_FAILED"
-	CodeVerificationRunning     Code = "VERIFICATION_RUNNING"
-	CodeNothingToVerify         Code = "NOTHING_TO_VERIFY"
-	CodeWorkspaceUnavailable    Code = "WORKSPACE_UNAVAILABLE"
-	CodeWorkspaceDirty          Code = "WORKSPACE_DIRTY"
-	CodeSubmissionNotIntegrated Code = "SUBMISSION_NOT_INTEGRATED"
-
-	// Anything else: a bug, an I/O failure, a corrupt store.
-	CodeInternal Code = "INTERNAL"
-	// CodeCancelled: the caller's context ended during the operation;
-	// nothing was written. Unwraps to the context error.
-	CodeCancelled Code = "CANCELLED"
+	// CodeDone: claim --wait on a board with nothing left to do.
+	CodeDone Code = "DONE"
+	// CodeStalled: claim --wait with only tasks that cannot proceed.
+	CodeStalled Code = "STALLED"
 )
 
 // Error is a coded error. Message is safe to show to users and agents.
@@ -74,8 +47,11 @@ type Error struct {
 	Message string
 	Err     error // optional underlying cause
 	// Details optionally carries a structured result for failures that
-	// still recorded facts (e.g. VERIFICATION_FAILED carries the run).
+	// still recorded facts (e.g. CHECK_FAILED carries the run).
 	Details any
+	// internal marks an infrastructure failure (I/O, store, tooling) as
+	// opposed to a domain refusal; it travels as NOT_READY on the wire.
+	internal bool
 }
 
 func (e *Error) Error() string {
@@ -104,7 +80,28 @@ func Wrap(err error, code Code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...), Err: err}
 }
 
-// CodeOf returns the code carried by err, or CodeInternal when err carries
+// NewInternal builds an infrastructure failure: wire code NOT_READY,
+// distinguishable from domain refusals through IsInternal.
+func NewInternal(format string, args ...any) *Error {
+	return &Error{Code: CodeNotReady, Message: fmt.Sprintf(format, args...), internal: true}
+}
+
+// WrapInternal attaches an infrastructure failure to an underlying error.
+func WrapInternal(err error, format string, args ...any) *Error {
+	return &Error{Code: CodeNotReady, Message: fmt.Sprintf(format, args...), Err: err, internal: true}
+}
+
+// IsInternal reports whether err is an infrastructure failure: built by
+// NewInternal/WrapInternal, or not a fault error at all.
+func IsInternal(err error) bool {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.internal
+	}
+	return err != nil
+}
+
+// CodeOf returns the code carried by err, or CodeNotReady when err carries
 // none. A nil error has no code and returns "".
 func CodeOf(err error) Code {
 	if err == nil {
@@ -114,7 +111,7 @@ func CodeOf(err error) Code {
 	if errors.As(err, &e) {
 		return e.Code
 	}
-	return CodeInternal
+	return CodeNotReady
 }
 
 // Is reports whether err carries the given code.
@@ -132,12 +129,3 @@ func MessageOf(err error) string {
 	}
 	return err.Error()
 }
-
-// CodeVerificationTimeout: a required check ran out of its budget. The
-// verification was built too slow for the task's size (or the code it
-// runs hangs); never counted against the attempt.
-const CodeVerificationTimeout Code = "VERIFICATION_TIMEOUT"
-
-// CodeUnhealthy: `atask doctor` found a problem that stops the project from
-// being worked safely; the report is in the error details.
-const CodeUnhealthy Code = "UNHEALTHY"

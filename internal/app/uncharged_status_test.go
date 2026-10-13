@@ -39,9 +39,9 @@ func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
 	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationTimeout)
+	wantCode(t, err, fault.CodeCheckFailed)
 	f.c.Advance(execution.DefaultLease + time.Minute)
-	notFailed("timeout, lease expired", a, task.StatusInterrupted, "VERIFICATION_TIMEOUT")
+	notFailed("timeout, lease expired", a, task.StatusInterrupted, "CHECK_FAILED")
 	s2 := f.claim(string(a))
 	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s2.Token}); err != nil {
 		t.Fatal(err)
@@ -55,9 +55,9 @@ func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
 	scratch := filepath.Join(f.repo, "b.txt")
 	os.WriteFile(scratch, []byte("local draft"), 0o644)
 	_, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeIntegrationFailed)
+	wantCode(t, err, fault.CodeBaseConflict)
 	f.c.Advance(execution.DefaultLease + time.Minute)
-	notFailed("integration failed, lease expired", b, task.StatusInterrupted, "INTEGRATION_FAILED")
+	notFailed("integration failed, lease expired", b, task.StatusInterrupted, "BASE_CONFLICT")
 	os.Remove(scratch)
 
 	// A failed proof is charged and still shows as failed.
@@ -65,7 +65,7 @@ func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
 	sc := f.claim(string(c))
 	f.commit(sc.Workspace, "c.txt", "c")
 	_, err = f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sc.Token}); err != nil {
 		t.Fatal(err)
 	}

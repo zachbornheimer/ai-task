@@ -318,9 +318,9 @@ func renderContext(c Context) string {
 		}
 	}
 	if c.Worktrunk {
-		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk is installed: `wt step diff` shows all changes since branching, `wt step squash` folds commits; on INTEGRATION_FAILED use `wt step rebase %s`).\n", c.TargetBranch)
+		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk is installed: `wt step diff` shows all changes since branching, `wt step squash` folds commits; on BASE_CONFLICT use `wt step rebase %s`).\n", c.TargetBranch)
 	} else {
-		fmt.Fprintf(&w, "Commit with git; on INTEGRATION_FAILED use `git merge %s`.\n", c.TargetBranch)
+		fmt.Fprintf(&w, "Commit with git; on BASE_CONFLICT use `git merge %s`.\n", c.TargetBranch)
 	}
 	return w.String()
 }
@@ -404,14 +404,14 @@ Execute
 - Iterate with ` + "`atask verify proof`" + ` and ` + "`atask verify regression`" + ` (diagnostic; they never complete anything).
 - Record progress with ` + "`atask log --done \"...\" --next \"...\" --learned \"...\"`" + `; ` + "`--next`" + ` is what the next attempt reads first.
 - The lease lasts 30 minutes and every ` + "`atask`" + ` command renews it; log before it runs out.
-- On LEASE_EXPIRED or SESSION_SUPERSEDED, stop editing immediately. The next ` + "`atask claim <task>`" + ` returns your handoff.
+- On INVALID_SESSION, stop editing immediately. The next ` + "`atask claim <task>`" + ` returns your handoff.
 
 Complete
 
 - Commit before ` + "`atask verify complete`" + ` (` + "`wt step commit`" + ` where Worktrunk is installed, plain git otherwise). The tree must be clean; nothing is committed for you.
 - You never set status. Only a passing ` + "`atask verify complete`" + ` completes the task: it runs every required task check and regression check fresh on the committed revision, then promotes the branch to the target. When the target had moved it merges for you and reports ` + "`integrated_revision`" + `.
-- On VERIFICATION_FAILED, read ` + "`error.details`" + `, fix the cause, commit, verify again. Your claim stays live.
-- On INTEGRATION_FAILED, the target moved against you: ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve ` + "`error.details.conflicts`" + `, commit, verify again. It is not counted against you.
+- On CHECK_FAILED, read ` + "`error.details`" + `, fix the cause, commit, verify again. Your claim stays live.
+- On BASE_CONFLICT, the target moved against you: ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve ` + "`error.details.conflicts`" + `, commit, verify again. It is not counted against you.
 - If completion depends on work that is not yours: ` + "`atask add \"prereq\" --blocks <task> --proof \"run: cmd\" --regression \"run: cmd\"`" + `, ` + "`atask log`" + ` the handoff, ` + "`atask claim release`" + `. Do not implement the blocking task.
 
 Exit

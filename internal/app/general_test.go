@@ -78,7 +78,7 @@ func TestGeneralAddRequiresCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.Apply(ctx, plan.ChangeSet{ProjectID: p.ID, Operations: []plan.Change{plan.AddTask{Title: "file this from ~/.agents"}}})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 }
 
 func TestGeneralAddStampsOrigin(t *testing.T) {
@@ -103,7 +103,7 @@ func TestGeneralAddStampsOrigin(t *testing.T) {
 func TestCodeProjectAddWithoutCheckStillFails(t *testing.T) {
 	f := newGitFixture(t)
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "needs a gate"}}})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 }
 
 func TestGlobalListIncludesGeneralAndNamed(t *testing.T) {

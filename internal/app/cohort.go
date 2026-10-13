@@ -30,7 +30,7 @@ func (e *Engine) submitForCohort(ctx context.Context, fr finalRun) (VerifyResult
 			return err
 		}
 		if r.UnmetRequires > 0 {
-			return fault.New(fault.CodeTaskBlocked, "%s cannot submit: prerequisites changed", r.Task.ID)
+			return fault.New(fault.CodeNotReady, "%s cannot submit: prerequisites changed", r.Task.ID)
 		}
 		if fr.submission, err = tx.InsertSubmission(r.Task.ID, fr.attempt.ID, fr.revision, r.Task.Cohort, now); err != nil {
 			return err
@@ -43,7 +43,7 @@ func (e *Engine) submitForCohort(ctx context.Context, fr finalRun) (VerifyResult
 	e.notify()
 	res := VerifyResult{TaskID: fr.rec.Task.ID, Mode: verification.ModeComplete, Revision: fr.revision, SubmissionID: fr.submission, Submitted: true}
 	ran, err := e.RunPendingCohorts(ctx, fr.proj.ID)
-	if err != nil && fault.CodeOf(err) == fault.CodeInternal {
+	if err != nil && fault.IsInternal(err) {
 		return res, err
 	}
 	res.Status = e.statusOf(ctx, fr.rec.Task.ID)
@@ -61,7 +61,7 @@ func (e *Engine) submitForCohort(ctx context.Context, fr finalRun) (VerifyResult
 		return res, nil
 	}
 	res.Message = "cohort verification failed for this task; it is claimable for repair"
-	return res, &fault.Error{Code: fault.CodeVerificationFailed, Message: fmt.Sprintf("cohort %q verification did not pass for %s", fr.rec.Task.Cohort, fr.rec.Task.ID), Details: res}
+	return res, &fault.Error{Code: fault.CodeCheckFailed, Message: fmt.Sprintf("cohort %q verification did not pass for %s", fr.rec.Task.Cohort, fr.rec.Task.ID), Details: res}
 }
 
 // cohortJob is the in-memory state of one running job.
@@ -99,7 +99,7 @@ func (e *Engine) RunPendingCohorts(ctx context.Context, pid project.ID) (bool, e
 			return ran, err
 		}
 		ran = true
-		if err := e.executeCohortJob(ctx, job); err != nil && fault.CodeOf(err) == fault.CodeInternal {
+		if err := e.executeCohortJob(ctx, job); err != nil && fault.IsInternal(err) {
 			return ran, err
 		}
 		e.notify()
@@ -233,7 +233,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 			return err
 		}
 		if j.Status != "running" || j.OwnerDigest != job.owner.Digest() {
-			return fault.New(fault.CodeSessionSuperseded, "verification job %d lost ownership", job.id)
+			return fault.New(fault.CodeInvalidSession, "verification job %d lost ownership", job.id)
 		}
 		return nil
 	}
@@ -292,7 +292,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 		}
 		if !outcome {
 			cand.Cleanup()
-			return fault.New(fault.CodeVerificationFailed, "cohort %q verification failed", job.cohort)
+			return fault.New(fault.CodeCheckFailed, "cohort %q verification failed", job.cohort)
 		}
 		if job.proj.Integration != project.IntegrationPromote {
 			cand.Cleanup()
@@ -303,7 +303,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 		intents, err := e.recordCohortIntents(ctx, job, cand, candidate, fence)
 		if err != nil {
 			cand.Cleanup()
-			if fault.CodeOf(err) != fault.CodeInternal {
+			if !fault.IsInternal(err) {
 				_ = e.finishConflict(ctx, job, fence, err)
 			}
 			return err
@@ -335,7 +335,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 					if err := tx.FinishRun(m.runID, sqlite.RunPending, "candidate passed but promotion failed: "+err.Error(), now); err != nil {
 						return err
 					}
-					if err := tx.SetLastError(m.rec.Task.ID, 0, "INTEGRATION_FAILED: "+err.Error(), now); err != nil {
+					if err := tx.SetLastError(m.rec.Task.ID, 0, "BASE_CONFLICT: "+err.Error(), now); err != nil {
 						return err
 					}
 				}
@@ -361,7 +361,7 @@ func (e *Engine) executeCohortJob(ctx context.Context, job cohortJob) error {
 		})
 		if err != nil {
 			// The intents stay open; reconciliation completes them from Git.
-			return fault.Wrap(err, fault.CodeInternal, "record completion of promoted cohort %q (will be reconciled)", job.cohort)
+			return fault.WrapInternal(err, "record completion of promoted cohort %q (will be reconciled)", job.cohort)
 		}
 		if err := e.fault("cohort:after-complete"); err != nil {
 			return err
@@ -434,7 +434,7 @@ func (e *Engine) finishConflict(ctx context.Context, job cohortJob, fence func(*
 				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "cohort finalisation refused: "+fault.MessageOf(cause), now); err != nil {
 					return err
 				}
-				if err := tx.SetLastError(id, 0, "PLAN_CONFLICT: "+fault.MessageOf(cause), now); err != nil {
+				if err := tx.SetLastError(id, 0, "CONFLICT: "+fault.MessageOf(cause), now); err != nil {
 					return err
 				}
 			default:
@@ -474,7 +474,7 @@ func (e *Engine) finalizeCohortDirect(ctx context.Context, job cohortJob, candid
 		return tx.FinishJob(job.id, job.owner.Digest(), "passed", candidate, "cohort verified", now)
 	})
 	if err != nil {
-		if fault.CodeOf(err) != fault.CodeInternal {
+		if !fault.IsInternal(err) {
 			_ = e.finishConflict(ctx, job, fence, err)
 		}
 		return err
@@ -613,7 +613,7 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 					// The shared gate is too slow: the same planner's problem
 					// as on the single-task path, worded as a timeout.
 					_, regOpts := suiteOpts(m.rec.Task, job.proj, nil)
-					lastError = string(fault.CodeVerificationTimeout) + ": cohort regression timed out on the combined candidate (no single member is to blame): " + regressionSummary + "; " + timeoutMessage(regressionVerdict, verification.Policy{Regression: job.proj.Regression}, 0, regOpts.budget, m.rec.Task.Size)
+					lastError = string(fault.CodeCheckFailed) + ": cohort regression timed out on the combined candidate (no single member is to blame): " + regressionSummary + "; " + timeoutMessage(regressionVerdict, verification.Policy{Regression: job.proj.Regression}, 0, regOpts.budget, m.rec.Task.Size)
 				}
 				if err := tx.SetLastError(m.rec.Task.ID, 0, lastError, now); err != nil {
 					return err
@@ -626,7 +626,7 @@ func (e *Engine) judgeCohort(ctx context.Context, job cohortJob, mgr workspace.M
 				if err := tx.FinishRun(m.runID, sqlite.RunFailed, "task checks timed out on cohort candidate "+short(candidate)+": "+v.Summary, now); err != nil {
 					return err
 				}
-				if err := tx.SetLastError(m.rec.Task.ID, 0, string(fault.CodeVerificationTimeout)+": "+v.Summary+"; "+timeoutMessage(v, m.policy, taskOpts.budget, 0, m.rec.Task.Size), now); err != nil {
+				if err := tx.SetLastError(m.rec.Task.ID, 0, string(fault.CodeCheckFailed)+": "+v.Summary+"; "+timeoutMessage(v, m.policy, taskOpts.budget, 0, m.rec.Task.Size), now); err != nil {
 					return err
 				}
 			case verdicts[m.runID].Summary != "":

@@ -62,7 +62,7 @@ func TestIntegrationMergeIdentity(t *testing.T) {
 	f.commit(f.repo, "other.txt", "main moved again")
 	before := f.git(f.repo, "rev-parse", "main")
 	res, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeWorkspaceUnavailable)
+	wantCode(t, err, fault.CodeNotReady)
 	if res.Completed || len(res.Conflicts) != 0 || !strings.Contains(res.Summary, "config user.name") {
 		t.Fatalf("missing identity result: %+v", res)
 	}

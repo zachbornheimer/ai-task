@@ -45,13 +45,13 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if !memory {
 		path = filepath.Clean(path)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, fault.Wrap(err, fault.CodeInternal, "create state directory")
+			return nil, fault.WrapInternal(err, "create state directory")
 		}
 	}
 	dsn := dsnFor(path, memory)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fault.Wrap(err, fault.CodeInternal, "open database")
+		return nil, fault.WrapInternal(err, "open database")
 	}
 	if memory {
 		db.SetMaxOpenConns(1)
@@ -114,7 +114,7 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) error {
 func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
 	if err != nil {
-		return fault.Wrap(err, fault.CodeInternal, "begin transaction")
+		return fault.WrapInternal(err, "begin transaction")
 	}
 	defer func() {
 		if p := recover(); p != nil {
@@ -124,7 +124,7 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 	}()
 	if err := fn(&Tx{tx: tx, ctx: ctx}); err != nil {
 		_ = tx.Rollback()
-		if cerr := ctx.Err(); cerr != nil && fault.CodeOf(err) == fault.CodeInternal {
+		if cerr := ctx.Err(); cerr != nil && fault.IsInternal(err) {
 			return cancelled(cerr)
 		}
 		return err
@@ -136,7 +136,7 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 		if cerr := ctx.Err(); cerr != nil {
 			return cancelled(cerr)
 		}
-		return fault.Wrap(err, fault.CodeInternal, "commit transaction")
+		return fault.WrapInternal(err, "commit transaction")
 	}
 	return nil
 }
@@ -144,13 +144,13 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 // cancelled reports a transaction abandoned because its context ended; it
 // unwraps to the context error (context.Canceled or DeadlineExceeded).
 func cancelled(cerr error) error {
-	return fault.Wrap(cerr, fault.CodeCancelled, "transaction abandoned: the caller's context ended (nothing was written)")
+	return fault.Wrap(cerr, fault.CodeNotReady, "transaction abandoned: the caller's context ended (nothing was written)")
 }
 
 func (s *Store) migrate(ctx context.Context) error {
 	entries, err := fs.ReadDir(migrationFS, "migrations")
 	if err != nil {
-		return fault.Wrap(err, fault.CodeInternal, "read migrations")
+		return fault.WrapInternal(err, "read migrations")
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -161,13 +161,13 @@ func (s *Store) migrate(ctx context.Context) error {
 	sort.Strings(names)
 	// The migrations table itself is created idempotently outside the loop.
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)`); err != nil {
-		return fault.Wrap(err, fault.CodeInternal, "create schema_migrations")
+		return fault.WrapInternal(err, "create schema_migrations")
 	}
 	return s.Write(ctx, func(tx *Tx) error {
 		applied := map[int64]bool{}
 		rows, err := tx.tx.QueryContext(ctx, `SELECT version FROM schema_migrations`)
 		if err != nil {
-			return fault.Wrap(err, fault.CodeInternal, "read schema_migrations")
+			return fault.WrapInternal(err, "read schema_migrations")
 		}
 		for rows.Next() {
 			var v int64
@@ -191,10 +191,10 @@ func (s *Store) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.tx.ExecContext(ctx, string(body)); err != nil {
-				return fault.Wrap(err, fault.CodeInternal, "apply migration %s", name)
+				return fault.WrapInternal(err, "apply migration %s", name)
 			}
 			if _, err := tx.tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`, version, name, time.Now().UnixMilli()); err != nil {
-				return fault.Wrap(err, fault.CodeInternal, "record migration %s", name)
+				return fault.WrapInternal(err, "record migration %s", name)
 			}
 		}
 		return nil
@@ -226,7 +226,7 @@ func wrapInternal(err error, what string) error {
 	if err == nil {
 		return nil
 	}
-	return fault.Wrap(err, fault.CodeInternal, "%s", what)
+	return fault.WrapInternal(err, "%s", what)
 }
 
 // IsUniqueViolation reports whether err is a UNIQUE/PRIMARY KEY conflict.

@@ -43,7 +43,7 @@ func TestCoupledVerificationCompletesTogether(t *testing.T) {
 		t.Fatalf("ack: %+v %v", ack, err)
 	}
 	_, err = f.e.Log(f.ctx, sa.Token, execution.LogEntry{Note: "x"})
-	wantCode(t, err, fault.CodeSessionFinished)
+	wantCode(t, err, fault.CodeInvalidSession)
 	sum, _ := f.e.Summary(f.ctx, f.proj.ID)
 	if sum.Stalled || sum.Done || sum.Active != 1 {
 		t.Fatalf("summary: %+v", sum)
@@ -80,7 +80,7 @@ func TestCoupledVerificationFailureSendsFailingMemberBack(t *testing.T) {
 	f.commit(su.Workspace, "ui.txt", "not ready")
 	f.e.Verify(f.ctx, su.Token, verification.ModeComplete)
 	_, err := f.e.Verify(f.ctx, sa.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	// api's e2e check failed on the candidate: api is sent back for repair;
 	// ui passed its own checks and waits for the peer.
 	if f.status(string(api)) != task.StatusVerificationFailed || f.status(string(ui)) != task.StatusAwaitingVerification {
@@ -92,12 +92,12 @@ func TestCoupledVerificationFailureSendsFailingMemberBack(t *testing.T) {
 	// The real fix is in ui: a planner notices and repairs ui by claiming
 	// it (its passing submission is superseded by a new attempt).
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &ui})
-	wantCode(t, err, fault.CodeTaskAwaitingVerification)
+	wantCode(t, err, fault.CodeNotReady)
 	// api is repaired and resubmitted unchanged in content; still fails
 	// because ui is wrong.
 	sa2 := f.claim(string(api))
 	_, err = f.e.Verify(f.ctx, sa2.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	// Planner relaxes api's e2e expectation (contract change) and api is
 	// resubmitted: now the cohort passes.
 	f.apply(plan.UpdateTask{Target: plan.Ref(api), TaskChecks: plan.Replace([]verification.CheckSpec{check("api-unit", "test -f api.txt", true), check("api-e2e", "test -f api.txt && test -f ui.txt", true)})})
@@ -167,7 +167,7 @@ func TestCohortSubmissionIsAcknowledgedIdempotently(t *testing.T) {
 		t.Fatalf("acknowledgement submitted again: %d submissions", len(full.History.Submissions))
 	}
 	// The consumed token still cannot act.
-	if _, err := f.e.Log(f.ctx, sa.Token, execution.LogEntry{Note: "x"}); fault.CodeOf(err) != fault.CodeSessionFinished {
+	if _, err := f.e.Log(f.ctx, sa.Token, execution.LogEntry{Note: "x"}); fault.CodeOf(err) != fault.CodeInvalidSession {
 		t.Fatalf("consumed token acted: %v", err)
 	}
 	if _, err := f.e.Verify(f.ctx, su.Token, verification.ModeComplete); err != nil {
@@ -193,7 +193,7 @@ func TestSubmittedCohortContractIsPinned(t *testing.T) {
 	}
 	relaxed := plan.Replace([]verification.CheckSpec{check("api-unit", "test -f api.txt", true)})
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(api), TaskChecks: relaxed}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(api), TaskChecks: relaxed, WithdrawSubmission: true}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestCohortLateConflictBlamesOnlyThatMember(t *testing.T) {
 	}
 	pre := f.apply(plan.AddTask{Key: "pre", Title: "pre", Blocks: []plan.Ref{plan.Ref(api)}, TaskChecks: okChecks()}).Created["pre"]
 	res, err := f.e.Verify(f.ctx, su.Token, verification.ModeComplete)
-	if err != nil && fault.CodeOf(err) == fault.CodeInternal {
+	if err != nil && fault.CodeOf(err) == fault.CodeNotReady {
 		t.Fatal(err)
 	}
 	if res.Completed {
@@ -258,7 +258,7 @@ func TestCohortRegressionFailureChargesNobody(t *testing.T) {
 	f.commit(su.Workspace, "ui.txt", "ui")
 	f.e.Verify(f.ctx, sa.Token, verification.ModeComplete)
 	_, err := f.e.Verify(f.ctx, su.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	for _, id := range []task.ID{api, ui} {
 		v := f.show(string(id))
 		if v.Status != task.StatusReady || v.Failures != 0 || !strings.Contains(v.LastError, "no single member") {
@@ -281,7 +281,7 @@ func TestCohortPromotionBackoffIsBounded(t *testing.T) {
 	f.e.Verify(f.ctx, sa.Token, verification.ModeComplete)
 	app.SetFaultHook(f.e, func(p string) error {
 		if p == "cohort:promote" {
-			return fault.New(fault.CodeIntegrationFailed, "target checkout is unusable (simulated)")
+			return fault.New(fault.CodeBaseConflict, "target checkout is unusable (simulated)")
 		}
 		return nil
 	})

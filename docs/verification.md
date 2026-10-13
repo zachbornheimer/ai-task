@@ -13,7 +13,7 @@ completes a task; only `verify complete` can, and only with fresh evidence.
 
 Check IDs are separate namespaces; a task check whose ID matches a
 regression check is rejected, and vice versa. A task missing either
-category cannot complete (`MISSING_VERIFICATION`).
+category cannot complete (`INVALID_INPUT`).
 
 Each check is an argv array (no shell), optional directory, optional
 timeout (stored as `timeout_ms`; it can only shorten the contract budget),
@@ -84,15 +84,15 @@ after a committed completion returns the stored result and runs nothing.
    row commits as it finishes, fenced on the session and on the run still
    being the newest.
 4. Judge. On failure: run failed, failure count and cooldown recorded,
-   claim stays live, `VERIFICATION_FAILED` with evidence.
+   claim stays live, `CHECK_FAILED` with evidence.
 5. In `promote` projects: merge the revision onto the target in a scratch
    worktree; if the merge changed content, run both suites on the merge
-   too. Conflicts fail with `INTEGRATION_FAILED` and the target never
+   too. Conflicts fail with `BASE_CONFLICT` and the target never
    moves. The merge commit (`at: integrate <task> (<title>)`, with an
    `At-Task: <id>` trailer per merged task) is recorded as the Git
    identity of whoever runs the verification, from the repository's
    configuration or `GIT_COMMITTER_*`, as `git merge` would; without one
-   it fails with `WORKSPACE_UNAVAILABLE` naming the fix, never a strike.
+   it fails with `NOT_READY` naming the fix, never a strike.
 6. **Intent.** One short transaction re-checks the session, prerequisites,
    the task's contract revision, the project regression digest, archive
    state, submission identity, and that stored evidence proves the
@@ -157,7 +157,7 @@ the project's budgets turn it into a cap on the task-check suite (30s,
 5m, 15m by default); the regression suite has its own cap (2m). The suite
 shares the cap: a check that would start after it is spent is recorded as
 `timed_out` without running. A timeout is its own outcome and result
-code, `VERIFICATION_TIMEOUT`, and is never counted against the attempt:
+code, `CHECK_FAILED`, and is never counted against the attempt:
 it says the verification was built too slow for the task's size (or the
 code hangs), not that the software is wrong. The message says which
 budget and whose problem: a task-check timeout names the two fixes

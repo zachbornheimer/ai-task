@@ -24,10 +24,9 @@ const (
 
 func classify(code fault.Code) failureClass {
 	switch code {
-	case fault.CodeVerificationFailed:
+	case fault.CodeCheckFailed:
 		return classAttempt
-	case fault.CodeSessionSuperseded, fault.CodeSessionFinished, fault.CodeLeaseExpired, fault.CodeInvalidSession,
-		fault.CodePlanConflict, fault.CodeTaskBlocked, fault.CodeMissingVerification:
+	case fault.CodeInvalidSession, fault.CodeConflict, fault.CodeInvalidInput:
 		return classConflict
 	}
 	return classEnvironment

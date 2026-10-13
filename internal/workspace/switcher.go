@@ -44,7 +44,7 @@ func (s WorktrunkSwitcher) Ensure(ctx context.Context, repo, branch, base string
 	}
 	wt, err := look("wt")
 	if err != nil {
-		return "", fault.New(fault.CodeWorkspaceUnavailable, "Worktrunk (wt) is required to create task worktrees: %v", err)
+		return "", fault.New(fault.CodeNotReady, "Worktrunk (wt) is required to create task worktrees: %v", err)
 	}
 	args := []string{"switch", "--no-cd", "--no-hooks", "--yes", "--format", "json"}
 	if create {
@@ -64,7 +64,7 @@ func (s WorktrunkSwitcher) Ensure(ctx context.Context, repo, branch, base string
 		}
 		msg := err.Error() + string(out)
 		if attempt == 7 || (!strings.Contains(msg, "lock") && !strings.Contains(msg, "already exists") && !strings.Contains(msg, "busy")) {
-			return "", fault.Wrap(err, fault.CodeWorkspaceUnavailable, "wt switch %s: %s", branch, strings.TrimSpace(string(out)))
+			return "", fault.Wrap(err, fault.CodeNotReady, "wt switch %s: %s", branch, strings.TrimSpace(string(out)))
 		}
 		select {
 		case <-ctx.Done():
@@ -100,5 +100,5 @@ func parseSwitchPath(out []byte) (string, error) {
 			return s.Path, nil
 		}
 	}
-	return "", fault.New(fault.CodeWorkspaceUnavailable, "wt switch --format json did not include path (output %q)", strings.TrimSpace(string(out)))
+	return "", fault.New(fault.CodeNotReady, "wt switch --format json did not include path (output %q)", strings.TrimSpace(string(out)))
 }

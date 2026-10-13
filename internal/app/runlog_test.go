@@ -22,7 +22,7 @@ func TestVerifyWritesRunLogs(t *testing.T) {
 	s := f.claim(string(a))
 
 	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if res.LogDir == "" || len(res.Evidence) != 1 {
 		t.Fatalf("no run directory: %+v", res)
 	}
@@ -53,7 +53,7 @@ func TestVerifyWritesRunLogs(t *testing.T) {
 	if rerr != nil || json.Unmarshal(b, &rr) != nil {
 		t.Fatalf("result.json: %v\n%s", rerr, b)
 	}
-	if rr.OK || rr.Error == nil || rr.Error.Code != fault.CodeVerificationFailed || rr.Result.RunID != res.RunID || len(rr.Result.Evidence) != 1 || rr.Result.Evidence[0].Log != ev.Log {
+	if rr.OK || rr.Error == nil || rr.Error.Code != fault.CodeCheckFailed || rr.Result.RunID != res.RunID || len(rr.Result.Evidence) != 1 || rr.Result.Evidence[0].Log != ev.Log {
 		t.Fatalf("result.json does not record the failed run: %s", b)
 	}
 
@@ -61,7 +61,7 @@ func TestVerifyWritesRunLogs(t *testing.T) {
 	// points at the failing run's full output.
 	f.commit(s.Workspace, "a.txt", "attempt one")
 	failed, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "stuck"}); err != nil {
 		t.Fatal(err)
 	}

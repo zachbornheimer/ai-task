@@ -37,7 +37,7 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 		plan.AddTask{Key: "x", Title: "x", Requires: []plan.Ref{"y"}, TaskChecks: okChecks()},
 		plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{"x"}},
 	}})
-	wantCode(t, err, fault.CodeDependencyCycle)
+	wantCode(t, err, fault.CodeInvalidInput)
 	if count(f, app.FilterAll) != 1 {
 		t.Fatal("partial insert after cycle")
 	}
@@ -79,7 +79,7 @@ func TestStableKeysAndIdempotency(t *testing.T) {
 	changed := op
 	changed.Title = "OAuth endpoint v2"
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{changed}})
-	wantCode(t, err, fault.CodeDuplicateKey)
+	wantCode(t, err, fault.CodeConflict)
 	if f.show("oauth").Title != "OAuth endpoint" {
 		t.Fatal("overwritten")
 	}
@@ -112,13 +112,13 @@ func TestReviewMutationIsOneRevisionWithOptimisticConcurrency(t *testing.T) {
 	}
 	// Stale revision is rejected and nothing changes.
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, ExpectedPlanRev: snap.Revision, Operations: []plan.Change{plan.AddTask{Key: "late", Title: "late", TaskChecks: okChecks()}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	if _, err := f.e.Show(f.ctx, f.proj.ID, "late", false); !fault.Is(err, fault.CodeNotFound) {
 		t.Fatal("late created despite conflict")
 	}
 	// Archiving a task that others require, without repairing, is rejected.
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "a2", Reason: "test"}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	// Repairing in the same set works.
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.UpdateTask{Target: plan.Ref(b), RemoveRequires: []plan.Ref{"a2"}},
@@ -169,9 +169,9 @@ func TestGroupsAreOrganizationalOnly(t *testing.T) {
 	// A group cannot be nested in itself; a group with members cannot be
 	// archived without them.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: "identity", Parent: refptr("sub")}}})
-	wantCode(t, err, fault.CodeDependencyCycle)
+	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "sub", Reason: "test"}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 }
 
 func refptr(s string) *plan.Ref { r := plan.Ref(s); return &r }
@@ -245,7 +245,7 @@ func TestIdempotencyIsBoundToThePayload(t *testing.T) {
 	}
 	// A stale expected revision on a NEW request is still a conflict.
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, IdempotencyKey: "K2", ExpectedPlanRev: 1, Operations: []plan.Change{plan.AddTask{Key: "i3", Title: "i3", TaskChecks: okChecks()}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	// Stable-key replay with a blocker: the first application records the
 	// edge; an identical replay is a no-op that does not bump the revision;
 	// a replay naming a different blocker is a conflicting definition.
@@ -262,7 +262,7 @@ func TestIdempotencyIsBoundToThePayload(t *testing.T) {
 		t.Fatalf("identical replay changed the plan: %+v %v", rb2, err)
 	}
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(other)}, TaskChecks: okChecks()}}})
-	wantCode(t, err, fault.CodeDuplicateKey)
+	wantCode(t, err, fault.CodeConflict)
 	if v := f.show(string(other)); len(v.Requires) != 0 {
 		t.Fatal("conflicting replay added an edge")
 	}
@@ -284,7 +284,7 @@ func TestArchiveGroupWithCompletedMembers(t *testing.T) {
 	res := f.apply(plan.AddGroup{Key: "g", Title: "G"}, plan.AddTask{Key: "done", Title: "done", Parent: "g", TaskChecks: okChecks()}, plan.AddTask{Key: "open", Title: "open", Parent: "g", TaskChecks: okChecks()})
 	f.complete(f.claim(string(res.Created["done"])))
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: "g", Reason: "reorg"}}})
-	wantCode(t, err, fault.CodePlanConflict) // "open" would be orphaned
+	wantCode(t, err, fault.CodeConflict) // "open" would be orphaned
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: "open", Parent: refptr("")}, plan.ArchiveTask{Target: "g", Reason: "reorg"}}}); err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,7 @@ func environmentFingerprint() string {
 //     cohort job if every peer has submitted.
 //
 // Every invocation executes checks; stored evidence is never reused as
-// proof. A failing result is returned as VERIFICATION_FAILED with the
+// proof. A failing result is returned as CHECK_FAILED with the
 // result in Details; the claim stays live so the agent can repair.
 func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verification.Mode) (VerifyResult, error) {
 	if _, err := verification.ParseMode(string(mode)); err != nil {
@@ -92,7 +92,7 @@ func (e *Engine) prepare(ctx context.Context, token execution.Token) (prepared, 
 	p.policy = effectivePolicy(p.rec.Task, p.proj)
 	p.dir = p.attempt.WorkspacePath
 	if p.dir == "" {
-		return p, fault.New(fault.CodeWorkspaceUnavailable, "attempt has no worktree; claim the task again")
+		return p, fault.New(fault.CodeNotReady, "attempt has no worktree; claim the task again")
 	}
 	return p, nil
 }
@@ -108,7 +108,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 		gate = policy.Regression
 	}
 	if err := verification.RequireGate(gate, string(mode)+" checks"); err != nil {
-		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s: %v; `verify complete` will fail closed", p.rec.Task.ID, fault.MessageOf(err))
+		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s: %v; `verify complete` will fail closed", p.rec.Task.ID, fault.MessageOf(err))
 	}
 	revision, dirty := "", false
 	if st, err := workspace.Inspect(ctx, p.dir); err == nil {
@@ -171,10 +171,10 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	res.Warnings = budgetWarnings(evidence, policy, taskOpts.budget, regOpts.budget)
 	if len(verdict.TimedOut) > 0 {
 		res.Message = timeoutMessage(verdict, policy, taskOpts.budget, regOpts.budget, p.rec.Task.Size)
-		return res, &fault.Error{Code: fault.CodeVerificationTimeout, Message: fmt.Sprintf("%s checks timed out for %s: %s", mode, p.rec.Task.ID, summary), Details: res}
+		return res, &fault.Error{Code: fault.CodeCheckFailed, Message: fmt.Sprintf("%s checks timed out for %s: %s", mode, p.rec.Task.ID, summary), Details: res}
 	}
 	if !verdict.Passed {
-		return res, &fault.Error{Code: fault.CodeVerificationFailed, Message: fmt.Sprintf("%s checks failed for %s: %s", mode, p.rec.Task.ID, summary), Details: res}
+		return res, &fault.Error{Code: fault.CodeCheckFailed, Message: fmt.Sprintf("%s checks failed for %s: %s", mode, p.rec.Task.ID, summary), Details: res}
 	}
 	return res, nil
 }
@@ -391,13 +391,13 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 	}
 	if p.proj.Integration == project.IntegrationPromote {
 		if missing := p.policy.MissingCategory(); missing != "" {
-			return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
+			return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
 		}
 	} else if !verification.HasRequired(p.policy.TaskChecks) {
-		return VerifyResult{}, fault.New(fault.CodeMissingVerification, "%s cannot complete: no required task checks are defined (completion fails closed)", p.rec.Task.ID)
+		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s cannot complete: no required task checks are defined (completion fails closed)", p.rec.Task.ID)
 	}
 	if p.rec.UnmetRequires > 0 {
-		return VerifyResult{}, fault.New(fault.CodeTaskBlocked, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
+		return VerifyResult{}, fault.New(fault.CodeNotReady, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
 	}
 	revision := "general"
 	if !p.proj.IsGeneral() && p.proj.RootPath != "" {
@@ -421,12 +421,12 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 			return err
 		}
 		if r.UnmetRequires > 0 {
-			return fault.New(fault.CodeTaskBlocked, "%s cannot complete: prerequisites changed", r.Task.ID)
+			return fault.New(fault.CodeNotReady, "%s cannot complete: prerequisites changed", r.Task.ID)
 		}
 		// One final run per attempt at a time: a double-fired `verify
 		// complete` must neither race its twin nor count a failure.
 		if s := r.Submission; s != nil && s.AttemptID == p.attempt.ID && s.RunStatus() == sqlite.RunRunning {
-			return fault.New(fault.CodeVerificationRunning, "%s: a `verify complete` run (%d) is already in progress for this attempt; wait for its result", r.Task.ID, s.Run.ID)
+			return fault.New(fault.CodeConflict, "%s: a `verify complete` run (%d) is already in progress for this attempt; wait for its result", r.Task.ID, s.Run.ID)
 		}
 		if fr.submission, err = tx.InsertSubmission(r.Task.ID, p.attempt.ID, revision, "", now); err != nil {
 			return err
@@ -461,7 +461,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			return err
 		}
 		if latest != fr.runID {
-			return fault.New(fault.CodeSessionSuperseded, "run %d superseded", fr.runID)
+			return fault.New(fault.CodeInvalidSession, "run %d superseded", fr.runID)
 		}
 		return nil
 	}
@@ -469,9 +469,8 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// proof counts against the attempt (once per attempt, fenced to the
 	// current generation); environment and authority problems are kept
 	// as last_error so the next attempt and humans can see them.
-	fail := func(status sqlite.RunStatus, code fault.Code, summary string, evidence []verification.Evidence) (VerifyResult, error) {
+	failAs := func(class failureClass, status sqlite.RunStatus, code fault.Code, summary string, evidence []verification.Evidence) (VerifyResult, error) {
 		now := e.now()
-		class := classify(code)
 		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 			if err := tx.FinishRun(fr.runID, status, summary, now); err != nil {
 				return err
@@ -485,13 +484,13 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		res.Evidence, res.Summary = evidence, summary
 		res.Status = e.statusOf(ctx, fr.rec.Task.ID)
 		switch {
-		case code == fault.CodeVerificationTimeout:
-			// message set by the caller: which budget, and whose problem
+		case code == fault.CodeCheckFailed && class != classAttempt:
+			// a check ran out of budget: message set by the caller
 		case class == classAttempt:
 			res.Message = "task NOT complete: a required check failed; the claim stays live for repair (counted against the attempt budget once)"
-		case code == fault.CodeIntegrationFailed && len(res.Conflicts) > 0:
+		case code == fault.CodeBaseConflict && len(res.Conflicts) > 0:
 			res.Message = fmt.Sprintf("task NOT complete: the submitted revision conflicts with %s (%s); in the worktree run %s, resolve the conflicts, commit, and `atask verify complete` again (not counted as a failure)", fr.proj.TargetBranch, strings.Join(res.Conflicts, ", "), integrateStep(fr.proj.TargetBranch))
-		case code == fault.CodeIntegrationFailed:
+		case code == fault.CodeBaseConflict:
 			res.Message = fmt.Sprintf("task NOT complete: the submitted revision could not be promoted to %s; in the worktree run %s, commit, and `atask verify complete` again (not counted as a failure)", fr.proj.TargetBranch, integrateStep(fr.proj.TargetBranch))
 		case class == classEnvironment:
 			res.Message = "task NOT complete: the environment stopped the run, not the checks; fix the cause and verify again (not counted as a failure)"
@@ -500,10 +499,18 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("%s: %s", fr.rec.Task.ID, summary), Details: res}
 	}
+	fail := func(status sqlite.RunStatus, code fault.Code, summary string, evidence []verification.Evidence) (VerifyResult, error) {
+		return failAs(classify(code), status, code, summary, evidence)
+	}
+	// failTimeout: a check ran out of its budget. The verification was
+	// built too slow for the task (or hangs); never a strike.
+	failTimeout := func(summary string, evidence []verification.Evidence) (VerifyResult, error) {
+		return failAs(classEnvironment, sqlite.RunFailed, fault.CodeCheckFailed, summary, evidence)
+	}
 	// conflict records the conflicting files of a merge failure on the
 	// result before fail renders it.
 	conflict := func(err error) (VerifyResult, error) {
-		if code := fault.CodeOf(err); code != fault.CodeIntegrationFailed {
+		if code := fault.CodeOf(err); code != fault.CodeBaseConflict {
 			// Not a merge outcome (no Git identity, an unusable repository):
 			// the environment's problem, reported with its own code.
 			return fail(sqlite.RunError, code, fault.MessageOf(err), res.Evidence)
@@ -512,7 +519,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		if errors.As(err, &ce) {
 			res.Conflicts = ce.Files
 		}
-		return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, fault.MessageOf(err), res.Evidence)
+		return fail(sqlite.RunFailed, fault.CodeBaseConflict, fault.MessageOf(err), res.Evidence)
 	}
 	mgr := e.manager(fr.proj)
 	checkCtx := fr.checkCtx
@@ -524,10 +531,10 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	if len(fr.rec.Task.Pins) > 0 && !fr.proj.IsGeneral() && fr.proj.RootPath != "" {
 		changed, err := workspace.ChangedBetween(ctx, fr.proj.RootPath, "refs/heads/"+fr.proj.TargetBranch, fr.revision)
 		if err != nil {
-			return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, "list changed files: "+fault.MessageOf(err), nil)
+			return fail(sqlite.RunError, fault.CodeNotReady, "list changed files: "+fault.MessageOf(err), nil)
 		}
 		if hit := pinnedChanges(fr.rec.Task.Pins, changed); len(hit) > 0 {
-			return fail(sqlite.RunFailed, fault.CodeVerificationFailed, "pinned path(s) changed by this task: "+strings.Join(hit, ", ")+"; the task may not modify them (revert the change, or ask the planner to unpin)", nil)
+			return fail(sqlite.RunFailed, fault.CodeCheckFailed, "pinned path(s) changed by this task: "+strings.Join(hit, ", ")+"; the task may not modify them (revert the change, or ask the planner to unpin)", nil)
 		}
 	}
 	integrate := fmt.Sprintf("at: integrate %s (%s)\n\nAt-Task: %s", fr.rec.Task.ID, fr.rec.Task.Description, fr.rec.Task.ID)
@@ -551,8 +558,8 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// Immutable inputs: detached snapshots of the submitted revision, one
 	// per check category.
 	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, fr.attempt.WorkspacePath)
-	if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(evidence) == 0 {
-		return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), nil)
+	if err != nil && fault.CodeOf(err) == fault.CodeNotReady && len(evidence) == 0 {
+		return fail(sqlite.RunError, fault.CodeNotReady, err.Error(), nil)
 	}
 	if err != nil {
 		res.Evidence = evidence
@@ -563,10 +570,10 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	taskBudget, regBudget := fr.proj.Budgets.ForSize(fr.rec.Task.Size), fr.proj.Budgets.RegressionBudget()
 	if len(verdict.TimedOut) > 0 {
 		res.Message = timeoutMessage(verdict, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
-		return fail(sqlite.RunFailed, fault.CodeVerificationTimeout, verdict.Summary+"; "+res.Message, evidence)
+		return failTimeout(verdict.Summary+"; "+res.Message, evidence)
 	}
 	if !verdict.Passed {
-		return fail(sqlite.RunFailed, fault.CodeVerificationFailed, verdict.Summary, evidence)
+		return fail(sqlite.RunFailed, fault.CodeCheckFailed, verdict.Summary, evidence)
 	}
 	res.Warnings = budgetWarnings(evidence, fr.policy, taskBudget, regBudget)
 	spec := intentSpec{proj: fr.proj, taskID: fr.rec.Task.ID, attemptID: fr.attempt.ID, runID: fr.runID, submission: fr.submission, owner: fr.token.Digest(), contractRev: fr.contractRev, regression: fr.regressionID, policy: fr.policy, source: fr.revision}
@@ -584,11 +591,10 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// refused maps a finalisation refusal (changed contract, lost
 	// authority, ...) to the caller's error; the target never moved.
 	refused := func(err error) (VerifyResult, error) {
-		code := fault.CodeOf(err)
-		if code == fault.CodeInternal {
+		if fault.IsInternal(err) {
 			return res, err
 		}
-		return fail(sqlite.RunFailed, code, err.Error(), evidence)
+		return fail(sqlite.RunFailed, fault.CodeOf(err), err.Error(), evidence)
 	}
 	if err := e.fault("final:after-checks"); err != nil {
 		return res, err
@@ -637,9 +643,9 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		final := fr.revision
 		if cand.Revision != fr.revision {
 			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, "")
-			if err != nil && fault.CodeOf(err) == fault.CodeWorkspaceUnavailable && len(more) == 0 {
+			if err != nil && fault.CodeOf(err) == fault.CodeNotReady && len(more) == 0 {
 				cand.Cleanup()
-				return fail(sqlite.RunError, fault.CodeWorkspaceUnavailable, err.Error(), evidence)
+				return fail(sqlite.RunError, fault.CodeNotReady, err.Error(), evidence)
 			}
 			if err != nil {
 				cand.Cleanup()
@@ -649,14 +655,12 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			evidence = append(evidence, more...)
 			if v := verification.Judge(fr.policy, more); !v.Passed {
 				cand.Cleanup()
-				code := fault.CodeVerificationFailed
 				summary := "integrated candidate " + short(cand.Revision) + ": " + v.Summary
 				if len(v.TimedOut) > 0 {
-					code = fault.CodeVerificationTimeout
 					res.Message = timeoutMessage(v, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
-					summary += "; " + res.Message
+					return failTimeout(summary+"; "+res.Message, evidence)
 				}
-				return fail(sqlite.RunFailed, code, summary, evidence)
+				return fail(sqlite.RunFailed, fault.CodeCheckFailed, summary, evidence)
 			}
 			final = cand.Revision
 		}
@@ -678,7 +682,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			continue
 		default:
 			e.abandonIntent(ctx, intentID, "promotion failed: "+err.Error())
-			return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, err.Error(), evidence)
+			return fail(sqlite.RunFailed, fault.CodeBaseConflict, err.Error(), evidence)
 		}
 		if err := e.fault("final:after-promote"); err != nil {
 			return res, err
@@ -694,7 +698,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		})
 		if err != nil {
 			// The intent stays open; reconciliation completes it from Git.
-			return res, fault.Wrap(err, fault.CodeInternal, "record completion of promoted %s (will be reconciled)", fr.rec.Task.ID)
+			return res, fault.WrapInternal(err, "record completion of promoted %s (will be reconciled)", fr.rec.Task.ID)
 		}
 		e.notify()
 		if err := e.fault("final:after-complete"); err != nil {
@@ -704,7 +708,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		_, _ = mgr.Prune(ctx, string(fr.rec.Task.ID), true)
 		return done(final)
 	}
-	return fail(sqlite.RunFailed, fault.CodeIntegrationFailed, "target branch kept moving; verify again", evidence)
+	return fail(sqlite.RunFailed, fault.CodeBaseConflict, "target branch kept moving; verify again", evidence)
 }
 
 // replayCompletion returns the committed result when the token's attempt

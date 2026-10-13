@@ -31,16 +31,16 @@ func TestEmptyChecksFailClosed(t *testing.T) {
 	f := newGitFixture(t)
 	// A task without checks cannot be planned, and checks cannot be removed.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "nc", Title: "no checks"}}})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	a := f.add("a")
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{})}}})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	// A project without regression checks hands out no work.
 	f.setRegression()
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	// Regression checks removed under a live claim: verification still fails
 	// closed and the claim survives.
 	f.setRegression(check("regress", "test -d .", true))
@@ -48,9 +48,9 @@ func TestEmptyChecksFailClosed(t *testing.T) {
 	f.setRegression()
 	f.commit(sa.Workspace, "a.txt", "a")
 	_, err = f.e.Verify(f.ctx, sa.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Verify(f.ctx, sa.Token, verification.ModeRegression)
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	if f.status(string(a)) != task.StatusClaimed {
 		t.Fatal("claim must survive a fail-closed refusal")
 	}
@@ -81,13 +81,13 @@ func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
 	if v.Verification.Task == nil || v.Verification.Regression == nil || v.Verification.Complete != nil || v.Attempt == nil || !v.Attempt.LeaseActive {
 		t.Fatalf("%+v", v.Verification)
 	}
-	// Failing diagnostics report VERIFICATION_FAILED with details and keep
+	// Failing diagnostics report CHECK_FAILED with details and keep
 	// the claim live.
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; exit 3", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	res, err = f.e.Verify(f.ctx, s.Token, verification.ModeProof)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if res.Passed || runs() != 4 || res.Evidence[0].ExitCode != 3 || f.status(string(a)) != task.StatusClaimed {
 		t.Fatalf("%+v runs=%d", res, runs())
 	}
@@ -127,7 +127,7 @@ func TestNoEvidenceReuseAndSameSnapshot(t *testing.T) {
 	os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("edited after commit"), 0o644)
 	// Dirty tree: refused outright.
 	_, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeWorkspaceDirty)
+	wantCode(t, err, fault.CodeNotReady)
 	os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("committed-c"), 0o644)
 	f.complete(sc)
 }
@@ -144,7 +144,7 @@ func TestFinalSuccessIsAtomicAndPromotes(t *testing.T) {
 	}
 	// Claim ended atomically with completion.
 	_, err = f.e.Log(f.ctx, s.Token, execution.LogEntry{Done: "late"})
-	wantCode(t, err, fault.CodeSessionFinished)
+	wantCode(t, err, fault.CodeInvalidSession)
 	// Promoted to main: the main worktree has the file.
 	if b, _ := os.ReadFile(filepath.Join(f.repo, "a.txt")); string(b) != "a" {
 		t.Fatal("not promoted")
@@ -182,7 +182,7 @@ func TestFinalFailureKeepsClaimAndBlocksDownstream(t *testing.T) {
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
 	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if res.Completed || res.Status != task.StatusClaimed {
 		t.Fatalf("%+v", res)
 	}
@@ -217,7 +217,7 @@ func TestLateBlockerPreventsCompletion(t *testing.T) {
 	}
 	f.commit(s.Workspace, "a.txt", "a")
 	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeTaskBlocked)
+	wantCode(t, err, fault.CodeNotReady)
 	if f.status(string(a)) != task.StatusClaimed {
 		t.Fatal("claim lost")
 	}
@@ -240,13 +240,13 @@ func TestCompletedContractsCannotChangeSilently(t *testing.T) {
 	f.complete(f.claim(string(a)))
 	// A hard requirement on a complete task is rejected.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{plan.Ref(b)}}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Title: "x", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Title: strptr("renamed")}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a), Reason: "test"}}})
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	if f.status(string(a)) != task.StatusComplete {
 		t.Fatal("completion lost")
 	}
@@ -278,7 +278,7 @@ func TestContractChangeDuringVerificationFailsClosed(t *testing.T) {
 	}
 	os.WriteFile(flag, []byte("1"), 0o644)
 	err := <-done
-	wantCode(t, err, fault.CodePlanConflict)
+	wantCode(t, err, fault.CodeConflict)
 	if f.status(string(a)) == task.StatusComplete {
 		t.Fatal("completed under a changed contract")
 	}
@@ -326,7 +326,7 @@ func TestIntegrationConflictDoesNotComplete(t *testing.T) {
 	// main moves with a conflicting change before a verifies.
 	f.commit(f.repo, "f.txt", "from main")
 	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeIntegrationFailed)
+	wantCode(t, err, fault.CodeBaseConflict)
 	if f.status(string(a)) == task.StatusComplete || f.git(f.repo, "rev-parse", "HEAD") != f.git(f.repo, "rev-parse", "main") {
 		t.Fatal("completed or moved target despite conflict")
 	}
@@ -388,14 +388,14 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	}
 	// Planning boundaries.
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "o", Title: "o", TaskChecks: []verification.CheckSpec{opt("o1")}}}})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	a := f.add("a")
 	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), TaskChecks: plan.Replace([]verification.CheckSpec{opt("o2")})}}})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	// Project boundary.
 	p, _ := f.e.Project(f.ctx, f.proj.ID)
 	p.Regression = []verification.CheckSpec{opt("r")}
-	wantCode(t, f.e.UpdateProject(f.ctx, p), fault.CodeMissingVerification)
+	wantCode(t, f.e.UpdateProject(f.ctx, p), fault.CodeInvalidInput)
 	// Legacy rows that bypassed the rule: never handed out, never completed.
 	db, err := sql.Open("sqlite", f.path)
 	if err != nil {
@@ -417,9 +417,9 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	regOpt, _ := json.Marshal(verification.Policy{Regression: []verification.CheckSpec{opt("r")}})
 	setRegression(string(regOpt))
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	f.setRegression(check("regress", "test -d .", true))
 	setPolicy(a, optJSON("o3"))
 	if st := f.status(string(a)); st != task.StatusNeedsAttention {
@@ -432,25 +432,25 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 		}
 	}
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
-	wantCode(t, err, fault.CodeNoAvailableTask)
+	wantCode(t, err, fault.CodeNotReady)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	// Checks made vacuous underneath a live claim: completion still refuses.
 	b := f.add("b")
 	s := f.claim(string(b))
 	f.commit(s.Workspace, "b.txt", "b")
 	setPolicy(b, optJSON("o4"))
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeProof)
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	good, _ := json.Marshal(verification.Policy{TaskChecks: []verification.CheckSpec{check("u", "test -d .", true)}})
 	setPolicy(b, string(good))
 	setRegression(string(regOpt))
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeRegression)
-	wantCode(t, err, fault.CodeMissingVerification)
+	wantCode(t, err, fault.CodeInvalidInput)
 	if f.status(string(b)) != task.StatusClaimed {
 		t.Fatal("claim must survive the refusal")
 	}
@@ -471,7 +471,7 @@ func TestCategoriesDoNotShareASnapshot(t *testing.T) {
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
 	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	var leave, regress verification.Outcome
 	for _, ev := range res.Evidence {
 		switch ev.CheckID {

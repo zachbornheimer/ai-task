@@ -171,7 +171,7 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 		return gv, err
 	}
 	if !head.known {
-		return gv, fault.New(fault.CodeInternal, "group %s: the target head was not resolved for this view", rec.Task.ID)
+		return gv, fault.NewInternal("group %s: the target head was not resolved for this view", rec.Task.ID)
 	}
 	if head.err != nil {
 		// Without the target the epic can neither run nor be judged
@@ -220,7 +220,7 @@ func (e *Engine) RunPendingGroups(ctx context.Context, pid project.ID, only task
 			return ran, err
 		}
 		ran = true
-		if err := e.executeGroupJob(ctx, job); err != nil && fault.CodeOf(err) == fault.CodeInternal {
+		if err := e.executeGroupJob(ctx, job); err != nil && fault.IsInternal(err) {
 			return ran, err
 		}
 		e.notify()
@@ -312,7 +312,7 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) error {
 			return err
 		}
 		if j.Status != "running" || j.OwnerDigest != job.owner.Digest() {
-			return fault.New(fault.CodeSessionSuperseded, "group verification job %d lost ownership", job.id)
+			return fault.New(fault.CodeInvalidSession, "group verification job %d lost ownership", job.id)
 		}
 		return nil
 	}
@@ -363,11 +363,11 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) error {
 	case len(v.TimedOut) > 0:
 		summary := fmt.Sprintf("%s; group check(s) %s exceeded the %s budget (%s): the epic's verification is built too slow; narrow it or set a larger --size on the group", v.Summary, strings.Join(v.TimedOut, ", "), size, job.proj.Budgets.ForSize(size))
 		_ = finish(sqlite.RunFailed, "failed", summary, false)
-		return fault.New(fault.CodeVerificationTimeout, "group %s: %s", job.rec.Task.ID, summary)
+		return fault.New(fault.CodeCheckFailed, "group %s: %s", job.rec.Task.ID, summary)
 	default:
 		summary := v.Summary + "; the epic's checks failed on " + short(job.head) + ": add follow-up member tasks (they reopen the group) or fix the checks"
 		_ = finish(sqlite.RunFailed, "failed", summary, false)
-		return fault.New(fault.CodeVerificationFailed, "group %s: %s", job.rec.Task.ID, summary)
+		return fault.New(fault.CodeCheckFailed, "group %s: %s", job.rec.Task.ID, summary)
 	}
 }
 

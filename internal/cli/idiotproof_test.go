@@ -64,7 +64,7 @@ func TestStatusWithoutProjectIsBoardWide(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("status: %d %s", code, errOut)
 	}
-	if strings.Contains(out+errOut, "NO_PROJECT") {
+	if strings.Contains(out+errOut, "NOT_FOUND") {
 		t.Fatalf("status without --project must not require a project:\n%s %s", out, errOut)
 	}
 	if !strings.Contains(out, "2 tasks") && !strings.Contains(out, "2 open") {

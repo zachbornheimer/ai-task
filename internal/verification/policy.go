@@ -162,9 +162,9 @@ func HasRequired(checks []CheckSpec) bool {
 func RequireGate(checks []CheckSpec, category string) error {
 	switch {
 	case len(checks) == 0:
-		return fault.New(fault.CodeMissingVerification, "no %s are defined; at least one required check is needed", category)
+		return fault.New(fault.CodeInvalidInput, "no %s are defined; at least one required check is needed", category)
 	case !HasRequired(checks):
-		return fault.New(fault.CodeMissingVerification, "every %s is optional; at least one required check is needed (optional checks are informational and cannot prove anything)", category)
+		return fault.New(fault.CodeInvalidInput, "every %s is optional; at least one required check is needed (optional checks are informational and cannot prove anything)", category)
 	}
 	return nil
 }

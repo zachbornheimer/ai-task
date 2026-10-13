@@ -81,13 +81,13 @@ func TestIntegrationIntentCrashRecovery(t *testing.T) {
 				}
 				// Nothing can move the task while the intent is open.
 				_, err = f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
-				wantCode(t, err, fault.CodeTaskAwaitingIntegration)
+				wantCode(t, err, fault.CodeNotReady)
 				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Title: strptr("renamed")}}})
-				wantCode(t, err, fault.CodePlanConflict)
+				wantCode(t, err, fault.CodeConflict)
 				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.ArchiveTask{Target: plan.Ref(a), Reason: "x"}}})
-				wantCode(t, err, fault.CodePlanConflict)
+				wantCode(t, err, fault.CodeConflict)
 				_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.AddTask{Key: "blk", Title: "blk", Blocks: []plan.Ref{plan.Ref(a)}, TaskChecks: okChecks()}}})
-				wantCode(t, err, fault.CodePlanConflict)
+				wantCode(t, err, fault.CodeConflict)
 			case "final:after-complete":
 				if v.Status != task.StatusComplete {
 					t.Fatalf("after complete: %s", v.Status)
@@ -151,7 +151,7 @@ func TestPlannerEditDuringVerificationNeverMovesTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile(flag, []byte("1"), 0o644)
-	wantCode(t, <-done, fault.CodePlanConflict)
+	wantCode(t, <-done, fault.CodeConflict)
 	if mainRev(f) != base {
 		t.Fatal("target moved on a refused completion")
 	}
@@ -182,7 +182,7 @@ func TestSupersededVerifierCannotPromote(t *testing.T) {
 	sB := f.claim(string(a))
 	os.WriteFile(flag, []byte("1"), 0o644)
 	err := <-done
-	if code := fault.CodeOf(err); code != fault.CodeSessionSuperseded && code != fault.CodeLeaseExpired {
+	if code := fault.CodeOf(err); code != fault.CodeInvalidSession {
 		t.Fatalf("stale verifier result: %v", err)
 	}
 	if mainRev(f) != base {

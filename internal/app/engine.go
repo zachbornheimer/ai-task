@@ -189,7 +189,7 @@ func stateDir() (string, error) {
 	home := func() (string, error) {
 		h, err := os.UserHomeDir()
 		if err != nil {
-			return "", fault.Wrap(err, fault.CodeInternal, "resolve home directory")
+			return "", fault.WrapInternal(err, "resolve home directory")
 		}
 		return h, nil
 	}
@@ -379,7 +379,7 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 		}
 		root, err := project.LocateRoot(dir)
 		if err != nil {
-			return fault.Wrap(err, fault.CodeInternal, "locate repository root")
+			return fault.WrapInternal(err, "locate repository root")
 		}
 		if root != "" {
 			if p, ok, err := tx.GetProjectByRoot(root); err != nil {
@@ -391,7 +391,7 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 		}
 		canon, err := project.CanonicalRoot(dir)
 		if err != nil {
-			return fault.Wrap(err, fault.CodeInternal, "canonicalise directory")
+			return fault.WrapInternal(err, "canonicalise directory")
 		}
 		roots, err := tx.ProjectRoots()
 		if err != nil {
@@ -416,7 +416,7 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 
 // errUseGeneral is an in-process signal from the read lookup to create
 // or load the general project. It is never returned to callers.
-var errUseGeneral = fault.New(fault.CodeNoProject, "use general")
+var errUseGeneral = fault.New(fault.CodeNotFound, "use general")
 
 // manager returns the Git workspace manager for a project.
 func (e *Engine) manager(p project.Project) workspace.Manager {

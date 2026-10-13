@@ -168,7 +168,7 @@ func (t *Tx) BumpPlanRev(pid project.ID, expected uint64, now time.Time) (uint64
 		return 0, wrapInternal(err, "read plan revision")
 	}
 	if expected != 0 && expected != current {
-		return 0, fault.New(fault.CodePlanConflict, "plan revision is %d, change set expected %d; re-read the plan and re-review", current, expected)
+		return 0, fault.New(fault.CodeConflict, "plan revision is %d, change set expected %d; re-read the plan and re-review", current, expected)
 	}
 	next := current + 1
 	if _, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET plan_rev = ?, updated_at = ? WHERE id = ?`, next, ms(now), pid); err != nil {
@@ -203,7 +203,7 @@ func (t *Tx) PlanRev(pid project.ID, expected uint64) (uint64, error) {
 		return 0, wrapInternal(err, "read plan revision")
 	}
 	if expected != 0 && expected != current {
-		return 0, fault.New(fault.CodePlanConflict, "plan revision is %d, change set expected %d; re-read the plan and re-review", current, expected)
+		return 0, fault.New(fault.CodeConflict, "plan revision is %d, change set expected %d; re-read the plan and re-review", current, expected)
 	}
 	return current, nil
 }

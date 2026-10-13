@@ -207,7 +207,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	r.commit(r.dir, "m.txt", "conflict B")
 	rev3 := r.git(w3.Path, "rev-parse", "HEAD")
 	_, err = r.mgr.PrepareMerge(r.ctx, "main", []string{rev3}, "x")
-	if !fault.Is(err, fault.CodeIntegrationFailed) || !strings.Contains(err.Error(), "m.txt") {
+	if !fault.Is(err, fault.CodeBaseConflict) || !strings.Contains(err.Error(), "m.txt") {
 		t.Fatalf("conflict: %v", err)
 	}
 	// Target moved between prepare and promote: compare-and-swap refuses.
@@ -220,7 +220,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	r.commit(r.dir, "z.txt", "moved")
 	err = r.mgr.Promote(r.ctx, "main", cand4)
 	cand4.Cleanup()
-	if !fault.Is(err, fault.CodeIntegrationFailed) || !errors.Is(err, ErrTargetMoved) {
+	if !fault.Is(err, fault.CodeBaseConflict) || !errors.Is(err, ErrTargetMoved) {
 		t.Fatalf("moved target: %v", err)
 	}
 	// A target worktree with a local file where the promotion would write
@@ -231,7 +231,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	os.WriteFile(filepath.Join(r.dir, "f5.txt"), []byte("x"), 0o644)
 	err = r.mgr.Promote(r.ctx, "main", cand5)
 	cand5.Cleanup()
-	if !fault.Is(err, fault.CodeIntegrationFailed) {
+	if !fault.Is(err, fault.CodeBaseConflict) {
 		t.Fatalf("dirty target: %v", err)
 	}
 	os.Remove(filepath.Join(r.dir, "f5.txt"))
@@ -375,8 +375,8 @@ func TestPrepareMergeWithoutIdentity(t *testing.T) {
 	// A merge is needed and Git has no identity: a setup error naming the
 	// fix, not a conflict.
 	_, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev}, "merge side\n\nAt-Task: at-aaaaaa")
-	if fault.CodeOf(err) != fault.CodeWorkspaceUnavailable || !strings.Contains(fault.MessageOf(err), "config user.email") {
-		t.Fatalf("want WORKSPACE_UNAVAILABLE naming the fix, got %v", err)
+	if fault.CodeOf(err) != fault.CodeNotReady || !strings.Contains(fault.MessageOf(err), "config user.email") {
+		t.Fatalf("want NOT_READY naming the fix, got %v", err)
 	}
 	var ce *ConflictError
 	if errors.As(err, &ce) {

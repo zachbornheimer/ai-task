@@ -182,7 +182,7 @@ func renderSession(w io.Writer, s app.Session) {
 		if s.TargetRevision != "" {
 			fmt.Fprintf(w, " at %s", s.TargetRevision[:min(12, len(s.TargetRevision))])
 		}
-		fmt.Fprintln(w, " (verified work is promoted there; on INTEGRATION_FAILED merge it into your branch)")
+		fmt.Fprintln(w, " (verified work is promoted there; on BASE_CONFLICT merge it into your branch)")
 	}
 	if len(s.Regression) > 0 {
 		fmt.Fprintf(w, "Regression: %d check(s) run by `verify complete` after the task checks:\n", len(s.Regression))
@@ -347,7 +347,7 @@ func (c *ctxt) verifyGroups(ctx context.Context, args []string) error {
 			o.Groups = append(o.Groups, g)
 		}
 	}
-	if runErr != nil && fault.CodeOf(runErr) == fault.CodeInternal {
+	if runErr != nil && fault.IsInternal(runErr) {
 		return runErr
 	}
 	if err := c.emit(o, func(w io.Writer) {

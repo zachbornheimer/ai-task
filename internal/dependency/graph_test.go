@@ -44,11 +44,11 @@ func TestValidate(t *testing.T) {
 		same bool
 		code fault.Code
 	}{
-		{"self", Edge{a, a}, true, fault.CodeSelfDependency},
-		{"cross project", Edge{a, c}, false, fault.CodeCrossProject},
-		{"duplicate", Edge{b, a}, true, fault.CodeDuplicateDependency},
-		{"direct cycle", Edge{a, b}, true, fault.CodeDependencyCycle},
-		{"transitive cycle a->b->c->a", Edge{a, c}, true, fault.CodeDependencyCycle},
+		{"self", Edge{a, a}, true, fault.CodeInvalidInput},
+		{"cross project", Edge{a, c}, false, fault.CodeInvalidInput},
+		{"duplicate", Edge{b, a}, true, fault.CodeInvalidInput},
+		{"direct cycle", Edge{a, b}, true, fault.CodeInvalidInput},
+		{"transitive cycle a->b->c->a", Edge{a, c}, true, fault.CodeInvalidInput},
 		{"ok diamond", Edge{c, a}, true, ""},
 	}
 	for _, tc := range cases {
@@ -93,7 +93,7 @@ func TestTopologicalOrderAndAround(t *testing.T) {
 		t.Fatalf("unexpected order %v", order)
 	}
 	cyc := Graph{Nodes: []Node{{ID: a}, {ID: b}}, Edges: []Edge{{a, b}, {b, a}}}
-	if _, err := cyc.TopologicalOrder(); !fault.Is(err, fault.CodeDependencyCycle) {
+	if _, err := cyc.TopologicalOrder(); !fault.Is(err, fault.CodeInvalidInput) {
 		t.Fatal("cycle not reported")
 	}
 	around := g.Around(b, 1)

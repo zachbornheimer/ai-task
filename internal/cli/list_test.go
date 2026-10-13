@@ -77,10 +77,10 @@ func TestListEmptyDatabase(t *testing.T) {
 		t.Fatalf("list: %d %s", code, e.String())
 	}
 	if !strings.Contains(o.String(), "no tasks registered") {
-		t.Fatalf("empty db should show the board, not NO_PROJECT:\n%s", o.String())
+		t.Fatalf("empty db should show the board, not NOT_FOUND:\n%s", o.String())
 	}
-	if strings.Contains(o.String()+e.String(), "NO_PROJECT") {
-		t.Fatalf("NO_PROJECT leaked:\n%s %s", o.String(), e.String())
+	if strings.Contains(o.String()+e.String(), "NOT_FOUND") {
+		t.Fatalf("NOT_FOUND leaked:\n%s %s", o.String(), e.String())
 	}
 }
 
@@ -105,7 +105,7 @@ func TestListFromUnregisteredDirIsGeneralTasks(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("list: %d %s", code, errOut)
 	}
-	if strings.Contains(out, "NO_PROJECT") || strings.Contains(errOut, "NO_PROJECT") {
+	if strings.Contains(out, "NOT_FOUND") || strings.Contains(errOut, "NOT_FOUND") {
 		t.Fatalf("list from unregistered dir: %s %s", out, errOut)
 	}
 	if !strings.Contains(out, "file the tracker") {

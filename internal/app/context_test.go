@@ -28,7 +28,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	if _, err := f.e.Log(f.ctx, s.Token, execution.LogEntry{Done: "skeleton", Next: "add Open(path)", Learned: "needs the sqlite driver"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeVerificationFailed {
+	if _, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeCheckFailed {
 		t.Fatalf("expected a failed proof, got %v", err)
 	}
 	if _, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "out of time"}); err != nil {

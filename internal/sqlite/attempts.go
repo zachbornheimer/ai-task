@@ -63,7 +63,7 @@ func (t *Tx) StartAttempt(id task.ID, prev *execution.Attempt, digest string, no
 		return execution.Attempt{}, wrapInternal(err, "advance attempt generation")
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return execution.Attempt{}, fault.New(fault.CodeTaskAlreadyTaken, "task %s was taken concurrently", id)
+		return execution.Attempt{}, fault.New(fault.CodeConflict, "task %s was taken concurrently", id)
 	}
 	r, err := t.tx.ExecContext(t.ctx, `INSERT INTO execution_attempts (task_id, seq, token_digest, started_at, lease_expires_at, lease_ms) VALUES (?, ?, ?, ?, ?, ?)`,
 		id, seq, digest, ms(now), ms(expires), lease.Milliseconds())
@@ -99,7 +99,7 @@ func (t *Tx) RenewLease(attemptID int64, expires time.Time) error {
 		return wrapInternal(err, "renew lease")
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fault.New(fault.CodeSessionFinished, "attempt already ended")
+		return fault.New(fault.CodeInvalidSession, "attempt already ended")
 	}
 	return nil
 }
@@ -111,7 +111,7 @@ func (t *Tx) EndAttempt(attemptID int64, reason execution.EndReason, now time.Ti
 		return wrapInternal(err, "end attempt")
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fault.New(fault.CodeSessionFinished, "attempt already ended")
+		return fault.New(fault.CodeInvalidSession, "attempt already ended")
 	}
 	return nil
 }

@@ -63,16 +63,16 @@ func IsGitRepo(dir string) bool {
 }
 
 // Inspect returns HEAD and the dirty status of dir. It fails with
-// WORKSPACE_UNAVAILABLE when Git is missing, dir is not a repository, or
+// NOT_READY when Git is missing, dir is not a repository, or
 // the repository has no commits.
 func Inspect(ctx context.Context, dir string) (GitState, error) {
 	rev, err := git(ctx, dir, "rev-parse", "--verify", "HEAD")
 	if err != nil {
-		return GitState{}, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "cannot resolve HEAD in %s (is it a Git repository with at least one commit?)", dir)
+		return GitState{}, fault.Wrap(err, fault.CodeNotReady, "cannot resolve HEAD in %s (is it a Git repository with at least one commit?)", dir)
 	}
 	status, err := git(ctx, dir, "status", "--porcelain", "--untracked-files=normal")
 	if err != nil {
-		return GitState{}, fault.Wrap(err, fault.CodeWorkspaceUnavailable, "git status failed in %s", dir)
+		return GitState{}, fault.Wrap(err, fault.CodeNotReady, "git status failed in %s", dir)
 	}
 	st := GitState{Revision: strings.TrimSpace(rev)}
 	for _, line := range strings.Split(status, "\n") {
@@ -83,7 +83,7 @@ func Inspect(ctx context.Context, dir string) (GitState, error) {
 	return st, nil
 }
 
-// RequireClean inspects dir and fails with WORKSPACE_DIRTY if anything is
+// RequireClean inspects dir and fails with NOT_READY if anything is
 // uncommitted. Nothing is ever staged or committed on the caller's behalf:
 // an automatic commit could capture secrets or unintended files.
 func RequireClean(ctx context.Context, dir string) (GitState, error) {
@@ -97,7 +97,7 @@ func RequireClean(ctx context.Context, dir string) (GitState, error) {
 		if n > 5 {
 			sample = sample[:5]
 		}
-		return st, fault.New(fault.CodeWorkspaceDirty, "working tree in %s has %d uncommitted change(s), e.g. %s; commit (or stash/remove) them so the submission names an immutable revision", dir, n, strings.Join(sample, ", "))
+		return st, fault.New(fault.CodeNotReady, "working tree in %s has %d uncommitted change(s), e.g. %s; commit (or stash/remove) them so the submission names an immutable revision", dir, n, strings.Join(sample, ", "))
 	}
 	return st, nil
 }
@@ -153,11 +153,11 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 
 // Identity returns the "Name <email>" Git commits as in dir, from its
 // configuration or the GIT_COMMITTER_* environment. It fails with
-// WORKSPACE_UNAVAILABLE naming the fix when Git cannot determine one.
+// NOT_READY naming the fix when Git cannot determine one.
 func Identity(ctx context.Context, dir string) (string, error) {
 	out, err := git(ctx, dir, "var", "GIT_COMMITTER_IDENT")
 	if err != nil {
-		return "", fault.Wrap(err, fault.CodeWorkspaceUnavailable, "no Git identity in %s: at records integration merges as the identity Git uses there; set one with git -C %s config user.name <name> && git -C %s config user.email <email>", dir, dir, dir)
+		return "", fault.Wrap(err, fault.CodeNotReady, "no Git identity in %s: at records integration merges as the identity Git uses there; set one with git -C %s config user.name <name> && git -C %s config user.email <email>", dir, dir, dir)
 	}
 	// "Name <email> 1700000000 +0000": drop the timestamp.
 	ident := strings.TrimSpace(out)

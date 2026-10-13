@@ -117,7 +117,7 @@ func (ArchiveTask) change() {}
 type ChangeSet struct {
 	ProjectID project.ID
 	// ExpectedPlanRev, when non-zero, must equal the project's current plan
-	// revision or the set is rejected with PLAN_CONFLICT.
+	// revision or the set is rejected with CONFLICT.
 	ExpectedPlanRev uint64
 	// IdempotencyKey, when set, makes a replay return the stored result
 	// instead of applying again.
@@ -182,7 +182,7 @@ func (cs ChangeSet) Validate() error {
 			}
 			if c.Key != "" {
 				if keys[c.Key] {
-					return fault.New(fault.CodeDuplicateKey, "key %q appears twice in the change set", c.Key)
+					return fault.New(fault.CodeConflict, "key %q appears twice in the change set", c.Key)
 				}
 				keys[c.Key] = true
 			}
@@ -195,7 +195,7 @@ func (cs ChangeSet) Validate() error {
 			}
 			if c.Key != "" {
 				if keys[c.Key] {
-					return fault.New(fault.CodeDuplicateKey, "key %q appears twice in the change set", c.Key)
+					return fault.New(fault.CodeConflict, "key %q appears twice in the change set", c.Key)
 				}
 				keys[c.Key] = true
 			}

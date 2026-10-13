@@ -47,7 +47,7 @@ type planFlags struct {
 }
 
 func (c *ctxt) bindPlanFlags(pf *planFlags) {
-	c.fs.Uint64Var(&pf.expectRev, "expect-rev", 0, "fail with PLAN_CONFLICT unless the plan revision equals this")
+	c.fs.Uint64Var(&pf.expectRev, "expect-rev", 0, "fail with CONFLICT unless the plan revision equals this")
 	c.fs.StringVar(&pf.idempotencyKey, "idempotency-key", "", "stable operation id; a replay returns the stored result")
 	c.fs.StringVar(&pf.session, "session", "", "session token authorizing a discovered blocker (default: ATASK_SESSION, or the task worktree's own token)")
 }

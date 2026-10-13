@@ -33,9 +33,9 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	s := f.claim(string(a))
 	f.commit(s.Workspace, "a.txt", "a")
 	_, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	_, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if failures(a) != 1 {
 		t.Fatalf("failures after two failed proofs in one attempt: %d", failures(a))
 	}
@@ -48,7 +48,7 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	f.c.Advance(11 * time.Minute)
 	s2 := f.claim(string(a))
 	_, err = f.e.Verify(f.ctx, s2.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationFailed)
+	wantCode(t, err, fault.CodeCheckFailed)
 	if failures(a) != 2 {
 		t.Fatalf("second attempt's failure not counted: %d", failures(a))
 	}
@@ -62,7 +62,7 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	scratch := filepath.Join(f.repo, "b.txt")
 	os.WriteFile(scratch, []byte("local draft"), 0o644)
 	_, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeIntegrationFailed)
+	wantCode(t, err, fault.CodeBaseConflict)
 	v := f.show(string(b))
 	if v.Failures != 0 || v.LastError == "" || v.Status != task.StatusClaimed {
 		t.Fatalf("environment failure misclassified: failures=%d last_error=%q status=%s", v.Failures, v.LastError, v.Status)
@@ -83,7 +83,7 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	go func() { _, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete); done <- err }()
 	f.waitStatus(string(c), task.StatusVerifying)
 	_, err = f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeVerificationRunning)
+	wantCode(t, err, fault.CodeConflict)
 	os.WriteFile(flag, []byte("1"), 0o644)
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	f.c.Advance(execution.DefaultLease + time.Minute)
 	sd2 := f.claim(string(d))
 	_, err = f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sd.Token, Failed: true})
-	wantCode(t, err, fault.CodeSessionSuperseded)
+	wantCode(t, err, fault.CodeInvalidSession)
 	if failures(d) != 0 {
 		t.Fatalf("stale release counted: %d", failures(d))
 	}

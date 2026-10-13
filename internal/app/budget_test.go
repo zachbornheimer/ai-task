@@ -30,15 +30,15 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	f.commit(s.Workspace, "a.txt", "a")
 	// Diagnostic and final runs both report the timeout class.
 	r, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof)
-	if fault.CodeOf(err) != fault.CodeVerificationTimeout || len(r.Evidence) != 1 || r.Evidence[0].Outcome != verification.OutcomeTimeout || !strings.Contains(r.Evidence[0].Message, "small task-check budget") {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || len(r.Evidence) != 1 || r.Evidence[0].Outcome != verification.OutcomeTimeout || !strings.Contains(r.Evidence[0].Message, "small task-check budget") {
 		t.Fatalf("diagnostic: %v %+v", err, r)
 	}
 	r, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeVerificationTimeout || !strings.Contains(r.Message, "built too slow") || !strings.Contains(r.Message, "-run") || !strings.Contains(r.Message, "--size") || !strings.Contains(r.Summary, "timed out: unit-slow") {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "built too slow") || !strings.Contains(r.Message, "-run") || !strings.Contains(r.Message, "--size") || !strings.Contains(r.Summary, "timed out: unit-slow") {
 		t.Fatalf("complete: %v %+v", err, r)
 	}
 	v := f.show(string(a))
-	if v.Failures != 0 || !strings.Contains(v.LastError, "VERIFICATION_TIMEOUT") {
+	if v.Failures != 0 || !strings.Contains(v.LastError, "CHECK_FAILED") {
 		t.Fatalf("a timeout must not be a strike: failures=%d last_error=%q", v.Failures, v.LastError)
 	}
 	if !strings.Contains(v.LastError, "-run") || !strings.Contains(v.LastError, "--size") {
@@ -69,7 +69,7 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	sb := f.claim(string(b))
 	f.commit(sb.Workspace, "b.txt", "b")
 	r, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeVerificationTimeout || !strings.Contains(r.Message, "regression budget") || !strings.Contains(r.Message, "planner") {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "regression budget") || !strings.Contains(r.Message, "planner") {
 		t.Fatalf("regression timeout: %v %+v", err, r)
 	}
 	if f.show(string(b)).Failures != 0 {
