@@ -61,6 +61,11 @@ func (r *Runner) Run(ctx context.Context, ct CheckType, spec ProofSpec, workdir 
 	if res.Options == nil {
 		res.Options = map[string]string{}
 	}
+	if p, ok := r.registry.Lookup(spec.Preset); ok {
+		if ev, isEval := p.(Evaluator); isEval {
+			return r.evaluate(ev, spec, workdir, res)
+		}
+	}
 	argv, err := r.argv(spec, workdir)
 	if err != nil {
 		res.Output = err.Error()
@@ -127,4 +132,31 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
+}
+
+// evaluate runs an in-process Evaluator, failing the run when it outlasts the budget.
+func (r *Runner) evaluate(ev Evaluator, spec ProofSpec, workdir string, res RunResult) RunResult {
+	type verdict struct {
+		passed bool
+		reason string
+		err    error
+	}
+	done := make(chan verdict, 1)
+	go func() {
+		passed, reason, err := ev.Evaluate(spec, workdir)
+		done <- verdict{passed, reason, err}
+	}()
+	timer := time.NewTimer(time.Duration(res.BudgetMS) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case v := <-done:
+		res.Passed, res.Output = v.passed, v.reason
+		if v.err != nil {
+			res.Passed, res.Output = false, v.err.Error()
+		}
+	case <-timer.C:
+		res.TimedOut, res.Output = true, "evaluation exceeded the budget"
+	}
+	res.ElapsedMS = time.Since(res.StartedAt).Milliseconds()
+	return res
 }

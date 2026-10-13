@@ -20,6 +20,17 @@ type Preset interface {
 	Argv(spec ProofSpec, env Env) ([]string, error)
 }
 
+// Evaluator is an optional Preset capability: judge a spec in-process
+// instead of running an argv.
+type Evaluator interface {
+	Evaluate(spec ProofSpec, workdir string) (passed bool, reason string, err error)
+}
+
+// builtins are the presets DefaultRegistry registers; files add theirs in init.
+var builtins []func() Preset
+
+func registerBuiltin(f func() Preset) { builtins = append(builtins, f) }
+
 // Registry holds presets by name.
 type Registry struct {
 	presets map[string]Preset
@@ -31,6 +42,9 @@ func NewRegistry() *Registry { return &Registry{presets: map[string]Preset{}} }
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(runPreset{})
+	for _, f := range builtins {
+		r.Register(f())
+	}
 	return r
 }
 
