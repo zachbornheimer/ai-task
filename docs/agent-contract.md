@@ -58,11 +58,12 @@ stdout (an envelope in JSON mode) and exits `0`.
 atask add "title" [--key K] [--group] [--parent REF] [--requires REF]*[--blocks REF]* [--cohort C]
 [--outcome ..] [--constraint ..]*[--accept ..]* --proof "PRESET: SUBJECT" --regression "PRESET: SUBJECT"
 (groups: [--check "[id:] cmd"]*[--optional-check ..]*)
+[--on-complete "PRESET: SUBJECT"]*[--on-complete-detach "PRESET: SUBJECT"]*
 [--pin PATH]*[--claim]
 [--expect-rev N] [--idempotency-key K]
 atask update REF [--title ..] [--outcome ..] [--parent REF|""] [--cohort C|""]
 [--requires REF]* [--remove-requires REF]*[--set-requires REF]*
-[--accept ..]*[--constraint ..]* [--proof ..] [--regression ..] [--pin PATH|""]*
+[--accept ..]*[--constraint ..]* [--proof ..] [--regression ..] [--on-complete ..]*[--on-complete-detach ..]* [--pin PATH|""]*
 [--archive --reason ..] [--reset-attempts] [--expect-rev N]
 
 ```text
@@ -104,6 +105,24 @@ stale `--expect-rev`), a different request under the same key is
   `show --json` carries `proof` and `regression` objects
   (`preset`, `subject`, `options`, `size`). `run: COMMAND` is the raw-command
   preset. A trivial command (`run: true`) is the planner's own risk.
+- `--on-complete "PRESET: SUBJECT"` (waited on, 900 s budget) and
+  `--on-complete-detach "PRESET: SUBJECT"` (spawned, not waited on) name
+  actions that run after the task completes, in the order given, in the
+  task's worktree. They use the proof grammar; the vacuity rule does not
+  apply. `update` with either flag replaces the whole list. Completion is
+  atomic and happens first: the same transaction records each action as
+  `pending`, then atask runs them. A waited action records a RunResult
+  (`check_type: on_complete`) and ends `succeeded` or `failed`; a detached
+  one records its start time (no return code) and ends `detached`. A
+  failed action never undoes completion. `show --full` and `show --json`
+  list `actions` (`spec`, `status`, `attempts`, `run`); `verify complete`
+  returns them too.
+- `verify complete` on an already complete task runs only the actions that
+  are `pending`, `failed`, or left `running` by a crash; `succeeded` and
+  `detached` actions never run again. `verify complete --reverify` runs
+  the proof and regression again against the revision that completed the
+  task (in snapshots), appends the new RunResults, and leaves the task
+  complete; it does not run actions.
 - `--size small|medium|large` (default small) declares how long the
   task's checks may take; the project's budgets turn it into seconds
   (defaults 30s, 5m, 15m; the regression suite 2m; `atask project
@@ -173,7 +192,7 @@ atask claim [REF] [--wait] [--lease 30m] one atomic leased attempt; prints the t
 atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
 atask claim release [token|-] [--note ..] [--failed]
 atask log --done .. --next .. --learned .. --note .. (token: see Token transport)
-atask verify proof | regression | complete (same token sources)
+atask verify proof | regression | complete [--reverify] (same token sources)
 
 ```text
 `claim` with no REF takes the oldest claimable task (stable ID tie-break;

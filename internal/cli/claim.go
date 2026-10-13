@@ -268,6 +268,7 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 
 func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
+	reverify := c.fs.Bool("reverify", false, "complete only: run proof and regression again against the revision that completed the task; the task stays complete")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -289,7 +290,15 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := e.Verify(ctx, tok, mode)
+	var res app.VerifyResult
+	switch {
+	case *reverify && mode != verification.ModeComplete:
+		return usage("--reverify applies to `verify complete` only")
+	case *reverify:
+		res, err = e.Reverify(ctx, tok)
+	default:
+		res, err = e.Verify(ctx, tok, mode)
+	}
 	if err != nil {
 		return err
 	}

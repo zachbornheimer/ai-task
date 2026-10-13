@@ -548,7 +548,10 @@ func (t *Tx) TaskProject(id task.ID) (project.ID, task.Kind, bool, error) {
 // MarkComplete records the completion fact.
 func (t *Tx) MarkComplete(id task.ID, submissionID int64, now time.Time) error {
 	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET completed_at = ?, completed_submission_id = ?, last_error = '', updated_at = ? WHERE id = ?`, ms(now), submissionID, ms(now), id)
-	return wrapInternal(err, "mark complete")
+	if err != nil {
+		return wrapInternal(err, "mark complete")
+	}
+	return t.recordPendingActions(id)
 }
 
 // MarkGroupComplete records that a group's own checks passed.

@@ -50,6 +50,9 @@ func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verific
 	var err error
 	if mode == verification.ModeComplete {
 		res, err = e.verifyComplete(ctx, token)
+		if err == nil && res.Completed {
+			err = e.attachActions(ctx, token, &res)
+		}
 	} else {
 		res, err = e.verifyDiagnostic(ctx, token, mode)
 	}

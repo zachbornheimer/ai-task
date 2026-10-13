@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -18,5 +20,22 @@ func applyProofs(pol *verification.Policy, proofSpec, regression *proof.ProofSpe
 	if regression != nil {
 		pol.RegressionProof = regression
 	}
+	return nil
+}
+
+// applyActions replaces a task's on-complete actions. Every preset must be
+// registered; the vacuity rule for proofs does not apply, since an action
+// does something rather than prove something.
+func applyActions(pol *verification.Policy, actions plan.Patch[proof.ActionSpec]) error {
+	if !actions.Set {
+		return nil
+	}
+	reg := proof.DefaultRegistry()
+	for _, a := range actions.Value {
+		if _, ok := reg.Lookup(a.Preset); !ok {
+			return fault.New(fault.CodeInvalidInput, "on-complete %q: preset %q is not registered", a.Subject, a.Preset)
+		}
+	}
+	pol.OnComplete = actions.Value
 	return nil
 }

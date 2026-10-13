@@ -64,6 +64,8 @@ func (r *Runner) budgetFor(ct CheckType, spec ProofSpec) time.Duration {
 		return r.budget
 	case ct == CheckProof:
 		return ProofBudget
+	case ct == CheckOnComplete:
+		return OnCompleteBudget
 	default:
 		return spec.Size.Budget()
 	}

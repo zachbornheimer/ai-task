@@ -1,7 +1,7 @@
 -- Every check execution is recorded as a RunResult (docs/contract.md, "Run
 -- result"): which budget governed it, whether it was killed, and the tail of
 -- its output. One row per evidence row, keyed by task, attempt and run.
-CREATE TABLE run_results (
+CREATE TABLE IF NOT EXISTS run_results (
     id           INTEGER PRIMARY KEY,
     task_id      TEXT    NOT NULL,
     attempt_id   INTEGER, -- NULL for an epic's own run, which has no attempt
@@ -19,5 +19,5 @@ CREATE TABLE run_results (
     passed       INTEGER NOT NULL,
     output       TEXT    NOT NULL DEFAULT ''
 );
-CREATE INDEX run_results_task ON run_results(task_id, id);
-CREATE INDEX run_results_run ON run_results(run_id, id);
+CREATE INDEX IF NOT EXISTS run_results_task ON run_results(task_id, id);
+CREATE INDEX IF NOT EXISTS run_results_run ON run_results(run_id, id);

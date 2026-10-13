@@ -412,6 +412,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			renderEvidence(w, r.Evidence, true)
 		}
 		renderRunResults(w, v.RunResults)
+		renderActions(w, v.Actions)
 		for _, i := range v.History.Integrations {
 			fmt.Fprintf(w, "  %s — Promoted %s to %s as %s.\n", i.CreatedAt.Format("15:04"), short(i.SourceRevision), i.TargetBranch, short(i.ResultRevision))
 		}
@@ -428,6 +429,22 @@ func renderRunResults(w io.Writer, results []proof.RunResult) {
 	for _, r := range results {
 		fmt.Fprintf(w, "    %s %s %s/%s %s\n", r.CheckType, r.Preset,
 			(time.Duration(r.ElapsedMS) * time.Millisecond).String(), (time.Duration(r.BudgetMS) * time.Millisecond).String(), runOutcome(r))
+	}
+}
+
+// renderActions prints one line per on-complete action: status, attempts,
+// and the command.
+func renderActions(w io.Writer, actions []proof.ActionResult) {
+	if len(actions) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  on-complete actions")
+	for _, a := range actions {
+		mode := "waited"
+		if a.Spec.Detach {
+			mode = "detached"
+		}
+		fmt.Fprintf(w, "    %s %s (%s, %d attempt(s)): %s\n", a.Status, a.Spec.Preset, mode, a.Attempts, a.Spec.Subject)
 	}
 }
 
@@ -627,6 +644,7 @@ func renderVerify(w io.Writer, res app.VerifyResult) {
 	for _, warn := range res.Warnings {
 		fmt.Fprintf(w, "Warning:   %s\n", warn)
 	}
+	renderActions(w, res.Actions)
 	renderEvidence(w, res.Evidence, false)
 	if res.LogDir != "" {
 		fmt.Fprintf(w, "Logs:      %s (result.json and one log per check)\n", res.LogDir)

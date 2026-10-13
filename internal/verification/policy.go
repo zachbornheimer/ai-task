@@ -109,10 +109,11 @@ func (c CheckSpec) EffectiveTimeout() time.Duration {
 // they can be shown back; when Proof is set, TaskChecks holds the gate derived
 // from it (see ProofGate) and is what verification currently executes.
 type Policy struct {
-	TaskChecks      []CheckSpec      `json:"task_checks,omitempty"`
-	Regression      []CheckSpec      `json:"regression,omitempty"`
-	Proof           *proof.ProofSpec `json:"proof,omitempty"`
-	RegressionProof *proof.ProofSpec `json:"regression_proof,omitempty"`
+	TaskChecks      []CheckSpec        `json:"task_checks,omitempty"`
+	Regression      []CheckSpec        `json:"regression,omitempty"`
+	Proof           *proof.ProofSpec   `json:"proof,omitempty"`
+	RegressionProof *proof.ProofSpec   `json:"regression_proof,omitempty"`
+	OnComplete      []proof.ActionSpec `json:"on_complete,omitempty"`
 }
 
 // Validate enforces structural rules. It does not judge whether the checks

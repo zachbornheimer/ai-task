@@ -243,6 +243,9 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err := applyProofs(&spec.Verification, c.Proof, c.Regression); err != nil {
 		return err
 	}
+	if err := applyActions(&spec.Verification, plan.Replace(c.OnComplete)); err != nil {
+		return err
+	}
 	for _, acc := range c.Acceptance {
 		spec.Acceptance = append(spec.Acceptance, task.AcceptanceCriterion{Description: acc})
 	}
@@ -514,7 +517,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Proof != nil || c.Regression != nil || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
+	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.Cohort != nil || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
 		return fault.New(fault.CodePlanConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
@@ -603,8 +606,15 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 				return fault.New(fault.CodeMissingVerification, "%s: %v; archive the task instead of removing its gate", t.ID, fault.MessageOf(err))
 			}
 		}
-		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value}
+		t.Verification = verification.Policy{TaskChecks: c.TaskChecks.Value, OnComplete: t.Verification.OnComplete}
 		changed = true
+	}
+	if c.OnComplete.Set {
+		pol := t.Verification
+		if err := applyActions(&pol, c.OnComplete); err != nil {
+			return err
+		}
+		t.Verification, changed = pol, true
 	}
 	if c.Proof != nil || c.Regression != nil {
 		pol := t.Verification

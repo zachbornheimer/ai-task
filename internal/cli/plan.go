@@ -392,6 +392,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 			if t.Proof, t.Regression, err = pfl.parse(*size); err != nil {
 				return err
 			}
+			if t.OnComplete, err = pfl.parseActions(); err != nil {
+				return err
+			}
 		}
 		op = t
 	}
@@ -607,6 +610,13 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 			if u.Proof, u.Regression, err = pfl.parse(*size); err != nil {
 				return err
 			}
+		}
+		if len(pfl.actions) > 0 {
+			acts, err := pfl.parseActions()
+			if err != nil {
+				return err
+			}
+			u.OnComplete = plan.Replace(acts)
 		}
 		if len(checks)+len(optionalChecks) > 0 {
 			var list []verification.CheckSpec

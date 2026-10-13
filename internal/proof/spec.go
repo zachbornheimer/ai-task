@@ -61,3 +61,56 @@ type RunResult struct {
 	Passed     bool              `json:"passed"`
 	Output     string            `json:"output"`
 }
+
+// OnCompleteBudget is the budget of a waited on-complete action.
+const OnCompleteBudget = 900 * time.Second
+
+// ActionSpec is an --on-complete (waited) or --on-complete-detach (spawned,
+// not waited on) command that runs after a task completes. It parses with
+// the proof grammar.
+type ActionSpec struct {
+	Preset  string            `json:"preset"`
+	Subject string            `json:"subject"`
+	Options map[string]string `json:"options"`
+	Detach  bool              `json:"detach"`
+}
+
+// Proof is the ProofSpec the action runs as.
+func (a ActionSpec) Proof() ProofSpec {
+	return ProofSpec{Preset: a.Preset, Subject: a.Subject, Options: a.Options}
+}
+
+// ParseAction reads "PRESET: SUBJECT [key=value ...]" as an action.
+// Unlike a proof, an action is not judged for vacuity: it does things.
+func ParseAction(s string, detach bool) (ActionSpec, error) {
+	p, err := Parse(s)
+	if err != nil {
+		return ActionSpec{}, err
+	}
+	return ActionSpec{Preset: p.Preset, Subject: p.Subject, Options: p.Options, Detach: detach}, nil
+}
+
+// ActionStatus is where an action stands.
+type ActionStatus string
+
+const (
+	ActionPending   ActionStatus = "pending"
+	ActionRunning   ActionStatus = "running"
+	ActionDetached  ActionStatus = "detached"
+	ActionSucceeded ActionStatus = "succeeded"
+	ActionFailed    ActionStatus = "failed"
+)
+
+// Retryable reports whether `verify complete` runs the action again: it
+// never ran, failed, or was interrupted mid-run.
+func (s ActionStatus) Retryable() bool {
+	return s == ActionPending || s == ActionFailed || s == ActionRunning
+}
+
+// ActionResult is an action and its latest run. Run is nil until it ran.
+type ActionResult struct {
+	Spec     ActionSpec   `json:"spec"`
+	Status   ActionStatus `json:"status"`
+	Attempts int          `json:"attempts"`
+	Run      *RunResult   `json:"run"`
+}

@@ -135,6 +135,9 @@ type TaskView struct {
 	// RunResults is every recorded check run of the task, oldest first
 	// (full depth only).
 	RunResults []proof.RunResult `json:"run_results,omitempty"`
+	// Actions are the task's on-complete actions and their latest runs
+	// (full depth only).
+	Actions []proof.ActionResult `json:"actions,omitempty"`
 	// LastError is the most recent environment or authority problem that
 	// stopped a verification without counting as a failure.
 	LastError string `json:"last_error,omitempty"`
@@ -261,6 +264,9 @@ type VerifyResult struct {
 	Conflicts []string `json:"conflicts,omitempty"`
 	// Warnings: checks that passed but used more than half their budget.
 	Warnings []string `json:"warnings,omitempty"`
+	// Actions are the task's on-complete actions after this call ran any
+	// that were pending or failed (complete only).
+	Actions []proof.ActionResult `json:"actions,omitempty"`
 	// LogDir is the run's directory: one <check>.log per executed check
 	// with its complete output, and result.json with this result.
 	LogDir string `json:"log_dir,omitempty"`
@@ -512,6 +518,9 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		}
 		v.History = hist
 		if v.RunResults, err = tx.RunResultsForTask(string(t.ID)); err != nil {
+			return v, err
+		}
+		if v.Actions, err = tx.Actions(t.ID); err != nil {
 			return v, err
 		}
 	}
