@@ -1,0 +1,97 @@
+# Shared dev-profile golangci config plus one repo-local exclusion (below).
+version: "2"
+run:
+  timeout: 5m
+  tests: true
+  concurrency: 0
+  allow-parallel-runners: true
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - errorlint
+    - gocritic
+    - unconvert
+    - unparam
+    - modernize
+    - exptostd
+    - usestdlibvars
+    - perfsprint
+    - misspell
+    - revive
+    - whitespace
+    - gosec
+    - bodyclose
+    - nilerr
+    - nolintlint
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      disable:
+        - fieldalignment
+        - shadow
+      enable-all: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam
+    gosec:
+      config:
+        global:
+          nosec: true
+    perfsprint:
+      errorf: true
+      sprintf1: true
+      strconcat: false
+      err-error: true
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: early-return
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    generated: lax
+    warn-unused: true
+    rules:
+      # G204 describes the product: running the user's declared proof command.
+      # The open design question of what limits a proof runs under (sandbox,
+      # env scrubbing, provenance) is deferred; see docs.
+      - linters: [gosec]
+        text: "^G204:"
+        path: '^(internal/checkexec/command\.go|internal/proof/detach\.go|internal/workspace/switcher\.go|test/e2e/at_test\.go)$'
+  default: none
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
