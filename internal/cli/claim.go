@@ -195,10 +195,10 @@ func renderSession(w io.Writer, s app.Session) {
 	if s.QuarantinedWorkspace != "" {
 		say(w, "Previous:  attempt did not end cleanly; its worktree was quarantined at %s\n", s.QuarantinedWorkspace)
 	}
-	say(w, "Token:     %s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
 	sayln(w)
 	renderShow(w, s.Task, false, painter{})
 	renderHandoff(w, s.Handoff)
+	say(w, "token=%s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
 }
 
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {

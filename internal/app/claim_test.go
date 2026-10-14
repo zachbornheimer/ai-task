@@ -387,3 +387,21 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	}
 	f.complete(sB)
 }
+
+// A caller who lost the token learns where the session lives and when the
+// lease ends, instead of waiting the lease out.
+func TestClaimConflictNamesWorktree(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	s := f.claim(string(a))
+	_, err := f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID, TaskID: &a})
+	if fault.CodeOf(err) != fault.CodeConflict {
+		t.Fatalf("code %q err %v", fault.CodeOf(err), err)
+	}
+	msg := fault.MessageOf(err)
+	for _, want := range []string{s.LeaseUntil.Format(time.RFC3339), s.Workspace, "atask log"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("message %q lacks %q", msg, want)
+		}
+	}
+}

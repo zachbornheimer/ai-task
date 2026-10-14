@@ -350,7 +350,7 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 	case task.StatusBlocked:
 		return fault.New(fault.CodeNotReady, "%s is blocked by %d incomplete prerequisite(s); see `atask show %s`", id, r.UnmetRequires, id)
 	case task.StatusClaimed:
-		return fault.New(fault.CodeConflict, "%s is claimed by attempt %d until %s", id, r.Attempt.Seq, r.Attempt.LeaseExpiresAt.Format(time.RFC3339))
+		return claimedConflict(id, r.Attempt)
 	case task.StatusVerifying, task.StatusAwaitingVerification:
 		return fault.New(fault.CodeNotReady, "%s has a submission being verified", id)
 	case task.StatusComplete:
@@ -601,4 +601,14 @@ func (e *Engine) renewalInterval(lease time.Duration) time.Duration {
 // terminalAuthority reports errors no retry can fix.
 func terminalAuthority(err error) bool {
 	return fault.CodeOf(err) == fault.CodeInvalidSession
+}
+
+// claimedConflict tells a caller who lost the token where the live session is
+// stored, so they resume there instead of waiting out the lease.
+func claimedConflict(id task.ID, a *execution.Attempt) error {
+	until := a.LeaseExpiresAt.Format(time.RFC3339)
+	if a.WorkspacePath == "" {
+		return fault.New(fault.CodeConflict, "%s is claimed by attempt %d until %s; the session token was printed only at claim time.", id, a.Seq, until)
+	}
+	return fault.New(fault.CodeConflict, "%s is claimed by attempt %d until %s in worktree %s; run atask log / atask verify from that worktree, where the session is stored.", id, a.Seq, until, a.WorkspacePath)
 }
