@@ -17,13 +17,20 @@ import (
 const staleHeartbeatSQL = `UPDATE verification_runs SET heartbeat_every_ms = 1000, heartbeat_at = ? WHERE status = 'running'`
 
 const (
+	// orphanTestLease outlasts any loaded-machine delay, so only the stale
+	// heartbeat the test injects can orphan the run, never the claim lease.
+	orphanTestLease     = time.Minute
+	orphanPulseInterval = 50 * time.Millisecond
+)
+
+const (
 	verifyingWait = 2 * time.Minute
 	verifyingPoll = 20 * time.Millisecond
 )
 
 func startSleepingVerify(t *testing.T, f *fixture) (*app.Engine, app.Session, task.ID, context.CancelFunc) {
 	t.Helper()
-	e := f.realClockEngine()
+	e := f.realClockEngineWithLease(orphanTestLease, orphanPulseInterval)
 	id := f.addWith("orphan", "sleep 30")
 	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id})
 	if err != nil {
