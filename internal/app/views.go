@@ -243,6 +243,9 @@ type VerifyResult struct {
 	Replayed     bool                    `json:"replayed,omitempty"`
 	// Warnings: checks that passed but used more than half their budget.
 	Warnings []string `json:"warnings,omitempty"`
+	// Base says how each required child entered the base the run judged
+	// (group verification): already in the target by which rule, or merged.
+	Base []string `json:"base,omitempty"`
 	// Actions are the task's on-complete actions after this call ran any
 	// that were pending or failed (complete only).
 	Actions []proof.ActionResult `json:"actions,omitempty"`

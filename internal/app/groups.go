@@ -456,7 +456,7 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("group %s: %s", job.rec.Task.ID, summary), Details: res}
 	}
 	mgr := e.manager(job.proj)
-	base, err := mgr.Base(ctx, job.proj.TargetBranch, job.requirements)
+	resolved, err := mgr.ResolveBase(ctx, job.proj.TargetBranch, job.requirements)
 	if err != nil {
 		summary := "cannot merge the children's completed revisions: " + fault.MessageOf(err)
 		status, jobStatus := sqlite.RunError, "error"
@@ -466,7 +466,8 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 		_ = finish(status, jobStatus, summary, false)
 		return fail(fault.CodeOf(err), summary)
 	}
-	res.Revision = base
+	base := resolved.Revision
+	res.Revision, res.Base = base, resolved.Explain()
 	size := job.rec.Task.Size
 	if size == "" {
 		size = task.SizeLarge
