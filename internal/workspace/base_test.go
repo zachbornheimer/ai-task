@@ -72,3 +72,21 @@ func TestBaseFirstRequirementConflictReturnsBaseConflict(t *testing.T) {
 		t.Fatalf("message lacks requirement/files: %v", err)
 	}
 }
+
+func TestBaseAlwaysStartsFromTargetTip(t *testing.T) {
+	r := newRepo(t)
+	branch := TaskBranch("at-eeeeee")
+	r.git(r.dir, "checkout", "-q", "-b", branch, "main")
+	aRev := strings.TrimSpace(r.commit(r.dir, "a.txt", "work of A"))
+	r.git(r.dir, "checkout", "-q", "main")
+	mainNew := strings.TrimSpace(r.commit(r.dir, "later.txt", "target moved after A"))
+	got, err := r.mgr.Base(r.ctx, "main", []Requirement{{Task: "at-eeeeee", Revision: aRev}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{mainNew, aRev} {
+		if _, err := git(r.ctx, r.dir, "merge-base", "--is-ancestor", want, got); err != nil {
+			t.Fatalf("base %s lacks %s: %v", got, want, err)
+		}
+	}
+}

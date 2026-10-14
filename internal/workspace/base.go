@@ -79,8 +79,8 @@ func (m Manager) Base(ctx context.Context, target string, reqs []Requirement) (s
 
 // ResolveBase computes the starting revision. A requirement the target
 // already holds (see Rule) adds nothing. With none left, the base is the
-// target tip; with one, that requirement's revision (a stacked branch);
-// with several, a merge commit of all of them onto the target tip, built
+// target tip; otherwise the target tip with every pending requirement
+// merged in (a plain fast-forward when the target has not moved), built
 // in a scratch worktree that is removed afterwards. Pending requirements
 // merge their task branch tip when the branch exists, else the recorded
 // revision. A merge that conflicts fails with *BaseConflict wrapped as
@@ -96,11 +96,7 @@ func (m Manager) ResolveBase(ctx context.Context, target string, reqs []Requirem
 		return BaseResult{}, err
 	}
 	res.Merged = pending
-	switch len(pending) {
-	case 0:
-		return res, nil
-	case 1:
-		res.Revision = pending[0].Revision
+	if len(pending) == 0 {
 		return res, nil
 	}
 	if _, err := Identity(ctx, m.Repo); err != nil {
@@ -113,7 +109,7 @@ func (m Manager) ResolveBase(ctx context.Context, target string, reqs []Requirem
 	defer cleanup()
 	for i, req := range pending {
 		message := fmt.Sprintf("chore: base of %s on %s", target, req.Task)
-		if _, err := git(ctx, path, "merge", "--no-ff", "--no-edit", "-m", message, req.Revision); err != nil {
+		if _, err := git(ctx, path, "merge", "--no-edit", "-m", message, req.Revision); err != nil {
 			conflicts, _ := git(ctx, path, "diff", "--name-only", "--diff-filter=U")
 			_, _ = git(ctx, path, "merge", "--abort")
 			bc := &BaseConflict{First: req, Files: lines(conflicts)}

@@ -328,10 +328,10 @@ const (
 - `Reverify: true`: fresh verification against the recorded revision; append
   evidence without undoing completion or re-running succeeded actions.
 - Dependencies: a task is ready when every required task is complete. At claim
-  its branch starts from the target branch plus a merge of every required
-  task's completed revision. One requirement yields a stacked branch; several
-  yield a merge base. A conflicting merge fails the claim with `BASE_CONFLICT`
-  and the task stays blocked with the conflict named.
+  its branch starts at the target tip with every required task's branch tip
+  merged in (a requirement already contained in the target adds nothing). A
+  conflicting merge fails the claim with `BASE_CONFLICT` and the task stays
+  blocked with the conflict named.
 - Groups: a group's proofs run on the merge of every child's completed
   revision, and the group completes only after every child is complete.
   Parents own no integration branch.
