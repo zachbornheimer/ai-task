@@ -405,3 +405,34 @@ func TestClaimConflictNamesWorktree(t *testing.T) {
 		}
 	}
 }
+
+// A superseded session's error names its quarantined worktree and says what
+// to do with commits made there after the takeover.
+func TestStaleTokenErrorNamesDetachedCommits(t *testing.T) {
+	f := newGitFixture(t)
+	a := f.add("a")
+	sA := f.claim(string(a))
+	f.c.Advance(execution.DefaultLease + time.Minute)
+	sB := f.claim(string(a))
+	stale := sA.Workspace + ".stale-1"
+
+	_, err := f.e.Log(f.ctx, sA.Token, execution.LogEntry{Note: "still here"})
+	wantCode(t, err, fault.CodeInvalidSession)
+	for _, want := range []string{stale, "no late commits"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("clean stale tree: %q missing from %v", want, err)
+		}
+	}
+
+	tip := strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "HEAD"))
+	f.commit(stale, "late.txt", "committed by A after takeover")
+	head := strings.TrimSpace(f.git(stale, "rev-parse", "HEAD"))
+	_, err = f.e.Log(f.ctx, sA.Token, execution.LogEntry{Note: "still here"})
+	wantCode(t, err, fault.CodeInvalidSession)
+	cherryPick := "git -C " + sB.Workspace + " cherry-pick " + tip + ".." + head
+	for _, want := range []string{stale, "detached HEAD", cherryPick} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("late commits: %q missing from %v", want, err)
+		}
+	}
+}

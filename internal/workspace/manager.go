@@ -114,7 +114,7 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 		if quarantineSeq == 0 {
 			return info, nil
 		}
-		stale := fmt.Sprintf("%s.stale-%d", info.Path, quarantineSeq)
+		stale := QuarantinedPath(info.Path, quarantineSeq)
 		if err := gitRetry(ctx, m.Repo, "worktree", "move", info.Path, stale); err != nil {
 			return info, fault.Wrap(err, fault.CodeNotReady, "quarantine worktree of attempt %d", quarantineSeq)
 		}
@@ -528,4 +528,27 @@ func short(rev string) string {
 		return rev[:12]
 	}
 	return rev
+}
+
+// QuarantineSuffix is appended, with the attempt number, to the path of a
+// worktree moved aside by a takeover.
+const QuarantineSuffix = ".stale-"
+
+// QuarantinedPath is where a takeover moves the worktree of attempt seq.
+func QuarantinedPath(worktree string, seq int) string {
+	return fmt.Sprintf("%s%s%d", worktree, QuarantineSuffix, seq)
+}
+
+// StaleDivergence returns the task branch tip and the HEAD of a quarantined
+// worktree. They differ exactly when the stale attempt committed after the
+// takeover.
+func (m Manager) StaleDivergence(ctx context.Context, taskID, stalePath string) (branchTip, staleHead string, err error) {
+	if branchTip, err = m.Revision(ctx, "refs/heads/"+TaskBranch(taskID)); err != nil {
+		return "", "", err
+	}
+	out, err := git(ctx, stalePath, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "", "", fault.Wrap(err, fault.CodeNotReady, "read HEAD of quarantined worktree %s", stalePath)
+	}
+	return branchTip, strings.TrimSpace(out), nil
 }

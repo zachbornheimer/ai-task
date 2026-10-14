@@ -374,9 +374,39 @@ func (e *Engine) authorize(tx *sqlite.Tx, token execution.Token, now time.Time) 
 		return execution.Attempt{}, err
 	}
 	if err := execution.Authorize(auth.Attempt, auth.CurrentSeq, now); err != nil {
+		if auth.Attempt.Seq != auth.CurrentSeq {
+			err = e.withStaleWorktreeHint(tx, auth.Attempt, err)
+		}
 		return execution.Attempt{}, err
 	}
 	return auth.Attempt, nil
+}
+
+// withStaleWorktreeHint extends the superseded-session refusal with where the
+// attempt's quarantined worktree is and how to carry its late commits over.
+// The hint is best effort: when git cannot be read the refusal stands as is.
+func (e *Engine) withStaleWorktreeHint(tx *sqlite.Tx, a execution.Attempt, refusal error) error {
+	var fe *fault.Error
+	if !errors.As(refusal, &fe) || a.WorkspacePath == "" {
+		return refusal
+	}
+	r, err := tx.GetRecord(a.TaskID)
+	if err != nil {
+		return refusal
+	}
+	proj, err := tx.GetProject(r.Task.ProjectID)
+	if err != nil {
+		return refusal
+	}
+	stale := workspace.QuarantinedPath(a.WorkspacePath, a.Seq)
+	tip, head, err := e.manager(proj).StaleDivergence(context.Background(), string(a.TaskID), stale)
+	if err != nil {
+		return refusal
+	}
+	if tip == head {
+		return fault.New(fe.Code, "%s; %s has no late commits and can be pruned", fe.Message, stale)
+	}
+	return fault.New(fe.Code, "%s; commits made in %s after takeover sit on a detached HEAD; carry them over with: git -C %s cherry-pick %s..%s", fe.Message, stale, a.WorkspacePath, tip, head)
 }
 
 // touch authorizes and renews the lease: every session-authenticated write
