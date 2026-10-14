@@ -36,7 +36,7 @@ merges it makes when building a task branch as the same identity, with an
 ```sh
 export ATASK_OUTPUT=json
 cd my-repo && atask init                                  # register the repo, install the AGENTS.md block and the CLAUDE.md import
-git add AGENTS.md CLAUDE.md && git commit -m "Install atask"   # worktrees and checks see only committed files
+git add AGENTS.md CLAUDE.md .claude/settings.json && git commit -m "Install atask"   # worktrees and checks see only committed files
 atask project --target-branch main --attempts 3           # a project holds a target branch and attempt budget, no checks
 atask doctor                                              # repository, target, identity, worktrees
 atask add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
@@ -93,7 +93,7 @@ workers.
 Codex, OpenCode and current Claude Code) and a CLAUDE.md that imports it,
 so every request an agent receives in that repository is routed through
 `at`: plan with proofs, claim, work in the task worktree, `atask verify
-complete`. It installs no hooks. `docs/integrations.md` has the recipe per
+complete`. It also installs one Claude Code `SessionStart` hook in the project's `.claude/settings.json` that runs `atask context`. `docs/integrations.md` has the recipe per
 harness, headless and interactive, and `examples/hosts/` the worker
 loops.
 

@@ -534,7 +534,7 @@ func TestInitInstallsInstructions(t *testing.T) {
 	e := gitEnv(t) // init ran once already
 	agents := filepath.Join(e.cwd, "AGENTS.md")
 	b, err := os.ReadFile(agents)
-	if err != nil || !strings.Contains(string(b), "<!-- atask:begin -->") || !strings.Contains(string(b), "Track verifiable objectives") || !strings.Contains(string(b), "# Engineering guidelines") {
+	if err != nil || !strings.Contains(string(b), "<!-- BEGIN atask v:1 hash:") || !strings.Contains(string(b), "Track verifiable objectives") || !strings.Contains(string(b), "# Engineering guidelines") {
 		t.Fatalf("AGENTS.md: %v\n%s", err, b)
 	}
 	if c, _ := os.ReadFile(filepath.Join(e.cwd, "CLAUDE.md")); strings.TrimSpace(string(c)) != "@AGENTS.md" {
@@ -547,11 +547,12 @@ func TestInitInstallsInstructions(t *testing.T) {
 		t.Fatalf("re-init: %v", again)
 	}
 	b2, _ := os.ReadFile(agents)
-	if !strings.Contains(string(b2), "keep me") || strings.Count(string(b2), "<!-- atask:begin -->") != 1 {
+	if !strings.Contains(string(b2), "keep me") || strings.Count(string(b2), "<!-- BEGIN atask") != 1 {
 		t.Fatalf("refresh damaged AGENTS.md:\n%s", b2)
 	}
-	if _, err := os.Stat(filepath.Join(e.cwd, ".claude", "settings.json")); err == nil {
-		t.Fatal("init wrote .claude/settings.json")
+	settings, err := os.ReadFile(filepath.Join(e.cwd, ".claude", "settings.json"))
+	if err != nil || strings.Count(string(settings), "atask context") != 1 || !strings.Contains(string(settings), "SessionStart") {
+		t.Fatalf(".claude/settings.json: %v\n%s", err, settings)
 	}
 }
 

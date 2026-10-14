@@ -17,7 +17,7 @@ func TestAgentsMDIsTheInstalledBlock(t *testing.T) {
 		t.Skip("AGENTS.md not available")
 	}
 	s := string(b)
-	block := app.InstructionsBegin + "\n" + app.Instructions() + app.InstructionsEnd
+	block := app.InstructionsBegin() + "\n" + app.Instructions() + app.InstructionsEnd
 	if !strings.Contains(s, block) {
 		t.Fatalf("AGENTS.md does not hold the installed block verbatim; run `atask init --path .` to refresh it")
 	}

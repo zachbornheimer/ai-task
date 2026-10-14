@@ -236,16 +236,21 @@ task with `atask show` (no argument: the current claim).
 
 **Installing the instructions.** `atask init` registers the repository and
 installs the project instruction block (`app.Instructions`: one paragraph
-that points agents at `atask context`) into `AGENTS.md`
-between `<!-- atask:begin -->` and `<!-- atask:end -->`, creating the file with a
+that points agents at `atask context`, the eight verbs, and "Do not use
+markdown TODO lists for task tracking.") into `AGENTS.md` between
+`<!-- BEGIN atask v:1 hash:... -->` and `<!-- END atask -->` (the hash covers
+the block text, so a changed template rewrites it), creating the file with a
 default engineering-guidelines section when absent and refreshing only
 the block on re-runs; it also makes sure `CLAUDE.md` imports it
 (`@AGENTS.md`). When `init` creates the repository in a directory that
 already has files, they stay untracked (init never commits them); the
 result carries `untracked_files` and a `warning` that they must be
 committed before the baseline can pass. Init installs the `AGENTS.md`
-block and the `CLAUDE.md` import and nothing else; it never rewrites
-personal `AGENTS.md`/`CLAUDE.md` or global host settings, and it only
+block, the `CLAUDE.md` import, and one Claude Code `SessionStart` hook
+(`atask context`) in the project's `.claude/settings.json` and nothing else
+(SessionStart fires again after compaction, so there is no Stop or
+PreCompact hook); it never rewrites personal `AGENTS.md`/`CLAUDE.md` or
+global host settings, and it only
 writes under the registered repository root.
 
 **Prompt layers.** An agent runs under three layers and `atask` supplies

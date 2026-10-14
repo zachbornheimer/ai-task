@@ -71,7 +71,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	if rep["healthy"] != true {
 		t.Fatalf("a warning must not make the project unhealthy: %v", rep)
 	}
-	e.git(e.cwd, "add", "main.go", "AGENTS.md", "CLAUDE.md")
+	e.git(e.cwd, "add", "main.go", "AGENTS.md", "CLAUDE.md", ".claude/settings.json")
 	e.git(e.cwd, "commit", "-q", "-m", "code")
 	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != true {
 		t.Fatalf("doctor on a clean checkout: %v", ch)

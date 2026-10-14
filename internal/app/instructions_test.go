@@ -51,7 +51,7 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 
 	// An out-of-date block is replaced, the surrounding text kept, and the
 	// result is then stable.
-	stale := "intro\n\n" + app.InstructionsBegin + "\nold\n" + app.InstructionsEnd + "\n\n# Mine\n"
+	stale := "intro\n\n" + app.InstructionsBegin() + "\nold\n" + app.InstructionsEnd + "\n\n# Mine\n"
 	if err := os.WriteFile(first.AgentsMD, []byte(stale), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 		t.Fatalf("stale block: %+v %v", r, err)
 	}
 	updated := read(first.AgentsMD)
-	if !strings.HasPrefix(updated, "intro\n\n"+app.InstructionsBegin) || !strings.HasSuffix(updated, app.InstructionsEnd+"\n\n# Mine\n") {
+	if !strings.HasPrefix(updated, "intro\n\n"+app.InstructionsBegin()) || !strings.HasSuffix(updated, app.InstructionsEnd+"\n\n# Mine\n") {
 		t.Fatalf("replacement lost the surrounding text or blank line:\n%s", updated)
 	}
 	if r, err := app.InstallInstructions(root); err != nil || r.Updated || read(first.AgentsMD) != updated {
@@ -76,7 +76,7 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 		t.Fatalf("orphan end marker: %+v %v", r, err)
 	}
 	got := read(path)
-	if n := strings.Count(got, app.InstructionsBegin); n != 1 {
+	if n := strings.Count(got, app.InstructionsBegin()); n != 1 {
 		t.Fatalf("begin markers = %d, want 1:\n%s", n, got)
 	}
 	if n := strings.Count(got, app.InstructionsEnd); n != 1 {

@@ -22,10 +22,10 @@ edited directly.
 
 ```sh
 cd repo
-atask init                                           # AGENTS.md block + CLAUDE.md import
+atask init                                           # AGENTS.md block + CLAUDE.md import + SessionStart hook (.claude/settings.json)
 atask project --target-branch main
 atask doctor                                         # repository, target, identity, regression green on the target
-git add AGENTS.md CLAUDE.md && git commit -m "Route agent work through atask"
+git add AGENTS.md CLAUDE.md .claude/settings.json && git commit -m "Route agent work through atask"
 ```
 
 ## Claude Code

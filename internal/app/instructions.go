@@ -1,28 +1,49 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
-// Markers delimit the block `atask init` owns inside AGENTS.md. Text outside
-// the markers belongs to the repository and is never touched.
+// The block `atask init` owns inside AGENTS.md is wrapped in markers; the
+// opening marker carries a hash of the block text so a changed template is
+// visible and re-running init rewrites only the block. Text outside the
+// markers belongs to the repository and is never touched.
 const (
-	InstructionsBegin = "<!-- atask:begin -->"
-	InstructionsEnd   = "<!-- atask:end -->"
+	InstructionsEnd   = "<!-- END atask -->"
+	instructionsBegin = "<!-- BEGIN atask v:1 hash:"
+	hashLen           = 12
 )
 
-// Instructions is the project instruction block for coding agents: how
-// work gets done through `atask` (any request becomes tasks), the agent
-// verbs, and the execution contract. `atask init` installs it into
-// AGENTS.md between the markers and keeps it current on re-runs.
+var (
+	beginMarkerRE = regexp.MustCompile(`<!-- (?:BEGIN atask[^>]*|atask:begin) -->`)
+	endMarkerRE   = regexp.MustCompile(`<!-- (?:END atask|atask:end) -->`)
+)
+
+// InstructionsBegin is the opening marker for the current Instructions().
+func InstructionsBegin() string { return beginMarker(Instructions()) }
+
+func beginMarker(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return instructionsBegin + hex.EncodeToString(sum[:])[:hashLen] + " -->"
+}
+
+// Instructions is the project instruction block for coding agents: the
+// fixed verb list and how work gets done through `atask`.
 func Instructions() string {
 	return `
 **Track verifiable objectives with ` + "`atask`" + `.** An objective is work with a specific outcome and meaningful completion criteria. Run ` + "`atask context`" + ` to learn the workflow. Ensure an objective has a task before doing or delegating its work. The worker claims the task, follows its handoff (` + "`atask context ID`" + `), and requests verification with ` + "`atask verify complete`" + `. The engine determines whether completion requirements are satisfied.
+
+Do not use markdown TODO lists for task tracking.
+
+Verbs: ` + "`atask context`, `atask list`, `atask show`, `atask add`, `atask update`, `atask claim`, `atask log`, `atask verify`" + `.
 
 `
 }
@@ -61,8 +82,14 @@ type InstallResult struct {
 // replacing the block when it does) and makes sure CLAUDE.md imports
 // AGENTS.md for harnesses that read only CLAUDE.md. Idempotent.
 func InstallInstructions(root string) (InstallResult, error) {
+	return InstallInstructionsText(root, Instructions())
+}
+
+// InstallInstructionsText installs text as the managed block; a changed
+// text changes the hash in the opening marker and rewrites the block.
+func InstallInstructionsText(root, text string) (InstallResult, error) {
 	res := InstallResult{AgentsMD: filepath.Join(root, "AGENTS.md")}
-	block := InstructionsBegin + "\n" + Instructions() + InstructionsEnd + "\n"
+	block := beginMarker(text) + "\n" + text + InstructionsEnd + "\n"
 	existing, err := os.ReadFile(res.AgentsMD)
 	var content string
 	switch {
@@ -73,9 +100,10 @@ func InstallInstructions(root string) (InstallResult, error) {
 		return res, fault.WrapInternal(err, "read AGENTS.md")
 	default:
 		s := string(existing)
-		b, e := strings.Index(s, InstructionsBegin), strings.Index(s, InstructionsEnd)
-		if b >= 0 && e > b {
-			rest := strings.TrimLeft(s[e+len(InstructionsEnd):], "\n")
+		bl, el := beginMarkerRE.FindStringIndex(s), endMarkerRE.FindStringIndex(s)
+		if bl != nil && el != nil && el[0] > bl[0] {
+			b, e := bl[0], el[1]
+			rest := strings.TrimLeft(s[e:], "\n")
 			if rest != "" {
 				rest = "\n" + rest // one blank line separates the block from the text after it
 			}
@@ -92,6 +120,9 @@ func InstallInstructions(root string) (InstallResult, error) {
 		if err := writeUnder(root, "AGENTS.md", []byte(content)); err != nil {
 			return res, fault.WrapInternal(err, "write AGENTS.md")
 		}
+	}
+	if err := installClaudeHook(root); err != nil {
+		return res, err
 	}
 	claude := filepath.Join(root, "CLAUDE.md")
 	cb, err := readUnder(root, "CLAUDE.md")
@@ -148,7 +179,7 @@ func readUnder(root, name string) ([]byte, error) {
 func dropMarkerLines(s string) string {
 	var kept []string
 	for _, line := range strings.Split(s, "\n") {
-		if t := strings.TrimSpace(line); t != InstructionsBegin && t != InstructionsEnd {
+		if t := strings.TrimSpace(line); !beginMarkerRE.MatchString(t) && !endMarkerRE.MatchString(t) {
 			kept = append(kept, line)
 		}
 	}
