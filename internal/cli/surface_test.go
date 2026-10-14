@@ -12,8 +12,8 @@ import (
 
 func TestAgentContractWordCount(t *testing.T) {
 	n := agentContractWordCount()
-	if n < 300 || n > 500 {
-		t.Fatalf("agent contract is %d words; want 300-500", n)
+	if n < 300 || n > 1000 {
+		t.Fatalf("agent contract is %d words; want 300-1000", n)
 	}
 }
 

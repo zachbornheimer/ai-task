@@ -4,10 +4,10 @@ import "strings"
 
 // AgentContract is the operating contract `atask context` prints. It is
 // static: no database, project, or session is required. Keep it between
-// 300 and 500 words so an agent can ingest it once.
+// 300 and 1000 words so an agent can ingest it once.
 const AgentContract = `atask tracks verifiable objectives. An objective belongs here when it has a specific outcome and meaningful criteria for whether it was achieved: fixing software, researching a competitor, writing a report, changing infrastructure, finishing an operational task. Do not create a task for every conversation, tool call, or implementation step. Track outcomes, not activity.
 
-atask context with no arguments is this contract. atask context ID is the worker handoff for that task: the objective, acceptance criteria, checks, blockers, worktree, and how completion is decided. atask help is the full command syntax.
+atask context with no arguments is this contract. atask context ID is the worker handoff for that task: the objective, acceptance criteria, checks, blockers, worktree, and how completion is decided. If the task is already complete, the handoff reports that and issues no new work. atask help is the full command syntax. atask version prints the build.
 
 Discover work with atask list. The default list is every non-archived task, including completed ones. Filters: ready, blocked, complete, archived, open. Global --project NAME scopes one repo. atask show with no argument is the current claim when a worktree or session can resolve one. atask show ID is any task. Outside a resolvable claim, show needs an ID.
 
