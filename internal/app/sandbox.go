@@ -121,6 +121,9 @@ func loadSandboxConfig() (proof.SandboxConfig, error) {
 // ensureSandbox fails closed before any check starts when confinement is
 // required but unavailable.
 func (e *Engine) ensureSandbox() error {
+	if e.sandbox.Mode == process.SandboxStrict {
+		goCaches() // resolve once now, so it never spends a check's budget
+	}
 	if err := (&process.Sandbox{Mode: e.sandbox.Mode}).Check(); err != nil {
 		return fault.Wrap(err, fault.CodeInvalidInput, "run checks")
 	}
