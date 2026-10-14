@@ -1,7 +1,7 @@
-// Package checkexec runs external verification commands. It knows nothing
+// Package process runs external verification commands. It knows nothing
 // about tasks or policies: it takes an argv, a directory, and a timeout, and
 // returns what happened with bounded, separated output.
-package checkexec
+package process
 
 import (
 	"bytes"
@@ -64,8 +64,7 @@ func Run(ctx context.Context, spec Spec) Result {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cctx, spec.Argv[0], spec.Argv[1:]...)
-	cmd.Dir = spec.Dir
+	cmd := Command(cctx, spec.Dir, spec.Argv[0], spec.Argv[1:]...)
 	if spec.Env != nil {
 		cmd.Env = spec.Env
 	}

@@ -79,7 +79,7 @@ rationale for every deviation. It is kept current as milestones land.
 - No repository interfaces, no generic services. The store exposes typed
   queries on a transaction handle; the application calls them.
 - No `workspace` package yet: nothing consumes it.
-- No `checkexec` package yet: Milestone 2 introduces it with its caller.
+- No `process` package yet: Milestone 2 introduces it with its caller.
 - No `types.go` duplicating internal types: the root package aliases them.
 
 ### Where the spec was right and we kept the constraint even though it cost
@@ -110,7 +110,7 @@ test/e2e                 subprocess tests against the built binary
 Arrows are the only allowed import directions. Domain packages never import
 `sqlite`, `app`, or `cli`. `sqlite` returns facts; it decides nothing.
 
-`internal/checkexec` (argv execution, bounded output) and
+`internal/process` (argv execution, bounded output) and
 `internal/workspace` (Git revision inspection) arrived with Milestone 2,
 each with one real consumer. The worktree lifecycle was
 deferred to Milestone 3.
@@ -174,7 +174,7 @@ judge (tx). Each boundary leaves a recoverable state (see
   take, racing edge inserts, crash/resume across engines, durability after
   close), subprocess e2e (exit codes, env defaults, token transports, real
   lease expiry, 24 concurrent processes, linked Git worktree resolution).
-- **M2 (done):** `checkexec` (argv, cwd, timeout, bounded output),
+- **M2 (done):** `process` (argv, cwd, timeout, bounded output),
   verification runs executed outside transactions with per-check evidence
   commits, `tasks verify --retry/--again`, `tasks evidence`, `tasks policy`
   as a separate versioned operation, Git revision capture at `finish` with

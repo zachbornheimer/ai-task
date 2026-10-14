@@ -1,4 +1,4 @@
-package checkexec
+package process
 
 import (
 	"bytes"

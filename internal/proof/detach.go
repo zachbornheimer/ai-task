@@ -1,12 +1,13 @@
 package proof
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
+	"github.com/zachbornheimer/ai-task/internal/process"
 )
 
 // Start spawns spec in workdir and does not wait for it: the process gets
@@ -20,8 +21,7 @@ func (r *Runner) Start(ct CheckType, spec ProofSpec, workdir string) RunResult {
 		res.Output = err.Error()
 		return res
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = workdir
+	cmd := process.Command(context.Background(), workdir, argv[0], argv[1:]...)
 	cmd.SysProcAttr = detachedProcAttr()
 	if devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
 		defer discard.CloseReadOnly(devnull)

@@ -18,7 +18,7 @@ prompts, or run a worker pool; the host does (see
 | `execution`    | attempts, leases, fencing generation, tokens, log entries, handoff bounds                               | authority or handoff semantics change                              |
 | `verification` | proof specs, modes, order, verdict (`Judge`), evidence shape                                            | the verification contract changes                                  |
 | `project`      | project identity, trusted configuration, directory → project resolution                                 | project configuration changes                                      |
-| `checkexec`    | running one argv command: cwd, timeout, bounded streams                                                 | execution mechanics change                                         |
+| `process`      | running one argv command: cwd, timeout, bounded streams                                                 | execution mechanics change                                         |
 | `workspace`    | Git: per-task worktrees (`atask/<id>`), detached snapshots, stacked task branches                       | Git interaction changes                                            |
 | `app`          | use cases and transaction boundaries (`Apply`, `Claim`, `Verify`, `List`/`Show`/`Summary`)              | a use case coordinates domains differently                         |
 | `sqlite`       | schema, migrations, typed queries                                                                       | persistence changes                                                |

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/checkexec"
+	"github.com/zachbornheimer/ai-task/internal/process"
 )
 
 // OutputTail is how much combined output a RunResult keeps (its last bytes).
@@ -110,7 +110,7 @@ func newRunResult(ct CheckType, spec ProofSpec, budget time.Duration) RunResult 
 // RunCommand executes cmd as the proof of spec, with the same budget,
 // kill, and recording rules as Run. The raw process result comes back too,
 // for callers that keep stdout and stderr apart.
-func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, cmd Command) (RunResult, checkexec.Result) {
+func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, cmd Command) (RunResult, process.Result) {
 	budget := r.budgetFor(ct, spec)
 	if r.budget <= 0 && cmd.Cap > 0 && cmd.Cap < budget {
 		budget = cmd.Cap
@@ -125,11 +125,11 @@ func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, c
 	if r.hasMise(cmd.Dir) {
 		argv = wrapMise(argv)
 	}
-	out := checkexec.Run(ctx, checkexec.Spec{Argv: argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: budget, Log: log})
+	out := process.Run(ctx, process.Spec{Argv: argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: budget, Log: log})
 	return r.finishRun(res, spec, cmd.Dir, out, tail), out
 }
 
-func (r *Runner) finishRun(res RunResult, spec ProofSpec, workdir string, out checkexec.Result, tail *tailBuffer) RunResult {
+func (r *Runner) finishRun(res RunResult, spec ProofSpec, workdir string, out process.Result, tail *tailBuffer) RunResult {
 	res.StartedAt = out.StartedAt
 	res.ElapsedMS = out.FinishedAt.Sub(out.StartedAt).Milliseconds()
 	res.TimedOut = out.TimedOut

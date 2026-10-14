@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/process"
 )
 
 // Switcher creates or locates a task worktree. Production uses
@@ -22,7 +23,7 @@ type Switcher interface {
 }
 
 // WorktrunkSwitcher shells out to `wt switch`. LookPath and Run are
-// seams for tests; nil uses exec.LookPath and exec.CommandContext.
+// seams for tests; nil uses exec.LookPath and process.Command.
 type WorktrunkSwitcher struct {
 	LookPath func(string) (string, error)
 	Run      func(ctx context.Context, wt, dir string, args []string) ([]byte, error)
@@ -81,8 +82,7 @@ func (s WorktrunkSwitcher) Ensure(ctx context.Context, repo, branch, base string
 }
 
 func runWt(ctx context.Context, wt, dir string, args []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, wt, args...)
-	cmd.Dir = dir
+	cmd := process.Command(ctx, dir, wt, args...)
 	return cmd.CombinedOutput()
 }
 

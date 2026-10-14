@@ -86,7 +86,7 @@ linters:
       # env scrubbing, provenance) is deferred; see docs.
       - linters: [gosec]
         text: "^G204:"
-        path: '^(internal/checkexec/command\.go|internal/proof/detach\.go|internal/workspace/switcher\.go|test/e2e/at_test\.go)$'
+        path: "^(internal/process/|test/e2e/)"
   default: none
 formatters:
   enable:
