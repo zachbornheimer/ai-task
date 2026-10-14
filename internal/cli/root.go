@@ -204,7 +204,7 @@ func (c *ctxt) printCommandHelpWith(cmd command, presets []presetRow) error {
 		h.Flags = append(h.Flags, flagHelp{f.Name, f.Usage, f.DefValue})
 	})
 	return c.emit(h, func(w io.Writer) {
-		fmt.Fprintf(w, "Usage: atask %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
+		say(w, "Usage: atask %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
 		c.fs.SetOutput(w)
 		c.fs.PrintDefaults()
 		if presets != nil {
@@ -270,7 +270,11 @@ func (c *ctxt) emit(result any, human func(w io.Writer)) error {
 	if c.jsonOut() {
 		return c.encoder().Encode(envelope{OK: true, Result: result})
 	}
-	human(c.env.Stdout)
+	out := &errWriter{w: c.env.Stdout}
+	human(out)
+	if out.err != nil {
+		return fmt.Errorf("write output: %w", out.err)
+	}
 	return nil
 }
 
@@ -294,14 +298,14 @@ func (c *ctxt) fail(err error) int {
 	if c.jsonOut() {
 		_ = c.encoder().Encode(envelope{OK: false, Error: &errorOut{Code: code, Message: msg, Details: details}})
 	} else {
-		fmt.Fprintf(c.env.Stderr, "error [%s]: %s\n", code, msg)
+		say(c.env.Stderr, "error [%s]: %s\n", code, msg)
 		if vr, ok := details.(app.VerifyResult); ok {
 			renderEvidence(c.env.Stderr, vr.Evidence, false)
 			if vr.Message != "" {
-				fmt.Fprintf(c.env.Stderr, "  %s\n", vr.Message)
+				say(c.env.Stderr, "  %s\n", vr.Message)
 			}
 			if vr.LogDir != "" {
-				fmt.Fprintf(c.env.Stderr, "  logs: %s (result.json and one log per check)\n", vr.LogDir)
+				say(c.env.Stderr, "  logs: %s (result.json and one log per check)\n", vr.LogDir)
 			}
 		}
 		if rep, ok := details.(app.DoctorReport); ok {
@@ -309,7 +313,7 @@ func (c *ctxt) fail(err error) int {
 		}
 		if sum, ok := details.(app.Summary); ok {
 			for _, r := range sum.Reasons {
-				fmt.Fprintf(c.env.Stderr, "  %s\n", r)
+				say(c.env.Stderr, "  %s\n", r)
 			}
 		}
 	}
@@ -320,16 +324,16 @@ func (c *ctxt) usageError(err error) int {
 	if c.jsonOut() {
 		_ = c.encoder().Encode(envelope{OK: false, Error: &errorOut{Code: fault.CodeInvalidInput, Message: "usage: " + err.Error()}})
 	} else {
-		fmt.Fprintf(c.env.Stderr, "usage error: %s\nRun `atask help` for commands.\n", err)
+		say(c.env.Stderr, "usage error: %s\nRun `atask help` for commands.\n", err)
 	}
 	return ExitUsage
 }
 
 func (c *ctxt) printHelp(w io.Writer) {
-	fmt.Fprintln(w, "atask - agent task engine: atomic plans, leased claims, verified completion")
-	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [command [args]]")
-	fmt.Fprintln(w, "       no command lists every non-archived task (same as atask list)")
-	fmt.Fprintln(w, `
+	sayln(w, "atask - agent task engine: atomic plans, leased claims, verified completion")
+	sayln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [command [args]]")
+	sayln(w, "       no command lists every non-archived task (same as atask list)")
+	sayln(w, `
 atask context                         operating contract for agents (no project or database)
 atask context ID                      worker handoff for that task
 atask help [command]                  this reference, or one command's flags
@@ -352,9 +356,9 @@ Commands:`)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		fmt.Fprintf(w, "  %-18s %s\n", n, commands[n].summary)
+		say(w, "  %-18s %s\n", n, commands[n].summary)
 	}
-	fmt.Fprintln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
+	sayln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
 }
 
 var commands = map[string]command{}
@@ -398,7 +402,7 @@ func init() {
 			return err
 		}
 		v := buildVersion(Version, debug.ReadBuildInfo)
-		return c.emit(map[string]string{"version": v}, func(w io.Writer) { fmt.Fprintln(w, v) })
+		return c.emit(map[string]string{"version": v}, func(w io.Writer) { sayln(w, v) })
 	})
 }
 

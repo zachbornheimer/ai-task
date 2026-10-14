@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -167,36 +166,36 @@ func renderSession(w io.Writer, s app.Session) {
 	if s.Resumed {
 		verb = "Resumed"
 	}
-	fmt.Fprintf(w, "✓ %s %s · %s (attempt %d)\n", verb, s.Task.ID, s.Task.Title, s.AttemptSeq)
-	fmt.Fprintf(w, "Lease:     until %s (renew with `atask claim renew`)\n", s.LeaseUntil.Format(time.RFC3339))
+	say(w, "✓ %s %s · %s (attempt %d)\n", verb, s.Task.ID, s.Task.Title, s.AttemptSeq)
+	say(w, "Lease:     until %s (renew with `atask claim renew`)\n", s.LeaseUntil.Format(time.RFC3339))
 	if s.Workspace != "" {
-		fmt.Fprintf(w, "Workspace: %s", s.Workspace)
+		say(w, "Workspace: %s", s.Workspace)
 		if s.Branch != "" {
-			fmt.Fprintf(w, " (branch %s)", s.Branch)
+			say(w, " (branch %s)", s.Branch)
 		}
-		fmt.Fprintln(w)
+		sayln(w)
 	}
 	if s.TargetBranch != "" {
-		fmt.Fprintf(w, "Target:    %s", s.TargetBranch)
+		say(w, "Target:    %s", s.TargetBranch)
 		if s.TargetRevision != "" {
-			fmt.Fprintf(w, " at %s", s.TargetRevision[:min(12, len(s.TargetRevision))])
+			say(w, " at %s", s.TargetRevision[:min(12, len(s.TargetRevision))])
 		}
-		fmt.Fprintln(w, " (verified work is promoted there; on BASE_CONFLICT merge it into your branch)")
+		sayln(w, " (verified work is promoted there; on BASE_CONFLICT merge it into your branch)")
 	}
 	if len(s.Regression) > 0 {
-		fmt.Fprintf(w, "Regression: %d check(s) run by `verify complete` after the task checks:\n", len(s.Regression))
+		say(w, "Regression: %d check(s) run by `verify complete` after the task checks:\n", len(s.Regression))
 		for _, ch := range s.Regression {
-			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, app.CheckText(ch))
+			say(w, "  - %s: %s\n", ch.ID, app.CheckText(ch))
 		}
 	}
 	if s.WorkspaceDirty {
-		fmt.Fprintln(w, "Warning:   workspace has uncommitted changes from a previous attempt; review `git status` before editing")
+		sayln(w, "Warning:   workspace has uncommitted changes from a previous attempt; review `git status` before editing")
 	}
 	if s.QuarantinedWorkspace != "" {
-		fmt.Fprintf(w, "Previous:  attempt did not end cleanly; its worktree was quarantined at %s\n", s.QuarantinedWorkspace)
+		say(w, "Previous:  attempt did not end cleanly; its worktree was quarantined at %s\n", s.QuarantinedWorkspace)
 	}
-	fmt.Fprintf(w, "Token:     %s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
-	fmt.Fprintln(w)
+	say(w, "Token:     %s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
+	sayln(w)
 	renderShow(w, s.Task, false, painter{})
 	renderHandoff(w, s.Handoff)
 }
@@ -224,16 +223,16 @@ func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 		type out struct {
 			LeaseUntil time.Time `json:"lease_until"`
 		}
-		return c.emit(out{exp}, func(w io.Writer) { fmt.Fprintf(w, "✓ Renewed · lease until %s\n", exp.Format(time.RFC3339)) })
+		return c.emit(out{exp}, func(w io.Writer) { say(w, "✓ Renewed · lease until %s\n", exp.Format(time.RFC3339)) })
 	default:
 		v, err := e.ReleaseTask(ctx, app.ReleaseRequest{Token: tok, Note: *note, Failed: *failed})
 		if err != nil {
 			return err
 		}
 		return c.emit(v, func(w io.Writer) {
-			fmt.Fprintf(w, "✓ Released %s · %s\nState:    %s %s\n", v.ID, v.Title, v.Status.Glyph(), stateLabel(v.Status))
+			say(w, "✓ Released %s · %s\nState:    %s %s\n", v.ID, v.Title, v.Status.Glyph(), stateLabel(v.Status))
 			if v.Note != "" {
-				fmt.Fprintf(w, "Note:     %s\n", v.Note)
+				say(w, "Note:     %s\n", v.Note)
 			}
 		})
 	}
@@ -260,7 +259,7 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.emit(rec, func(w io.Writer) { fmt.Fprintf(w, "✓ Logged entry #%d\n", rec.Seq) })
+	return c.emit(rec, func(w io.Writer) { say(w, "✓ Logged entry #%d\n", rec.Seq) })
 }
 
 func runVerify(ctx context.Context, c *ctxt, args []string) error {

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -41,7 +40,7 @@ func runDoctor(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func renderDoctor(w io.Writer, rep app.DoctorReport) {
-	fmt.Fprintf(w, "Project %s · %s (target %s)\n", rep.Project, rep.Root, rep.Target)
+	say(w, "Project %s · %s (target %s)\n", rep.Project, rep.Root, rep.Target)
 	for _, ch := range rep.Checks {
 		mark := "✓"
 		switch {
@@ -50,21 +49,21 @@ func renderDoctor(w io.Writer, rep app.DoctorReport) {
 		case !ch.OK:
 			mark = "!"
 		}
-		fmt.Fprintf(w, "%s %-18s %s\n", mark, ch.ID, ch.Message)
+		say(w, "%s %-18s %s\n", mark, ch.ID, ch.Message)
 		if !ch.OK && ch.Remedy != "" {
-			fmt.Fprintf(w, "    fix: %s\n", ch.Remedy)
+			say(w, "    fix: %s\n", ch.Remedy)
 		}
 		for _, ev := range ch.Evidence {
-			fmt.Fprintf(w, "    %s %s exit=%d\n", ev.CheckID, ev.Outcome, ev.ExitCode)
+			say(w, "    %s %s exit=%d\n", ev.CheckID, ev.Outcome, ev.ExitCode)
 			if t := strings.TrimSpace(ev.Stderr); t != "" {
-				fmt.Fprintf(w, "      %s\n", strings.ReplaceAll(tail(t, 400), "\n", "\n      "))
+				say(w, "      %s\n", strings.ReplaceAll(tail(t, 400), "\n", "\n      "))
 			}
 		}
 	}
 	if rep.Healthy {
-		fmt.Fprintln(w, "● healthy")
+		sayln(w, "● healthy")
 	} else {
-		fmt.Fprintln(w, "○ not ready: fix the ✗ items")
+		sayln(w, "○ not ready: fix the ✗ items")
 	}
 }
 

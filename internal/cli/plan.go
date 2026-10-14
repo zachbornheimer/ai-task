@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -75,30 +76,30 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 	o.Instructions = &ir
 	return c.emit(o, func(w io.Writer) {
 		if res.Existing {
-			fmt.Fprintf(w, "✓ Project %s · %s (already registered)\n", p.ID, p.Name)
+			say(w, "✓ Project %s · %s (already registered)\n", p.ID, p.Name)
 		} else {
-			fmt.Fprintf(w, "✓ Registered project %s · %s\n", p.ID, p.Name)
+			say(w, "✓ Registered project %s · %s\n", p.ID, p.Name)
 		}
-		fmt.Fprintf(w, "Root:        %s\n", p.RootPath)
+		say(w, "Root:        %s\n", p.RootPath)
 		if res.CreatedRepo {
-			fmt.Fprintln(w, "Repository:  created (git init + initial commit)")
+			sayln(w, "Repository:  created (git init + initial commit)")
 		}
 		if res.Warning != "" {
-			fmt.Fprintf(w, "Warning:     %s\n", res.Warning)
+			say(w, "Warning:     %s\n", res.Warning)
 			for _, f := range res.UntrackedFiles {
-				fmt.Fprintf(w, "             untracked: %s\n", f)
+				say(w, "             untracked: %s\n", f)
 			}
 		}
-		fmt.Fprintf(w, "Target:      %s (task branches atask/<id>)\n", p.TargetBranch)
-		fmt.Fprintf(w, "State:       %s\n", e.Path())
+		say(w, "Target:      %s (task branches atask/<id>)\n", p.TargetBranch)
+		say(w, "State:       %s\n", e.Path())
 		if ir := o.Instructions; ir != nil {
 			switch {
 			case ir.Created:
-				fmt.Fprintf(w, "Agents:      wrote %s (edit the guidelines below the at block) and CLAUDE.md (@AGENTS.md)\n", ir.AgentsMD)
+				say(w, "Agents:      wrote %s (edit the guidelines below the at block) and CLAUDE.md (@AGENTS.md)\n", ir.AgentsMD)
 			case ir.Updated:
-				fmt.Fprintf(w, "Agents:      refreshed the at block in %s\n", ir.AgentsMD)
+				say(w, "Agents:      refreshed the at block in %s\n", ir.AgentsMD)
 			default:
-				fmt.Fprintf(w, "Agents:      %s is current\n", ir.AgentsMD)
+				say(w, "Agents:      %s is current\n", ir.AgentsMD)
 			}
 		}
 	})
@@ -167,7 +168,7 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	}
 	v := ProjectView{ID: p.ID, Name: p.Name, Path: p.RootPath, TargetBranch: p.TargetBranch, Attempts: p.MaxAttempts}
 	return c.emit(v, func(w io.Writer) {
-		fmt.Fprintf(w, "Project:  %s · %s\nPath:     %s\nTarget:   %s\nAttempts: %d\n", v.ID, v.Name, v.Path, v.TargetBranch, v.Attempts)
+		say(w, "Project:  %s · %s\nPath:     %s\nTarget:   %s\nAttempts: %d\n", v.ID, v.Name, v.Path, v.TargetBranch, v.Attempts)
 	})
 }
 
@@ -280,18 +281,18 @@ func (c *ctxt) emitAdd(ctx context.Context, pid project.ID, res plan.Result, id 
 			verb = "Unchanged"
 		}
 		if id != "" {
-			fmt.Fprintf(w, "✓ %s %s · %s\n", verb, id, title)
+			say(w, "✓ %s %s · %s\n", verb, id, title)
 		} else {
-			fmt.Fprintf(w, "✓ %s %d item(s)\n", verb, len(res.Created))
+			say(w, "✓ %s %d item(s)\n", verb, len(res.Created))
 			for name, cid := range res.Created {
-				fmt.Fprintf(w, "  %s  %s\n", cid, name)
+				say(w, "  %s  %s\n", cid, name)
 			}
 		}
 		if o.Task != nil {
 			renderAck(w, *o.Task)
 		}
 		renderWarnings(w, res.Warnings)
-		fmt.Fprintf(w, "Plan rev: %d\n", res.PlanRev)
+		say(w, "Plan rev: %d\n", res.PlanRev)
 	})
 }
 
@@ -301,7 +302,7 @@ func (c *ctxt) addFromPlan(ctx context.Context, file string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer discard.CloseReadOnly(r)
 	items, err := readPlanItems(name, r)
 	if err != nil {
 		return err
@@ -435,13 +436,13 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 			verb = "Unchanged"
 		}
 		if verr == nil {
-			fmt.Fprintf(w, "✓ %s %s · %s\n", verb, view.ID, view.Title)
+			say(w, "✓ %s %s · %s\n", verb, view.ID, view.Title)
 			renderAck(w, view)
 		} else {
-			fmt.Fprintf(w, "✓ %s %s\n", verb, target)
+			say(w, "✓ %s %s\n", verb, target)
 		}
 		renderWarnings(w, res.Warnings)
-		fmt.Fprintf(w, "Plan rev: %d\n", res.PlanRev)
+		say(w, "Plan rev: %d\n", res.PlanRev)
 	})
 }
 
@@ -611,9 +612,9 @@ func runPrune(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	return c.emit(res, func(w io.Writer) {
-		fmt.Fprintf(w, "✓ Pruned %d director%s\n", len(res.Removed), map[bool]string{true: "y", false: "ies"}[len(res.Removed) == 1])
+		say(w, "✓ Pruned %d director%s\n", len(res.Removed), map[bool]string{true: "y", false: "ies"}[len(res.Removed) == 1])
 		for _, p := range res.Removed {
-			fmt.Fprintf(w, "  - %s\n", p)
+			say(w, "  - %s\n", p)
 		}
 	})
 }

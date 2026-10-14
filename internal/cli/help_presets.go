@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"io"
 	"strings"
 	"text/tabwriter"
@@ -52,9 +51,9 @@ func presetRows(r *proof.Registry, custom bool) []presetRow {
 }
 
 func renderPresets(w io.Writer, rows []presetRow) {
-	fmt.Fprintln(w, "\nPresets (--proof / --regression \"PRESET: SUBJECT [k=v]\"):")
+	sayln(w, "\nPresets (--proof / --regression \"PRESET: SUBJECT [k=v]\"):")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tSUBJECT\tOPTIONS\tSIZE")
+	sayln(tw, "NAME\tSUBJECT\tOPTIONS\tSIZE")
 	for _, r := range rows {
 		opts := "-"
 		if len(r.Options) > 0 {
@@ -64,7 +63,8 @@ func renderPresets(w io.Writer, rows []presetRow) {
 		if r.Custom {
 			name += " (custom)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, r.Subject, opts, r.Size)
+		say(tw, "%s\t%s\t%s\t%s\n", name, r.Subject, opts, r.Size)
 	}
-	tw.Flush()
+	// tw wraps w, whose write errors are latched by emit's errWriter.
+	_ = tw.Flush()
 }
