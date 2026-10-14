@@ -3,7 +3,7 @@
 # empty plan. Uses a throwaway git repo + ATASK_DB so a live in-progress
 # task in another project cannot block claim --wait.
 set -eu
-root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)
 d=$(mktemp -d "${TMPDIR:-/tmp}/atask-empty-host.XXXXXX")
 cleanup() { rm -rf "$d"; }
 trap cleanup EXIT

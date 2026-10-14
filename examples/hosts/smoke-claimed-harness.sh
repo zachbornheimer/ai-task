@@ -3,7 +3,7 @@
 # (stubbed), not POSIX /usr/bin/at. Throwaway git repo + ATASK_DB so a
 # live in-progress task in another project cannot steal the claim.
 set -eu
-root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)
 d=$(mktemp -d "${TMPDIR:-/tmp}/atask-claimed-host.XXXXXX")
 cleanup() {
 	git -C "$d" worktree prune -q 2>/dev/null || true
