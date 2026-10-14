@@ -312,7 +312,7 @@ const (
   proofs, and `on_complete` configuration. A task filed without both proofs is a draft: listed under its own glyph, never claimable, no attempt budget. Giving it both proofs makes it ready. Vacuity rules apply once proofs are supplied. A task missing any required field is a draft; the required fields are proof and regression (the title is required at add). Adding an open title that already exists
   returns the existing task.
 - `List` / `Show`: task state, hierarchy, history, every `RunResult`, and
-  action results. `List` is scoped to one project; `general` when none is given.
+  action results. `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed outside a registered repo. The list is board-wide by default.
 - `Claim`: atomic eligibility and exclusive leased assignment; isolated
   worktree for Git tasks. The token is discoverable from the task worktree;
   elsewhere it is passed explicitly or via `ATASK_SESSION`.
