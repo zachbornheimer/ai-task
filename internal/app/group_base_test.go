@@ -23,6 +23,9 @@ func TestGroupBaseSkipsChildrenAlreadyInTarget(t *testing.T) {
 	f.completeWith(b, "b.txt", "from b")
 
 	// a lands by rebase: a new commit on main, the branch moved onto it.
+	// A later committer date keeps the cherry-pick from hashing to revA itself
+	// when both commits land within the same second.
+	t.Setenv("GIT_COMMITTER_DATE", "2030-01-01T00:00:00Z")
 	f.git(f.repo, "cherry-pick", revA)
 	f.git(f.repo, "update-ref", "refs/heads/atask/"+string(a), "refs/heads/main")
 	// b lands by plain merge.
