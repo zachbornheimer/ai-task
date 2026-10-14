@@ -16,6 +16,11 @@ import (
 
 const staleHeartbeatSQL = `UPDATE verification_runs SET heartbeat_every_ms = 1000, heartbeat_at = ? WHERE status = 'running'`
 
+const (
+	verifyingWait = 2 * time.Minute
+	verifyingPoll = 20 * time.Millisecond
+)
+
 func startSleepingVerify(t *testing.T, f *fixture) (*app.Engine, app.Session, task.ID, context.CancelFunc) {
 	t.Helper()
 	e := f.realClockEngine()
@@ -27,21 +32,29 @@ func startSleepingVerify(t *testing.T, f *fixture) (*app.Engine, app.Session, ta
 	f.commit(s.Workspace, "o.txt", "o")
 	vctx, cancel := context.WithCancel(f.ctx)
 	verifyDone := make(chan struct{})
+	var verifyErr error
 	go func() {
 		defer close(verifyDone)
-		_, _ = e.Verify(vctx, s.Token, verification.ModeComplete)
+		_, verifyErr = e.Verify(vctx, s.Token, verification.ModeComplete)
 	}()
 	// Registered after f's TempDir cleanup, so it runs before it: the run
 	// must be canceled and joined before its files are removed.
 	t.Cleanup(func() { cancel(); <-verifyDone })
-	deadline := time.Now().Add(10 * time.Second)
-	for e != nil && time.Now().Before(deadline) {
+	// Verify blocks for the whole run, so the only signal that the run has
+	// started is the task state. Poll it, but give a loaded machine ample
+	// time and fail with Verify's own error if it ended before starting.
+	deadline := time.Now().Add(verifyingWait)
+	for time.Now().Before(deadline) {
 		if v, err := e.Show(f.ctx, f.proj.ID, string(id), false); err == nil && v.Status == task.StatusVerifying {
 			return e, s, id, cancel
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-verifyDone:
+			t.Fatalf("verify ended before the task reached verifying: %v", verifyErr)
+		case <-time.After(verifyingPoll):
+		}
 	}
-	t.Fatal("task never reached verifying")
+	t.Fatalf("task never reached verifying within %s", verifyingWait)
 	return nil, s, id, cancel
 }
 
