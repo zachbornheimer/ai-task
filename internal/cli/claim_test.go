@@ -29,7 +29,7 @@ func TestJSONClaimRenewDispatch(t *testing.T) {
 	if code, _, errOut := run("--json", "add", "renew", "--proof", "run: go version", "--regression", "run: go version"); code != ExitOK {
 		t.Fatalf("add renew: %d %s", code, errOut)
 	}
-	code, out, errOut := run("--json", "add", "held-work", "--proof", "run: go version", "--regression", "run: go version", "--claim")
+	code, out, errOut := addClaimed(t, run, "held-work", "--proof", "run: go version", "--regression", "run: go version")
 	if code != ExitOK {
 		t.Fatalf("add --claim: %d %s", code, errOut)
 	}

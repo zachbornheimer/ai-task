@@ -46,8 +46,6 @@ type globals struct {
 	db      string
 	project string
 	json    bool
-	output  string
-	pretty  bool
 }
 
 type command struct {
@@ -76,7 +74,7 @@ func Main(env Env) int {
 	}
 	ctx := context.Background()
 	c := &ctxt{env: env}
-	c.g = globals{db: env.Getenv("ATASK_DB"), project: env.Getenv("ATASK_PROJECT"), output: env.Getenv("ATASK_OUTPUT")}
+	c.g = globals{db: env.Getenv("ATASK_DB"), project: env.Getenv("ATASK_PROJECT"), json: strings.EqualFold(env.Getenv("ATASK_OUTPUT"), "json")}
 
 	top := flag.NewFlagSet("atask", flag.ContinueOnError)
 	top.SetOutput(io.Discard)
@@ -89,7 +87,7 @@ func Main(env Env) int {
 			}
 			return ExitOK
 		}
-		return c.usageError(err)
+		return c.usageError(removedFlagError(anyCommand, err))
 	}
 	rest := top.Args()
 	if len(rest) == 0 {
@@ -99,7 +97,7 @@ func Main(env Env) int {
 	cmd, ok := commands[name]
 	if !ok {
 		takeJSONMode(&c.g, args)
-		return c.usageError(fmt.Errorf("unknown command %q", name))
+		return c.usageError(removedVerbError(name))
 	}
 	c.name = name
 	c.fs = flag.NewFlagSet(name, flag.ContinueOnError)
@@ -132,39 +130,20 @@ func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
 	fs.StringVar(&c.g.db, "db", c.g.db, dbHelp)
 	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env ATASK_PROJECT)")
 	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env ATASK_OUTPUT=json)")
-	fs.StringVar(&c.g.output, "output", c.g.output, "output format: text|json")
-	fs.BoolVar(&c.g.pretty, "pretty", c.g.pretty, "indent JSON output (default: compact, one line)")
 }
 
-// encoder writes JSON compactly unless --pretty is set: agents read it, and
-// a one-line envelope costs fewer tokens than an indented one.
-func (c *ctxt) encoder() *json.Encoder {
-	enc := json.NewEncoder(c.env.Stdout)
-	if c.g.pretty {
-		enc.SetIndent("", "  ")
-	}
-	return enc
-}
+// encoder writes JSON compactly: agents read it, and a one-line envelope
+// costs fewer tokens than an indented one.
+func (c *ctxt) encoder() *json.Encoder { return json.NewEncoder(c.env.Stdout) }
 
-func (c *ctxt) jsonOut() bool { return c.g.json || strings.EqualFold(c.g.output, "json") }
+func (c *ctxt) jsonOut() bool { return c.g.json }
 
-// takeJSONMode applies trailing --json/--output after an unknown command,
-// which top.Parse never reaches (it stops at the first non-flag).
+// takeJSONMode applies a trailing --json after an unknown command, which
+// top.Parse never reaches (it stops at the first non-flag).
 func takeJSONMode(g *globals, args []string) {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--json" || a == "-json":
+	for _, a := range args {
+		if a == "--json" || a == "-json" {
 			g.json = true
-		case a == "--output" || a == "-output":
-			if i+1 < len(args) {
-				i++
-				g.output = args[i]
-			}
-		case strings.HasPrefix(a, "--output="):
-			g.output = strings.TrimPrefix(a, "--output=")
-		case strings.HasPrefix(a, "-output="):
-			g.output = strings.TrimPrefix(a, "-output=")
 		}
 	}
 }
@@ -178,7 +157,7 @@ func (c *ctxt) parse(args []string) error {
 			if errors.Is(err, flag.ErrHelp) {
 				return &helpRequest{}
 			}
-			return &usageErr{err}
+			return removedFlagError(c.name, err)
 		}
 		rest := c.fs.Args()
 		// flag.Parse consumes a "--" terminator itself; if the last consumed
@@ -205,18 +184,22 @@ func (*helpRequest) Error() string { return "help requested" }
 
 // printCommandHelp prints the command's usage line and every flag with its
 // description: on stdout, or as a JSON envelope.
-func (c *ctxt) printCommandHelp(cmd command) error {
+func (c *ctxt) printCommandHelp(cmd command) error { return c.printCommandHelpWith(cmd, nil) }
+
+// printCommandHelpWith is printCommandHelp followed by a preset table.
+func (c *ctxt) printCommandHelpWith(cmd command, presets []presetRow) error {
 	type flagHelp struct {
 		Name    string `json:"name"`
 		Usage   string `json:"usage"`
 		Default string `json:"default,omitempty"`
 	}
 	type commandHelp struct {
-		Command string     `json:"command"`
-		Usage   string     `json:"usage"`
-		Flags   []flagHelp `json:"flags"`
+		Command string      `json:"command"`
+		Usage   string      `json:"usage"`
+		Flags   []flagHelp  `json:"flags"`
+		Presets []presetRow `json:"presets,omitempty"`
 	}
-	h := commandHelp{Command: cmd.name, Usage: cmd.summary}
+	h := commandHelp{Command: cmd.name, Usage: cmd.summary, Presets: presets}
 	c.fs.VisitAll(func(f *flag.Flag) {
 		h.Flags = append(h.Flags, flagHelp{f.Name, f.Usage, f.DefValue})
 	})
@@ -224,6 +207,9 @@ func (c *ctxt) printCommandHelp(cmd command) error {
 		fmt.Fprintf(w, "Usage: atask %s\n  %s\n\nFlags:\n", cmd.name, cmd.summary)
 		c.fs.SetOutput(w)
 		c.fs.PrintDefaults()
+		if presets != nil {
+			renderPresets(w, presets)
+		}
 	})
 }
 
@@ -341,7 +327,7 @@ func (c *ctxt) usageError(err error) int {
 
 func (c *ctxt) printHelp(w io.Writer) {
 	fmt.Fprintln(w, "atask - agent task engine: atomic plans, leased claims, verified completion")
-	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [--pretty] [command [args]]")
+	fmt.Fprintln(w, "\nUsage: atask [--db PATH] [--project ID|NAME] [--json] [command [args]]")
 	fmt.Fprintln(w, "       no command lists every non-archived task (same as atask list)")
 	fmt.Fprintln(w, `
 atask context                         operating contract for agents (no project or database)
@@ -349,8 +335,8 @@ atask context ID                      worker handoff for that task
 atask help [command]                  this reference, or one command's flags
 atask version                         build version
 
-atask add "title" --proof "run: cmd" --regression "run: cmd" [--claim] [--parent ID] [--requires ID] [--group]
-atask update ID [--title ...] [--proof ...] [--regression ...] [--archive --reason ...]
+atask add "title" --proof "run: cmd" --regression "run: cmd" [--parent ID] [--requires ID] [--group]
+atask update ID [--proof ...] [--regression ...] [--archive --reason ...]
 atask list [ready|blocked|complete|archived|open]
 atask show [ID] [--full]
 atask claim [ID] [--wait]
@@ -401,7 +387,7 @@ func init() {
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		h := help{Usage: "atask [--db PATH] [--project ID|NAME] [--json] [--pretty] [command [args]]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
+		h := help{Usage: "atask [--db PATH] [--project ID|NAME] [--json] [command [args]]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
 		for _, n := range names {
 			h.Commands = append(h.Commands, cmd{n, commands[n].summary})
 		}
@@ -452,26 +438,27 @@ func buildVersion(linked string, read func() (*debug.BuildInfo, bool)) string {
 	return "dev+" + rev
 }
 
-// runCommandHelp is `atask help NAME`: the command's summary, plus the
-// preset table for `add`.
+// runCommandHelp is `atask help NAME`: what `atask NAME --help` prints (the
+// command's own flags and the globals), plus the preset table for `add`.
 func runCommandHelp(c *ctxt, name string) error {
 	cmd, ok := commands[name]
 	if !ok {
 		return usage("unknown command %q", name)
 	}
-	out := map[string]any{"command": cmd.name, "usage": cmd.summary}
-	var rows []presetRow
-	if name == "add" {
-		var err error
-		if rows, err = addHelpPresets(); err != nil {
-			return err
-		}
-		out["presets"] = rows
+	sub := &ctxt{env: c.env, g: c.g, name: name}
+	sub.fs = flag.NewFlagSet(name, flag.ContinueOnError)
+	sub.fs.SetOutput(io.Discard)
+	sub.bindGlobals(sub.fs)
+	var h *helpRequest
+	if err := cmd.run(context.Background(), sub, []string{"--help"}); !errors.As(err, &h) {
+		return err
 	}
-	return c.emit(out, func(w io.Writer) {
-		fmt.Fprintf(w, "Usage: atask %s\n  %s\n", cmd.name, cmd.summary)
-		if rows != nil {
-			renderPresets(w, rows)
-		}
-	})
+	if name != "add" {
+		return sub.printCommandHelp(cmd)
+	}
+	rows, err := addHelpPresets()
+	if err != nil {
+		return err
+	}
+	return sub.printCommandHelpWith(cmd, rows)
 }

@@ -139,18 +139,16 @@ func TestContextCompletedTaskIssuesNoWork(t *testing.T) {
 		}
 		return ""
 	}
-	var out, errb bytes.Buffer
-	code := Main(Env{
-		Args:   []string{"--json", "add", "already-done", "--proof", "run: test -d .", "--regression", "run: test -d .", "--claim"},
-		Stdin:  strings.NewReader(""),
-		Stdout: &out,
-		Stderr: &errb,
-		Cwd:    cwd,
-		Getenv: getenv,
-	})
+	code, outStr, errOut := addClaimed(t, func(args ...string) (int, string, string) {
+		var o, e bytes.Buffer
+		c := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &o, Stderr: &e, Cwd: cwd, Getenv: getenv})
+		return c, o.String(), e.String()
+	}, "already-done", "--proof", "run: test -d .", "--regression", "run: test -d .")
 	if code != ExitOK {
-		t.Fatalf("add --claim: %d %s", code, errb.String())
+		t.Fatalf("add and claim: %d %s", code, errOut)
 	}
+	var out bytes.Buffer
+	out.WriteString(outStr)
 	var env struct {
 		Result struct {
 			Task struct {
@@ -203,94 +201,6 @@ func TestContextCompletedTaskIssuesNoWork(t *testing.T) {
 }
 
 var cliFlagLine = regexp.MustCompile(`(?m)^\s+-([A-Za-z0-9][A-Za-z0-9-]*)`)
-
-func TestCLITouchableSurface(t *testing.T) {
-	wantVerbs := []string{
-		"add", "claim", "context", "doctor", "help", "hook", "init", "list", "log",
-		"project", "projects", "prune", "show", "status", "update", "verify", "version",
-	}
-	gotVerbs := make([]string, 0, len(commands))
-	for n := range commands {
-		gotVerbs = append(gotVerbs, n)
-	}
-	assertExact(t, "CLI verbs", wantVerbs, gotVerbs)
-
-	globals := []string{"db", "json", "output", "pretty", "project"}
-	commandFlags := map[string][]string{
-		"add": {
-			"accept", "blocks", "check", "claim", "cohort", "constraint", "expect-rev", "f",
-			"group", "idempotency-key", "key", "on-complete", "on-complete-detach",
-			"optional-check", "outcome", "parent", "pin", "plan", "policy-json", "proof",
-			"regression", "requires", "session", "size",
-		},
-		"update": {
-			"accept", "archive", "check", "cohort", "constraint", "expect-rev",
-			"idempotency-key", "on-complete", "on-complete-detach", "optional-check",
-			"outcome", "parent", "pin", "proof", "reason", "regression", "remove-requires",
-			"requires", "reset-attempts", "session", "set-requires", "size", "title",
-		},
-		"show":     {"full"},
-		"claim":    {"lease", "wait"},
-		"log":      {"done", "learned", "next", "note", "session"},
-		"verify":   {"reverify", "session"},
-		"init":     {"claude", "name", "no-instructions", "path"},
-		"help":     nil,
-		"version":  nil,
-		"context":  nil,
-		"list":     nil,
-		"status":   nil,
-		"projects": nil,
-		"prune":    nil,
-		"doctor":   nil,
-		"hook":     nil,
-		"project":  nil, // trusted project flags are project configuration, not the agent verb set
-	}
-
-	for _, n := range wantVerbs {
-		if _, ok := commands[n]; !ok {
-			continue
-		}
-		code, out, errOut := runAt(t, n, "--help")
-		if code != ExitOK {
-			t.Errorf("atask %s --help: exit %d\n%s\n%s", n, code, out, errOut)
-			continue
-		}
-		got := flagsFromHelp(out)
-		specific, listed := commandFlags[n]
-		if !listed {
-			continue
-		}
-		want := append([]string{}, globals...)
-		want = append(want, specific...)
-		if n == "project" {
-			assertContains(t, "atask project globals", globals, got)
-			continue
-		}
-		assertExact(t, "atask "+n+" flags", want, got)
-	}
-
-	wantListFilters := []string{"all", "archived", "blocked", "complete", "draft", "open", "ready"}
-	var gotFilters []string
-	for _, f := range []string{"all", "archived", "blocked", "complete", "draft", "open", "ready", "whoami", "hook"} {
-		if _, ok := listFilter(f); ok {
-			gotFilters = append(gotFilters, f)
-		}
-	}
-	assertExact(t, "list filters", wantListFilters, gotFilters)
-
-	claimHelp := commands["claim"].summary
-	for _, sub := range []string{"renew", "release"} {
-		if !strings.Contains(claimHelp, "claim "+sub) {
-			t.Errorf("claim surface missing subcommand %s (summary %q)", sub, claimHelp)
-		}
-	}
-	verifyHelp := commands["verify"].summary
-	for _, mode := range []string{"task", "regression", "complete"} {
-		if !strings.Contains(verifyHelp, mode) {
-			t.Errorf("verify surface missing mode %s (summary %q)", mode, verifyHelp)
-		}
-	}
-}
 
 func flagsFromHelp(help string) []string {
 	var out []string
@@ -447,18 +357,16 @@ func TestShowNoArgsIsTheCurrentClaim(t *testing.T) {
 		}
 		return ""
 	}
-	var out, errb bytes.Buffer
-	code := Main(Env{
-		Args:   []string{"--json", "add", "held surface", "--proof", "run: test -d .", "--regression", "run: test -d .", "--claim"},
-		Stdin:  strings.NewReader(""),
-		Stdout: &out,
-		Stderr: &errb,
-		Cwd:    cwd,
-		Getenv: getenv,
-	})
+	code, outStr, errOut := addClaimed(t, func(args ...string) (int, string, string) {
+		var o, e bytes.Buffer
+		c := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &o, Stderr: &e, Cwd: cwd, Getenv: getenv})
+		return c, o.String(), e.String()
+	}, "held surface", "--proof", "run: test -d .", "--regression", "run: test -d .")
 	if code != ExitOK {
-		t.Fatalf("add --claim: %d %s", code, errb.String())
+		t.Fatalf("add and claim: %d %s", code, errOut)
 	}
+	var out bytes.Buffer
+	out.WriteString(outStr)
 	var env struct {
 		Result struct {
 			Task struct {
@@ -508,7 +416,7 @@ func TestListDefaultIncludesComplete(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	code, out, errOut := run("--json", "add", "finished-work", "--proof", "run: test -d .", "--regression", "run: test -d .", "--claim")
+	code, out, errOut := addClaimed(t, func(args ...string) (int, string, string) { return run(args...) }, "finished-work", "--proof", "run: test -d .", "--regression", "run: test -d .")
 	if code != ExitOK {
 		t.Fatalf("add --claim: %d %s", code, errOut)
 	}
@@ -558,14 +466,14 @@ func TestListColorsGlyphsAndDimsProject(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
+	if code, _, errOut := run(alpha, "init", "--name", "alpha"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
 	if code, _, errOut := run(alpha, "add", "colored-work", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	loose := t.TempDir()
-	if code, _, errOut := run(loose, "add", "claimed-work", "--proof", "run: test -d .", "--regression", "run: test -d .", "--claim"); code != ExitOK {
+	if code, _, errOut := addClaimed(t, func(args ...string) (int, string, string) { return run(loose, args...) }, "claimed-work", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
 		t.Fatalf("claim add: %d %s", code, errOut)
 	}
 	code, out, errOut := run(alpha, "list")

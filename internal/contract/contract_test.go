@@ -68,3 +68,31 @@ func TestParseTextRejectsMissingSections(t *testing.T) {
 		t.Fatal("expected error for document without a CLI block")
 	}
 }
+
+func TestContractVerbFlagsAndFilters(t *testing.T) {
+	s, err := Parse(filepath.Join(repoRoot(t), "docs", "contract.md"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for verb, want := range map[string][]string{
+		"claim":           {"--wait"},
+		"claim release":   {"--note", "--failed"},
+		"verify complete": {"--reverify"},
+		"add":             {"-f", "--proof", "--key"},
+		"update":          {"--archive", "--reason", "--reset-attempts", "--remove-requires", "--proof"},
+		"init":            {"--name", "--path"},
+		"project":         {"--target-branch", "--attempts"},
+	} {
+		for _, f := range want {
+			if !slices.Contains(s.VerbFlags[verb], f) {
+				t.Errorf("%s flags lack %q: %v", verb, f, s.VerbFlags[verb])
+			}
+		}
+	}
+	if slices.Contains(s.VerbFlags["add"], "--reason") {
+		t.Errorf("add must not take update-only flags: %v", s.VerbFlags["add"])
+	}
+	if !slices.Equal(s.ListFilters, []string{"all", "open", "ready", "blocked", "draft", "complete", "archived"}) {
+		t.Errorf("list filters = %v", s.ListFilters)
+	}
+}

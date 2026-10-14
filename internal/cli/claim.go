@@ -19,11 +19,11 @@ import (
 func init() {
 	register("claim", "claim work: atask claim [REF] [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
 	register("log", "record progress under the current session: atask log --done .. --next .. --learned .. --note ..", runLog)
-	register("verify", "run checks under the current session: atask verify proof|regression|complete | atask verify groups [REF]", runVerify)
+	register("verify", "run checks under the current session: atask verify proof|regression|complete", runVerify)
 }
 
 // token resolves a REQUIRED session token: a positional argument, "-" for
-// one line of stdin, --session, ATASK_SESSION, or the token the claim stored
+// one line of stdin, ATASK_SESSION, or the token the claim stored
 // in the task worktree the command runs in (so an agent started there
 // needs no token at all). A stale process sits in a quarantined worktree
 // whose stored token is its own, expired, one. Human read commands never
@@ -32,8 +32,8 @@ func init() {
 // When the working directory is a task worktree the token must belong to
 // that task: a token for another task is refused before any write, so a
 // mis-exported ATASK_SESSION cannot act on the wrong task.
-func (c *ctxt) token(ctx context.Context, positional []string, flag string) (execution.Token, error) {
-	raw := flag
+func (c *ctxt) token(ctx context.Context, positional []string) (execution.Token, error) {
+	raw := ""
 	switch {
 	case len(positional) > 1:
 		return "", usage("expected at most one token argument")
@@ -53,7 +53,7 @@ func (c *ctxt) token(ctx context.Context, positional []string, flag string) (exe
 		raw = workspace.LoadToken(ctx, c.env.Cwd)
 	}
 	if strings.TrimSpace(raw) == "" {
-		return "", usage("session token required: run inside the task worktree, pass it as an argument, '-' to read stdin, --session, or set ATASK_SESSION")
+		return "", usage("session token required: run inside the task worktree, pass it as an argument, '-' to read stdin, or set ATASK_SESSION")
 	}
 	tok, err := execution.ParseToken(raw)
 	if err != nil {
@@ -90,7 +90,7 @@ func (c *ctxt) guardWorkspace(ctx context.Context, tok execution.Token) error {
 // are interleaved (`atask claim --json renew` dispatches like `atask claim
 // renew --json`), and returns the remaining args.
 func claimSubcommand(args []string) (string, []string) {
-	valueFlags := map[string]bool{"--lease": true, "--session": true, "--note": true, "--db": true, "--project": true, "--output": true}
+	valueFlags := map[string]bool{"--note": true, "--db": true, "--project": true}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "renew" || a == "release" {
@@ -118,7 +118,6 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 		return c.claimSub(ctx, sub, rest)
 	}
 	wait := c.fs.Bool("wait", false, "block until work is claimable, the project is done, or it is stalled")
-	lease := c.fs.Duration("lease", 0, "lease duration (default 30m, min 5m, max 4h; every authenticated command renews it)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -129,7 +128,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	req := app.ClaimRequest{Lease: *lease, Wait: *wait}
+	req := app.ClaimRequest{Wait: *wait}
 	pid, perr := c.resolveProject(ctx)
 	if len(c.args) == 1 {
 		ref := c.args[0]
@@ -205,11 +204,10 @@ func renderSession(w io.Writer, s app.Session) {
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 	note := c.fs.String("note", "", "why the task is being released (logged)")
 	failed := c.fs.Bool("failed", false, "record a failed attempt (retry bookkeeping)")
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	tok, err := c.token(ctx, c.args, *session)
+	tok, err := c.token(ctx, c.args)
 	if err != nil {
 		return err
 	}
@@ -247,11 +245,10 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 	c.fs.StringVar(&entry.Next, "next", "", "remaining work / next action")
 	c.fs.StringVar(&entry.Learned, "learned", "", "reusable discovery")
 	c.fs.StringVar(&entry.Note, "note", "", "warning, question, or context")
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
-	tok, err := c.token(ctx, c.args, *session)
+	tok, err := c.token(ctx, c.args)
 	if err != nil {
 		return err
 	}
@@ -267,15 +264,19 @@ func runLog(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func runVerify(ctx context.Context, c *ctxt, args []string) error {
-	session := c.fs.String("session", "", "session token (default: ATASK_SESSION or the worktree's stored token)")
 	reverify := c.fs.Bool("reverify", false, "complete only: run proof and regression again against the revision that completed the task; the task stays complete")
 	if err := c.parse(args); err != nil {
 		return err
 	}
+	if len(c.args) > 0 {
+		if err := removedVerifyMode(c.args[0]); err != nil {
+			return err
+		}
+	}
 	if len(c.args) < 1 {
 		return usage("verify needs a mode: `atask verify proof`, `atask verify regression`, `atask verify complete`, or `atask verify complete GROUP`")
 	}
-	if c.args[0] == string(verification.ModeComplete) && len(c.args) == 2 && *session == "" {
+	if c.args[0] == string(verification.ModeComplete) && len(c.args) == 2 {
 		if handled, err := c.verifyGroup(ctx, c.args[1]); handled {
 			return err
 		}
@@ -284,7 +285,7 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return usage("%v", err)
 	}
-	tok, err := c.token(ctx, c.args[1:], *session)
+	tok, err := c.token(ctx, c.args[1:])
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,7 @@ func TestDraftWithoutProofs(t *testing.T) {
 		}})
 		return code, out.String(), errb.String()
 	}
-	if code, _, e := run("init", "--name", "drafts", "--no-instructions"); code != ExitOK {
+	if code, _, e := run("init", "--name", "drafts"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, e)
 	}
 	code, out, e := run("--json", "add", "idea")

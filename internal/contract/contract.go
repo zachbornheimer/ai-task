@@ -32,6 +32,14 @@ type Surface struct {
 	ProjectFlags  []string
 	GlobalFlags   []string
 	EngineMethods []string
+	// UpdateOnlyFlags are the task flags only `update` takes: the last
+	// blank-line-separated group of the task flag block.
+	UpdateOnlyFlags []string
+	// VerbFlags maps each CLI line's verb ("claim release") to the flags that
+	// line names; FLAGS expands to the task flags (project flags for project).
+	VerbFlags map[string][]string
+	// ListFilters are the names in the `atask list [a|b|...]` line.
+	ListFilters []string
 }
 
 // Parse reads the contract document at path into a Surface.
@@ -66,7 +74,100 @@ func ParseText(text string) (Surface, error) {
 		}
 		*sec.dst = sec.take(block)
 	}
+	cli, _ := fencedBlockAt(lines, cliHeading)
+	tasks, _ := fencedBlockAt(lines, taskFlagsMarker)
+	s.UpdateOnlyFlags = lastGroupFlags(tasks)
+	s.VerbFlags = verbFlags(cli, s)
+	s.ListFilters = listFilters(cli)
 	return s, nil
+}
+
+var (
+	flagToken  = regexp.MustCompile(`(?:^|[\s\[])(--?[a-z][a-z-]*)`)
+	filterList = regexp.MustCompile(`^atask list \[([a-z|]+)\]`)
+)
+
+func lastGroupFlags(block []string) []string {
+	var group []string
+	for _, line := range block {
+		if strings.TrimSpace(line) == "" {
+			group = nil
+			continue
+		}
+		group = append(group, line)
+	}
+	var out []string
+	for _, line := range group {
+		for _, m := range flagToken.FindAllStringSubmatch(line, -1) {
+			out = appendUnique(out, m[1])
+		}
+	}
+	return out
+}
+
+// verbFlags reads the flags each CLI line names. A trailing "# comment" is
+// not part of the line. FLAGS stands for the task flags, which `add` takes
+// without the update-only group and `update` takes whole.
+func verbFlags(block []string, s Surface) map[string][]string {
+	out := map[string][]string{}
+	for _, line := range block {
+		line, _, _ = strings.Cut(line, "#")
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != commandPrefix {
+			continue
+		}
+		var words []string
+		for _, w := range fields[1:] {
+			if !verbWord.MatchString(w) {
+				break
+			}
+			words = append(words, w)
+		}
+		if len(words) == 0 {
+			continue
+		}
+		verb := strings.Join(words, " ")
+		flags := out[verb]
+		for _, m := range flagToken.FindAllStringSubmatch(line, -1) {
+			flags = appendUnique(flags, m[1])
+		}
+		if strings.Contains(line, "FLAGS") {
+			flags = expandFlags(flags, verb, s)
+		}
+		out[verb] = flags
+	}
+	return out
+}
+
+func expandFlags(flags []string, verb string, s Surface) []string {
+	switch verb {
+	case "project":
+		return append(flags, s.ProjectFlags...)
+	case "add":
+		for _, f := range s.TaskFlags {
+			if !slices.Contains(s.UpdateOnlyFlags, f) {
+				flags = appendUnique(flags, f)
+			}
+		}
+	default:
+		for _, f := range s.TaskFlags {
+			flags = appendUnique(flags, f)
+		}
+		for _, f := range s.UpdateOnlyFlags {
+			flags = appendUnique(flags, f)
+		}
+	}
+	return flags
+}
+
+func listFilters(block []string) []string {
+	for _, line := range block {
+		line, _, _ = strings.Cut(line, "#")
+		if m := filterList.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			return strings.Split(m[1], "|")
+		}
+	}
+	return nil
 }
 
 // fencedBlockAt returns the fenced block that contains marker, or else the

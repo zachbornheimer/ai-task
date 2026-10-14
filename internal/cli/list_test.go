@@ -22,10 +22,10 @@ func TestListAllProjectsThenOne(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
+	if code, _, errOut := run(alpha, "init", "--name", "alpha"); code != ExitOK {
 		t.Fatalf("init alpha: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(beta, "init", "--name", "beta", "--no-instructions"); code != ExitOK {
+	if code, _, errOut := run(beta, "init", "--name", "beta"); code != ExitOK {
 		t.Fatalf("init beta: %d %s", code, errOut)
 	}
 	code, out, errOut := run(alpha, "projects")
@@ -165,7 +165,7 @@ func TestListHonorsProjectFlag(t *testing.T) {
 		return code, out.String(), errb.String()
 	}
 	for name, dir := range map[string]string{"alpha": alpha, "beta": beta} {
-		if code, _, e := run(dir, "init", "--name", name, "--no-instructions"); code != ExitOK {
+		if code, _, e := run(dir, "init", "--name", name); code != ExitOK {
 			t.Fatalf("init %s: %d %s", name, code, e)
 		}
 		if code, _, e := run(dir, "add", "task-in-"+name, "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {

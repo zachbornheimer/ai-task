@@ -51,7 +51,7 @@ func TestStatusWithoutProjectIsBoardWide(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
+	if code, _, errOut := run(alpha, "init", "--name", "alpha"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
 	if code, _, errOut := run(alpha, "add", "alpha-work", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
@@ -87,7 +87,7 @@ func TestListTagsProjectOnMixedBoard(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run(alpha, "init", "--name", "alpha", "--no-instructions"); code != ExitOK {
+	if code, _, errOut := run(alpha, "init", "--name", "alpha"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
 	if code, _, errOut := run(alpha, "add", "named-work", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {

@@ -1,8 +1,6 @@
 package app
 
 import (
-	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -146,61 +144,6 @@ func readUnder(root, name string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// ClaudeHooks are the optional Claude Code hooks `atask init --claude`
-// installs. Only SessionStart is installed: it injects the current claim
-// when one exists, never the full board. guard-edit and stop remain
-// callable as `atask hook` for a host that opts in, but they are not
-// default enforcement. guard-edit only sees Edit/Write tools; it does
-// not catch shell writes.
-var ClaudeHooks = map[string][]map[string]any{
-	"SessionStart": {{"hooks": []map[string]any{{"type": "command", "command": "atask hook session-start", "timeout": 30}}}},
-}
-
-// InstallClaudeHooks merges ClaudeHooks into <root>/.claude/settings.json,
-// keeping every other setting and any hook entries that are not ours.
-// Returns the settings path and whether it changed.
-func InstallClaudeHooks(root string) (string, bool, error) {
-	dir := filepath.Join(root, ".claude")
-	path := filepath.Join(dir, "settings.json")
-	settings := map[string]any{}
-	if b, err := readUnder(root, filepath.Join(".claude", "settings.json")); err == nil {
-		if err := json.Unmarshal(b, &settings); err != nil {
-			return path, false, fault.Wrap(err, fault.CodeInvalidInput, "%s is not valid JSON", path)
-		}
-	} else if !os.IsNotExist(err) {
-		return path, false, fault.WrapInternal(err, "read %s", path)
-	}
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-	changed := false
-	for event, ours := range ClaudeHooks {
-		list, _ := hooks[event].([]any)
-		for _, entry := range ours {
-			cmd := entry["hooks"].([]map[string]any)[0]["command"].(string)
-			if hasHookCommand(list, cmd) {
-				continue
-			}
-			list = append(list, toAny(entry))
-			changed = true
-		}
-		hooks[event] = list
-	}
-	settings["hooks"] = hooks
-	if !changed {
-		return path, false, nil
-	}
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return path, false, fault.WrapInternal(err, "create %s", dir)
-	}
-	b, _ := json.MarshalIndent(settings, "", "  ")
-	if err := writeUnder(root, filepath.Join(".claude", "settings.json"), append(b, '\n')); err != nil {
-		return path, false, fault.WrapInternal(err, "write %s", path)
-	}
-	return path, true, nil
-}
-
 // dropMarkerLines removes lines that are only a block marker.
 func dropMarkerLines(s string) string {
 	var kept []string
@@ -210,27 +153,4 @@ func dropMarkerLines(s string) string {
 		}
 	}
 	return strings.Join(kept, "\n")
-}
-
-func hasHookCommand(list []any, cmd string) bool {
-	for _, item := range list {
-		entry, _ := item.(map[string]any)
-		hs, _ := entry["hooks"].([]any)
-		for _, h := range hs {
-			hm, _ := h.(map[string]any)
-			if fmt.Sprint(hm["command"]) == cmd {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// toAny round-trips a typed map through JSON so it merges with values
-// decoded from the settings file.
-func toAny(v any) any {
-	b, _ := json.Marshal(v)
-	var out any
-	_ = json.Unmarshal(b, &out)
-	return out
 }

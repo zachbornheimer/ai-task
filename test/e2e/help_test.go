@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -9,18 +8,18 @@ import (
 // TestSubcommandHelpListsFlags: `atask <command> --help` (and -h) is a request
 // for help, not a usage error: it prints the command's usage line and every
 // flag with its description on stdout and exits 0; in JSON mode the same
-// content arrives in an envelope. `atask help` names `verify groups`.
+// content arrives in an envelope.
 func TestSubcommandHelpListsFlags(t *testing.T) {
 	e := newEnv(t)
 	for _, tc := range []struct {
 		args  []string
 		flags []string
 	}{
-		{[]string{"add", "--help"}, []string{"-key", "stable project-local key", "-group", "-check"}},
+		{[]string{"add", "--help"}, []string{"-key", "stable project-local key", "-group", "-proof"}},
 		{[]string{"log", "-h"}, []string{"-done", "progress made", "-next", "-learned"}},
-		{[]string{"claim", "--help"}, []string{"-wait", "block until work is claimable", "-lease"}},
+		{[]string{"claim", "--help"}, []string{"-wait", "block until work is claimable"}},
 		{[]string{"claim", "release", "--help"}, []string{"-note", "-failed"}},
-		{[]string{"verify", "--help"}, []string{"-session"}},
+		{[]string{"verify", "--help"}, []string{"-reverify"}},
 	} {
 		// Text mode (ATASK_OUTPUT unset): plain help on stdout, nothing on stderr.
 		r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, tc.args...)
@@ -52,11 +51,8 @@ func TestSubcommandHelpListsFlags(t *testing.T) {
 	}
 	// A real mistake is still a usage error.
 	e.fails("INVALID_INPUT", "add", "--no-such-flag")
-	// The top-level help points at the group verification verb.
-	if r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "help"); !strings.Contains(r.stdout+r.stderr, "verify groups") {
-		t.Fatalf("at help does not mention `verify groups`: %s%s", r.stdout, r.stderr)
-	}
-	if b, _ := json.Marshal(e.ok("help")); !strings.Contains(string(b), "verify groups") {
-		t.Fatalf("help envelope does not mention `verify groups`: %s", b)
+	// The top-level help names no removed verb.
+	if r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "help"); strings.Contains(r.stdout+r.stderr, "verify groups") || strings.Contains(r.stdout+r.stderr, "hook") {
+		t.Fatalf("at help names a removed verb: %s%s", r.stdout, r.stderr)
 	}
 }

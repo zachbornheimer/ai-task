@@ -17,7 +17,7 @@ type proofHarness struct {
 func newProofHarness(t *testing.T) *proofHarness {
 	t.Helper()
 	h := &proofHarness{t: t, db: filepath.Join(t.TempDir(), "at.db"), cwd: t.TempDir()}
-	if code, _, errOut := h.run("init", "--name", "proofs", "--no-instructions"); code != ExitOK {
+	if code, _, errOut := h.run("init", "--name", "proofs"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
 	return h

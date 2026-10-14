@@ -33,7 +33,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n"), 0o644)
 
-	res := e.ok("init", "--name", "u", "--no-instructions")
+	res := e.ok("init", "--name", "u")
 	if res["created_repo"] != true {
 		t.Fatalf("init did not create the repository: %v", res)
 	}
@@ -52,11 +52,11 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	// The human form says it too.
 	h := newEnv(t)
 	os.WriteFile(filepath.Join(h.cwd, "lib.go"), []byte("package lib\n"), 0o644)
-	if r := h.runIn(h.cwd, "", []string{"ATASK_OUTPUT=text"}, "init", "--no-instructions"); !strings.Contains(r.stdout, "untracked") || !strings.Contains(r.stdout, "lib.go") {
+	if r := h.runIn(h.cwd, "", []string{"ATASK_OUTPUT=text"}, "init"); !strings.Contains(r.stdout, "untracked") || !strings.Contains(r.stdout, "lib.go") {
 		t.Fatalf("human init output: %s", r.stdout)
 	}
 	// An empty directory has nothing to warn about.
-	if r := newEnv(t).run("init", "--no-instructions"); r.env["result"].(map[string]any)["warning"] != nil {
+	if r := newEnv(t).run("init"); r.env["result"].(map[string]any)["warning"] != nil {
 		t.Fatalf("init warned about nothing: %s", r.stdout)
 	}
 
@@ -71,7 +71,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	if rep["healthy"] != true {
 		t.Fatalf("a warning must not make the project unhealthy: %v", rep)
 	}
-	e.git(e.cwd, "add", "main.go")
+	e.git(e.cwd, "add", "main.go", "AGENTS.md", "CLAUDE.md")
 	e.git(e.cwd, "commit", "-q", "-m", "code")
 	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != true {
 		t.Fatalf("doctor on a clean checkout: %v", ch)

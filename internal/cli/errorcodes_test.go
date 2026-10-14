@@ -155,14 +155,23 @@ func TestErrorCodesMatchContract(t *testing.T) {
 
 	t.Run("failed verify is CHECK_FAILED", func(t *testing.T) {
 		db, cwd := filepath.Join(t.TempDir(), "at.db"), t.TempDir()
-		_, add := atask(t, db, cwd, "--json", "add", "doomed", "--proof", "run: false", "--regression", "run: true", "--claim")
+		_, add := atask(t, db, cwd, "--json", "add", "doomed", "--proof", "run: false", "--regression", "run: true")
+		var added struct {
+			Task struct {
+				ID string `json:"id"`
+			} `json:"task"`
+		}
+		if err := json.Unmarshal(add.Result, &added); err != nil || added.Task.ID == "" {
+			t.Fatalf("add: %v %+v", err, add)
+		}
+		_, claim := atask(t, db, cwd, "--json", "claim", added.Task.ID)
 		var res struct {
 			Session struct {
 				Token string `json:"token"`
-			} `json:"session"`
+			}
 		}
-		if err := json.Unmarshal(add.Result, &res); err != nil || res.Session.Token == "" {
-			t.Fatalf("add --claim: %v %+v", err, add)
+		if err := json.Unmarshal(claim.Result, &res.Session); err != nil || res.Session.Token == "" {
+			t.Fatalf("claim: %v %+v", err, claim)
 		}
 		args := []string{"--json", "verify", "complete", res.Session.Token}
 		_, env := atask(t, db, cwd, args...)

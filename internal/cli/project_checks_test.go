@@ -76,7 +76,7 @@ func assertVerifyRunsTaskRegression(t *testing.T) {
 	h := &proofHarness{t: t, db: filepath.Join(t.TempDir(), "at.db"), cwd: t.TempDir()}
 	claim := func(title, regression string) string {
 		t.Helper()
-		code, out, errOut := h.run("--json", "add", title, "--proof", "run: test -d .", "--regression", regression, "--claim")
+		code, out, errOut := addClaimed(t, h.run, title, "--proof", "run: test -d .", "--regression", regression)
 		if code != ExitOK {
 			t.Fatalf("add %s: %d %s %s", title, code, out, errOut)
 		}
