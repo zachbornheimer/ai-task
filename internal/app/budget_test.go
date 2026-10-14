@@ -31,15 +31,15 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 		t.Fatalf("diagnostic: %v %+v", err, r)
 	}
 	r, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "built too slow") || !strings.Contains(r.Message, "-run") || !strings.Contains(r.Message, "--size") || !strings.Contains(r.Summary, "timed out: unit-slow") {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "fixed 30s proof budget") || !strings.Contains(r.Message, "--size") || !strings.Contains(r.Summary, "timed out: unit-slow") {
 		t.Fatalf("complete: %v %+v", err, r)
 	}
 	v := f.show(string(a))
 	if v.Failures != 0 || !strings.Contains(v.LastError, "CHECK_FAILED") {
 		t.Fatalf("a timeout must not be a strike: failures=%d last_error=%q", v.Failures, v.LastError)
 	}
-	if !strings.Contains(v.LastError, "-run") || !strings.Contains(v.LastError, "--size") {
-		t.Fatalf("timeout last_error must name -run and --size: %q", v.LastError)
+	if !strings.Contains(v.LastError, "narrow the proof command") || !strings.Contains(v.LastError, "--size") {
+		t.Fatalf("timeout last_error must name the remedy and --size: %q", v.LastError)
 	}
 	// The planner declares a larger size: same check, now within budget,
 	// and the warning says it used more than half of a small budget only
