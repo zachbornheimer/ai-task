@@ -468,7 +468,7 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("group %s: %s", job.rec.Task.ID, summary), Details: res}
 	}
 	mgr := e.manager(job.proj)
-	resolved, err := mgr.ResolveBase(ctx, job.proj.TargetBranch, job.requirements)
+	resolved, err := mgr.ResolveGroupBase(ctx, job.proj.TargetBranch, job.requirements)
 	if err != nil {
 		summary := "cannot merge the children's completed revisions: " + fault.MessageOf(err)
 		status, jobStatus := sqlite.RunError, "error"
@@ -487,7 +487,17 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 	t := job.rec.Task
 	t.Size = size
 	policy := effectivePolicy(t, job.proj)
-	evidence, err := e.runSuites(checkCtx, mgr, base, policy, job.runID, fence, t, job.proj, "")
+	staleEvidence, staleFailure, err := e.proveStaleChildren(checkCtx, mgr, base, resolved.Stale, job, fence)
+	res.Evidence = staleEvidence
+	if err == nil && staleFailure != "" {
+		_ = finish(sqlite.RunFailed, "failed", staleFailure, false)
+		return fail(fault.CodeCheckFailed, staleFailure)
+	}
+	evidence, err2 := e.runSuites(checkCtx, mgr, base, policy, job.runID, fence, t, job.proj, "")
+	if err == nil {
+		err = err2
+	}
+	evidence = append(staleEvidence, evidence...)
 	res.Evidence = evidence
 	if err != nil {
 		_ = finish(sqlite.RunError, "error", "group verification interrupted: "+fault.MessageOf(err), false)
@@ -511,6 +521,33 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 		_ = finish(sqlite.RunFailed, "failed", summary, false)
 		return fail(fault.CodeCheckFailed, summary)
 	}
+}
+
+// proveStaleChildren runs the task proofs of children whose completed
+// revision the target has since superseded, on the base (the target tip
+// plus the clean children). A child counts as landed when its proof
+// passes there. The failure string names the first child whose proof did not.
+func (e *Engine) proveStaleChildren(ctx context.Context, mgr workspace.Manager, base string, stale []workspace.Requirement, job groupJob, fence func(*sqlite.Tx) error) ([]verification.Evidence, string, error) {
+	var out []verification.Evidence
+	for _, req := range stale {
+		var child sqlite.Record
+		if err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) {
+			child, err = tx.GetRecord(task.ID(req.Task))
+			return err
+		}); err != nil {
+			return out, "", err
+		}
+		policy := verification.Policy{TaskChecks: effectivePolicy(child.Task, job.proj).TaskChecks}
+		ev, err := e.runSuites(ctx, mgr, base, policy, job.runID, fence, child.Task, job.proj, "")
+		out = append(out, ev...)
+		if err != nil {
+			return out, "", err
+		}
+		if v := verification.Judge(policy, ev); !v.Passed {
+			return out, fmt.Sprintf("%s %s: its proof failed on the target (%s) after the target changed its completed revision: %s", child.Task.ID, child.Task.Description, short(base), v.Summary), nil
+		}
+	}
+	return out, "", nil
 }
 
 // reopenAncestors withdraws the completion of every completed group that

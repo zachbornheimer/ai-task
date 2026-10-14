@@ -336,7 +336,10 @@ const (
   conflicting merge fails the claim with `BASE_CONFLICT` and the task stays
   blocked with the conflict named.
 - Groups: a group's proofs run on the merge of every child's completed
-  revision, and the group completes only after every child is complete.
+  revision, and the group completes only after every child is complete. A
+  child whose completed revision no longer merges onto the target (the target
+  integrated and changed it) counts as landed when its own proof passes on the
+  target tip; otherwise the group fails `CHECK_FAILED` naming the child.
   Parents own no integration branch.
 - Projects: `general` exists by default and holds tasks filed outside a
   registered repo. `init` registers a repo. `project` sets target branch and

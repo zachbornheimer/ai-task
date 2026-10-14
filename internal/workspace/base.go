@@ -57,6 +57,7 @@ type BaseResult struct {
 	Revision  string
 	Satisfied []Satisfaction
 	Merged    []Requirement // pending requirements, with the revision actually used
+	Stale     []Requirement // group only: pending requirements that no longer merge onto the target tip; their proofs are judged on the base instead
 }
 
 // Explain lists, one per requirement, how the base treated it.
@@ -67,6 +68,9 @@ func (r BaseResult) Explain() []string {
 	}
 	for _, q := range r.Merged {
 		out = append(out, fmt.Sprintf("base: %s merged at %s", q.Task, short(q.Revision)))
+	}
+	for _, q := range r.Stale {
+		out = append(out, fmt.Sprintf("base: %s superseded by the target; proof judged on the target", q.Task))
 	}
 	return out
 }
@@ -86,6 +90,20 @@ func (m Manager) Base(ctx context.Context, target string, reqs []Requirement) (s
 // revision. A merge that conflicts fails with *BaseConflict wrapped as
 // BASE_CONFLICT.
 func (m Manager) ResolveBase(ctx context.Context, target string, reqs []Requirement) (BaseResult, error) {
+	return m.resolveBase(ctx, target, reqs, false)
+}
+
+// ResolveGroupBase is ResolveBase for group verification. A pending
+// requirement that cannot merge onto the target tip alone has been
+// integrated and since changed there: it is reported in Stale instead of
+// failing, so the caller judges its proof on the target. Pending
+// requirements that merge alone but conflict with each other still fail
+// with BASE_CONFLICT.
+func (m Manager) ResolveGroupBase(ctx context.Context, target string, reqs []Requirement) (BaseResult, error) {
+	return m.resolveBase(ctx, target, reqs, true)
+}
+
+func (m Manager) resolveBase(ctx context.Context, target string, reqs []Requirement, group bool) (BaseResult, error) {
 	tip, err := m.Revision(ctx, "refs/heads/"+target)
 	if err != nil {
 		return BaseResult{}, err
@@ -94,6 +112,9 @@ func (m Manager) ResolveBase(ctx context.Context, target string, reqs []Requirem
 	pending, err := m.classify(ctx, tip, reqs, &res)
 	if err != nil {
 		return BaseResult{}, err
+	}
+	if group {
+		pending, res.Stale = m.splitStale(ctx, tip, pending)
 	}
 	res.Merged = pending
 	if len(pending) == 0 {
@@ -125,6 +146,19 @@ func (m Manager) ResolveBase(ctx context.Context, target string, reqs []Requirem
 	}
 	res.Revision = strings.TrimSpace(rev)
 	return res, nil
+}
+
+// splitStale separates the requirements that merge cleanly onto the tip
+// alone from those that conflict with it.
+func (m Manager) splitStale(ctx context.Context, tip string, pending []Requirement) (clean, stale []Requirement) {
+	for _, r := range pending {
+		if _, err := git(ctx, m.Repo, "merge-tree", "--write-tree", tip, r.Revision); err != nil {
+			stale = append(stale, r)
+			continue
+		}
+		clean = append(clean, r)
+	}
+	return clean, stale
 }
 
 // classify drops requirements without a revision and duplicates, records
