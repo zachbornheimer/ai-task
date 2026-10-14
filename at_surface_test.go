@@ -39,24 +39,30 @@ func TestPublicGoAPI(t *testing.T) {
 	}
 	root := filepath.Dir(thisFile)
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, root, func(fi os.FileInfo) bool {
-		name := fi.Name()
-		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
-	}, 0)
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkg, ok := pkgs["at"]
-	if !ok {
-		var names []string
-		for k := range pkgs {
-			names = append(names, k)
+	var files []*ast.File
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
 		}
-		t.Fatalf("package at not found in %s; got %v", root, names)
+		f, err := parser.ParseFile(fset, filepath.Join(root, name), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Name.Name == "at" {
+			files = append(files, f)
+		}
+	}
+	if len(files) == 0 {
+		t.Fatalf("package at not found in %s", root)
 	}
 
 	var funcs, types, consts, vars []string
-	for _, f := range pkg.Files {
+	for _, f := range files {
 		for _, d := range f.Decls {
 			switch d := d.(type) {
 			case *ast.FuncDecl:
@@ -95,8 +101,7 @@ func TestPublicGoAPI(t *testing.T) {
 	engine := reflect.TypeFor[at.Engine]()
 	gotMethods := map[string]string{}
 	var gotNames []string
-	for i := 0; i < engine.NumMethod(); i++ {
-		m := engine.Method(i)
+	for m := range engine.Methods() {
 		gotMethods[m.Name] = shortMethod(m)
 		gotNames = append(gotNames, m.Name)
 	}
@@ -119,12 +124,12 @@ func TestPublicGoAPI(t *testing.T) {
 func shortMethod(m reflect.Method) string {
 	t := m.Type
 	in := make([]string, 0, t.NumIn())
-	for i := 0; i < t.NumIn(); i++ {
-		in = append(in, shortType(t.In(i)))
+	for in0 := range t.Ins() {
+		in = append(in, shortType(in0))
 	}
 	out := make([]string, 0, t.NumOut())
-	for i := 0; i < t.NumOut(); i++ {
-		out = append(out, shortType(t.Out(i)))
+	for out0 := range t.Outs() {
+		out = append(out, shortType(out0))
 	}
 	s := m.Name + "(" + strings.Join(in, ", ") + ")"
 	switch len(out) {
@@ -201,8 +206,8 @@ func TestPublicSurfaceMatchesContract(t *testing.T) {
 	}
 	engine := reflect.TypeFor[at.Engine]()
 	var methods []string
-	for i := 0; i < engine.NumMethod(); i++ {
-		methods = append(methods, engine.Method(i).Name)
+	for method := range engine.Methods() {
+		methods = append(methods, method.Name)
 	}
 	assertExactNames(t, "Engine methods", want.EngineMethods, methods)
 

@@ -101,7 +101,7 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 		t.Fatalf("changed checks must reopen the epic: %+v", v.GroupVerification)
 	}
 	// Timeouts are reported as the epic's construction problem.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), Size: strptr("small"), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), Size: new("small"), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	f.setProofBudget(300 * time.Millisecond)

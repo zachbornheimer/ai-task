@@ -143,8 +143,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 			return nil
 		case errors.Is(err, at.ErrStalled):
 			// A stall is a human's problem: say why, and show the plan.
-			var fe *at.Error
-			if errors.As(err, &fe) {
+			if fe, ok := errors.AsType[*at.Error](err); ok {
 				if sum, ok := fe.Details.(at.Summary); ok {
 					say(out, "worker %d: stalled: %v\n", n, sum.Reasons)
 				}

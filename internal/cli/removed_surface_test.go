@@ -148,8 +148,8 @@ func TestPublicSurfaceMatchesContract(t *testing.T) {
 
 	engine := reflect.TypeFor[at.Engine]()
 	var methods []string
-	for i := 0; i < engine.NumMethod(); i++ {
-		methods = append(methods, engine.Method(i).Name)
+	for method := range engine.Methods() {
+		methods = append(methods, method.Name)
 	}
 	sort.Strings(methods)
 	assertExact(t, "Engine methods", s.EngineMethods, methods)

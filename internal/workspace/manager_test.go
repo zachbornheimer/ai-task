@@ -379,8 +379,7 @@ func TestPrepareMergeWithoutIdentity(t *testing.T) {
 	if fault.CodeOf(err) != fault.CodeNotReady || !strings.Contains(fault.MessageOf(err), "config user.email") {
 		t.Fatalf("want NOT_READY naming the fix, got %v", err)
 	}
-	var ce *ConflictError
-	if errors.As(err, &ce) {
+	if _, ok := errors.AsType[*ConflictError](err); ok {
 		t.Fatal("missing identity reported as a conflict")
 	}
 
@@ -430,11 +429,9 @@ func TestConcurrentEnsureTaskNeverFails(t *testing.T) {
 		errs := make([]error, claimers)
 		var wg sync.WaitGroup
 		for i := range errs {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_, errs[i] = r.mgr.EnsureTask(r.ctx, fmt.Sprintf("at-r%dc%02d", round, i), "main", 0)
-			}()
+			})
 		}
 		wg.Wait()
 		for i, err := range errs {

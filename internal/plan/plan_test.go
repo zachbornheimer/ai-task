@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidate(t *testing.T) {
-	ok := ChangeSet{ProjectID: "proj-0000000000000000", Operations: []Change{AddGroup{Key: "g", Title: "G"}, AddTask{Key: "a", Title: "A", Parent: "g"}, UpdateTask{Target: "a", Title: strptr("A2")}, ArchiveTask{Target: "a", Reason: "split"}}}
+	ok := ChangeSet{ProjectID: "proj-0000000000000000", Operations: []Change{AddGroup{Key: "g", Title: "G"}, AddTask{Key: "a", Title: "A", Parent: "g"}, UpdateTask{Target: "a", Title: new("A2")}, ArchiveTask{Target: "a", Reason: "split"}}}
 	if err := ok.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ func TestValidate(t *testing.T) {
 		{ChangeSet{ProjectID: "p", Operations: []Change{AddTask{Title: " "}}}, fault.CodeInvalidInput},
 		{ChangeSet{ProjectID: "p", Operations: []Change{AddTask{Title: "a", Requires: []Ref{""}}}}, fault.CodeInvalidInput},
 		{ChangeSet{ProjectID: "p", Operations: []Change{UpdateTask{}}}, fault.CodeInvalidInput},
-		{ChangeSet{ProjectID: "p", Operations: []Change{UpdateTask{Target: "a", Title: strptr(" ")}}}, fault.CodeInvalidInput},
+		{ChangeSet{ProjectID: "p", Operations: []Change{UpdateTask{Target: "a", Title: new(" ")}}}, fault.CodeInvalidInput},
 		{ChangeSet{ProjectID: "p", Operations: []Change{ArchiveTask{}}}, fault.CodeInvalidInput},
 		{ChangeSet{ProjectID: "p", Operations: []Change{ArchiveTask{Target: "a"}}}, fault.CodeInvalidInput},
 		{ChangeSet{ProjectID: "p", Operations: []Change{AddGroup{Key: "bad key", Title: "x"}}}, fault.CodeInvalidInput},
@@ -38,4 +38,4 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func strptr(s string) *string { return &s }
+//go:fix inline

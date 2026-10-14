@@ -127,7 +127,7 @@ func TestReviewMutationIsOneRevisionWithOptimisticConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Updates distinguish unchanged / set / clear.
-	f.apply(plan.UpdateTask{Target: plan.Ref(b), Outcome: strptr("new outcome"), Constraints: plan.Replace([]string{"c1"})})
+	f.apply(plan.UpdateTask{Target: plan.Ref(b), Outcome: new("new outcome"), Constraints: plan.Replace([]string{"c1"})})
 	v := f.show(string(b))
 	if v.Outcome != "new outcome" || len(v.Constraints) != 1 || v.Title != "b" || v.ContractRev != 2 {
 		t.Fatalf("%+v", v)
@@ -206,7 +206,7 @@ func TestDiscoveredBlockerNeedsSessionOrPlanner(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Contract edits to a claimed task are refused to its own session.
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sd.Token), Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), Title: strptr("renamed")}}})
+	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Session: string(sd.Token), Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(d), Title: new("renamed")}}})
 	wantCode(t, err, fault.CodeInvalidSession)
 }
 

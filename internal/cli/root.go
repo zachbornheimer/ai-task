@@ -109,8 +109,7 @@ func Main(env Env) int {
 			err = closeErr
 		}
 	}
-	var h *helpRequest
-	if errors.As(err, &h) {
+	if _, ok := errors.AsType[*helpRequest](err); ok {
 		if err := c.printCommandHelp(cmd); err != nil {
 			return c.fail(err)
 		}

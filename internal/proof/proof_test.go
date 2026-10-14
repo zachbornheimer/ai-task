@@ -70,11 +70,11 @@ func TestProofSpecContract(t *testing.T) {
 			code           *int
 		}{
 			{name: "timeout", in: "run: sleep 5", budget: 100 * time.Millisecond, timedOut: true},
-			{name: "pass", in: "run: true", pass: true, code: intp(0)},
-			{name: "fail", in: "run: false", code: intp(1)},
-			{name: "expect match", in: "run: echo hello expect=^hel", pass: true, code: intp(0)},
-			{name: "expect mismatch", in: "run: echo hello expect=^bye", code: intp(0)},
-			{name: "shell syntax", in: "run: echo a | tr a b expect=^b", pass: true, code: intp(0)},
+			{name: "pass", in: "run: true", pass: true, code: new(0)},
+			{name: "fail", in: "run: false", code: new(1)},
+			{name: "expect match", in: "run: echo hello expect=^hel", pass: true, code: new(0)},
+			{name: "expect mismatch", in: "run: echo hello expect=^bye", code: new(0)},
+			{name: "shell syntax", in: "run: echo a | tr a b expect=^b", pass: true, code: new(0)},
 		}
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
@@ -144,4 +144,4 @@ func TestRunnerUnknownPreset(t *testing.T) {
 	}
 }
 
-func intp(i int) *int { return &i }
+//go:fix inline

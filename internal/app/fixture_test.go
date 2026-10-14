@@ -260,7 +260,7 @@ func wantCode(t *testing.T, err error, code fault.Code) {
 	}
 }
 
-func strptr(s string) *string { return &s }
+//go:fix inline
 
 type addSwitcher struct {
 	t    testing.TB

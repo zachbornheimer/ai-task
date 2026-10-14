@@ -94,8 +94,7 @@ func WrapInternal(err error, format string, args ...any) *Error {
 // IsInternal reports whether err is an infrastructure failure: built by
 // NewInternal/WrapInternal, or not a fault error at all.
 func IsInternal(err error) bool {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.internal
 	}
 	return err != nil
@@ -107,8 +106,7 @@ func CodeOf(err error) Code {
 	if err == nil {
 		return ""
 	}
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Code
 	}
 	return CodeNotReady
@@ -120,8 +118,7 @@ func Is(err error, code Code) bool { return CodeOf(err) == code }
 // MessageOf returns the message of a coded error without its code, or
 // err.Error() for any other error.
 func MessageOf(err error) string {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Message
 	}
 	if err == nil {
