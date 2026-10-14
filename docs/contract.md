@@ -354,10 +354,7 @@ const (
 - `VerifyComplete`: fresh proof, fresh regression, then atomically complete the
   task and record its `on_complete` actions as pending. atask then runs each
   action: waited actions record a `RunResult`; detached actions are spawned
-  and recorded as `detached`. On a Git-backed task whose worktree holds no
-  commit beyond its base it returns `NOT_READY` ("no commits since claim;
-  commit the work first (or release the claim)") before any check runs and
-  counts nothing against the attempt budget.
+  and recorded as `detached`.
 - `VerifyComplete` on a completed task: retry pending or failed actions without
   repeating succeeded ones.
 - `Reverify: true`: fresh verification against the recorded revision; append

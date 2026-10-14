@@ -404,9 +404,6 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 			return VerifyResult{}, err
 		}
 		revision = st.Revision
-		if err := e.requireOwnCommits(ctx, p); err != nil {
-			return VerifyResult{}, err
-		}
 	}
 	fr := finalRun{prepared: p, token: token, revision: revision, contractRev: p.rec.Task.ContractRev, regressionID: (verification.Policy{Regression: p.policy.Regression}).Digest()}
 	now := e.now()
@@ -444,31 +441,6 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 	}
 	e.notify()
 	return res, err
-}
-
-// noCommitsMessage is why a worktree still at its base cannot complete.
-const noCommitsMessage = "no commits since claim; commit the work first (or release the claim)"
-
-// requireOwnCommits refuses completion when the worktree holds nothing
-// beyond its base, so checks already green on the base cannot complete a
-// task with nothing delivered.
-func (e *Engine) requireOwnCommits(ctx context.Context, p prepared) error {
-	var reqs []workspace.Requirement
-	err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) {
-		reqs, err = completedRequirements(tx, p.rec.Task.ID)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-	has, err := e.manager(p.proj).HasOwnCommits(ctx, p.dir, p.proj.TargetBranch, reqs)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return fault.New(fault.CodeNotReady, "%s", noCommitsMessage)
-	}
-	return nil
 }
 
 // executeFinal runs both suites on an immutable snapshot, integrates, and

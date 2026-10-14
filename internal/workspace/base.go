@@ -272,23 +272,3 @@ func lines(s string) []string {
 	}
 	return out
 }
-
-// HasOwnCommits reports whether the worktree at dir holds a commit made
-// since claim: one reachable from HEAD but not from the target tip or any
-// requirement revision. The merge commits ResolveBase builds do not count.
-func (m Manager) HasOwnCommits(ctx context.Context, dir, target string, reqs []Requirement) (bool, error) {
-	args := []string{"rev-list", "--count", "--no-merges", "HEAD", "--not", "refs/heads/" + target}
-	for _, r := range reqs {
-		if r.Revision != "" {
-			args = append(args, r.Revision)
-		}
-		if tip, ok := m.branchTip(ctx, r.Task); ok {
-			args = append(args, tip)
-		}
-	}
-	out, err := git(ctx, dir, args...)
-	if err != nil {
-		return false, fault.Wrap(err, fault.CodeNotReady, "count commits in %s", dir)
-	}
-	return strings.TrimSpace(out) != "0", nil
-}

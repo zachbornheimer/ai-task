@@ -268,8 +268,8 @@ Use the shell and the `at` CLI to execute and manage the task; `at` is
 authoritative for task state, verification and completion. ATASK_OUTPUT=json is
 set: every `atask` command returns one JSON envelope; inspect error.details when
 one fails. Start with `atask context` and follow the project instructions.
-Commit before `atask verify complete`; only a passing verification completes
-the task. If any `atask` command returns INVALID_SESSION or INVALID_SESSION,
+Commit your work before `atask verify complete` (checks run on the committed
+revision); only a passing verification completes the task. If any `atask` command returns INVALID_SESSION or INVALID_SESSION,
 stop editing immediately.
 
 ```text
