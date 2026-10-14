@@ -54,6 +54,7 @@ func sandboxPolicy(cfg proof.SandboxConfig) proof.SandboxPolicy {
 		return &process.Sandbox{
 			Mode: cfg.Mode, Home: home,
 			Writable: withoutEmpty(writable), Unreadable: underHome(home, unreadableUnderHome),
+			Readable: withoutEmpty([]string{dir, dir + ".tmp"}),
 		}
 	}
 }

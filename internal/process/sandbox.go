@@ -38,6 +38,9 @@ type Sandbox struct {
 	Home       string
 	Writable   []string
 	Unreadable []string
+	// Readable re-allows reads beneath an Unreadable path (the check's own
+	// directory lives inside one).
+	Readable []string
 	// LookPath finds sandbox-exec; nil means exec.LookPath.
 	LookPath func(string) (string, error)
 	// GOOS names the platform; empty means the running one.
@@ -81,7 +84,8 @@ func (s *Sandbox) sandboxExec() (string, error) {
 }
 
 // Profile renders the Seatbelt profile. Later rules win, so the order is
-// allow-all, deny home writes, re-allow the writable paths, deny secret reads.
+// allow-all, deny home writes, re-allow the writable paths, deny secret reads,
+// re-allow the reads the run itself needs.
 func (s *Sandbox) Profile() string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n")
@@ -91,6 +95,9 @@ func (s *Sandbox) Profile() string {
 	}
 	for _, p := range s.Unreadable {
 		fmt.Fprintf(&b, "(deny file-read* %s)\n", subpaths(p))
+	}
+	for _, p := range s.Readable {
+		fmt.Fprintf(&b, "(allow file-read* %s)\n", subpaths(p))
 	}
 	return b.String()
 }
