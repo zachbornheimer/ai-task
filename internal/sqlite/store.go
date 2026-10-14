@@ -81,7 +81,7 @@ func dsnFor(path string, memory bool) string {
 	}
 	// Write transactions take the RESERVED lock up front so that two writers
 	// never deadlock on a deferred-to-write upgrade; busy_timeout then
-	// serialises them. Read-only transactions still begin deferred.
+	// serializes them. Read-only transactions still begin deferred.
 	q.Set("_txlock", "immediate")
 	return "file:" + path + "?" + q.Encode()
 }
@@ -125,7 +125,7 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 	if err := fn(&Tx{tx: tx, ctx: ctx}); err != nil {
 		_ = tx.Rollback()
 		if cerr := ctx.Err(); cerr != nil && fault.IsInternal(err) {
-			return cancelled(cerr)
+			return canceled(cerr)
 		}
 		return err
 	}
@@ -134,16 +134,16 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 		// ends; the commit then reports "already rolled back". That is the
 		// caller's cancellation, not an internal fault: nothing was written.
 		if cerr := ctx.Err(); cerr != nil {
-			return cancelled(cerr)
+			return canceled(cerr)
 		}
 		return fault.WrapInternal(err, "commit transaction")
 	}
 	return nil
 }
 
-// cancelled reports a transaction abandoned because its context ended; it
+// canceled reports a transaction abandoned because its context ended; it
 // unwraps to the context error (context.Canceled or DeadlineExceeded).
-func cancelled(cerr error) error {
+func canceled(cerr error) error {
 	return fault.Wrap(cerr, fault.CodeNotReady, "transaction abandoned: the caller's context ended (nothing was written)")
 }
 

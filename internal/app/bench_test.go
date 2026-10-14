@@ -37,7 +37,7 @@ func layered(b *testing.B, e *app.Engine, pid project.ID, n, width int) {
 	b.Helper()
 	ctx := context.Background()
 	var ops []plan.Change
-	for i := 0; i < n; i++ {
+	for i := range n {
 		t := plan.AddTask{Key: fmt.Sprintf("t%d", i), Title: fmt.Sprintf("task %d", i), TaskChecks: []verification.CheckSpec{{ID: "u", Command: []string{"test", "-d", "."}, Required: true}}}
 		if i >= width {
 			start := (i/width - 1) * width
@@ -62,7 +62,7 @@ func BenchmarkApply200Tasks(b *testing.B) {
 		pid := p.ID
 		b.StartTimer()
 		var ops []plan.Change
-		for j := 0; j < 200; j++ {
+		for range 200 {
 			t := plan.AddTask{Title: "t", TaskChecks: []verification.CheckSpec{{ID: "u", Command: []string{"test", "-d", "."}, Required: true}}}
 			ops = append(ops, t)
 		}

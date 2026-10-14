@@ -22,7 +22,7 @@ import (
 const tokenFile = "atask-session"
 
 // gitDir resolves the private git directory of the worktree containing
-// dir, honouring GIT_DIR (set by Git when running hooks).
+// dir, honoring GIT_DIR (set by Git when running hooks).
 func gitDir(ctx context.Context, dir string) (string, error) {
 	if g := os.Getenv("GIT_DIR"); g != "" {
 		if !filepath.IsAbs(g) {

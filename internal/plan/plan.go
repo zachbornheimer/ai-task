@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -194,10 +195,8 @@ func (cs ChangeSet) Validate() error {
 				}
 				keys[c.Key] = true
 			}
-			for _, r := range append(append([]Ref{}, c.Requires...), c.Blocks...) {
-				if r == "" {
-					return fault.New(fault.CodeInvalidInput, "operation %d: empty reference", i)
-				}
+			if slices.Contains(append(append([]Ref{}, c.Requires...), c.Blocks...), "") {
+				return fault.New(fault.CodeInvalidInput, "operation %d: empty reference", i)
 			}
 		case UpdateTask:
 			if c.Target == "" {

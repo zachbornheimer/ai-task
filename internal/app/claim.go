@@ -378,7 +378,7 @@ func (e *Engine) authorize(tx *sqlite.Tx, token execution.Token, now time.Time) 
 	return auth.Attempt, nil
 }
 
-// touch authorises and renews the lease: every session-authenticated write
+// touch authorizes and renews the lease: every session-authenticated write
 // is proof of life, so an active agent never has to renew by hand.
 func (e *Engine) touch(tx *sqlite.Tx, token execution.Token, now time.Time) (execution.Attempt, error) {
 	a, err := e.authorize(tx, token, now)

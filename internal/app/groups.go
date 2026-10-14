@@ -135,9 +135,8 @@ func latestGroupRun(tx *sqlite.Tx, id task.ID) (*sqlite.Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := len(runs) - 1; i >= 0; i-- {
-		if runs[i].Mode == verification.ModeGroup {
-			r := runs[i]
+	for _, r := range slices.Backward(runs) {
+		if r.Mode == verification.ModeGroup {
 			return &r, nil
 		}
 	}

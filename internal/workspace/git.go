@@ -75,7 +75,7 @@ func Inspect(ctx context.Context, dir string) (GitState, error) {
 		return GitState{}, fault.Wrap(err, fault.CodeNotReady, "git status failed in %s", dir)
 	}
 	st := GitState{Revision: strings.TrimSpace(rev)}
-	for _, line := range strings.Split(status, "\n") {
+	for line := range strings.SplitSeq(status, "\n") {
 		if strings.TrimSpace(line) != "" {
 			st.Dirty = append(st.Dirty, line)
 		}
@@ -110,7 +110,7 @@ func gitRetry(ctx context.Context, dir string, args ...string) (string, error) {
 	var out string
 	var err error
 	delay := 20 * time.Millisecond
-	for attempt := 0; attempt < 8; attempt++ {
+	for range 8 {
 		out, err = git(ctx, dir, args...)
 		if err == nil || !isLockContention(err) {
 			return out, err
@@ -175,7 +175,7 @@ func ChangedFiles(ctx context.Context, dir, ref string) ([]string, error) {
 		return nil, err
 	}
 	var files []string
-	for _, f := range strings.Split(strings.TrimSpace(out), "\n") {
+	for f := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if f != "" {
 			files = append(files, f)
 		}
@@ -191,7 +191,7 @@ func ChangedBetween(ctx context.Context, repo, base, rev string) ([]string, erro
 		return nil, err
 	}
 	var files []string
-	for _, f := range strings.Split(strings.TrimSpace(out), "\n") {
+	for f := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if f != "" {
 			files = append(files, f)
 		}

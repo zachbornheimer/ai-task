@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -59,7 +60,8 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	f.complete(got)
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID, Wait: true})
 	wantCode(t, err, fault.CodeStalled)
-	if fe, _ := err.(*fault.Error); fe == nil || !strings.Contains(strings.Join(fe.Details.(app.Summary).Reasons, " "), "unusable workspace") {
+	var fe *fault.Error
+	if !errors.As(err, &fe) || !strings.Contains(strings.Join(fe.Details.(app.Summary).Reasons, " "), "unusable workspace") {
 		t.Fatalf("stall reasons: %v", err)
 	}
 	// An explicit claim retries; it fails again while the worktree is still

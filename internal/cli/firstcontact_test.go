@@ -84,7 +84,7 @@ func TestVersionFromBuildInfo(t *testing.T) {
 			t.Errorf("buildVersion(%q) = %q, want %q", c.linked, got, c.want)
 		}
 	}
-	// The command reports it, and honours --help.
+	// The command reports it, and honors --help.
 	if code, out, _ := runAt(t, "version"); code != ExitOK || strings.TrimSpace(out) == "" {
 		t.Fatalf("at version: exit %d %q", code, out)
 	}

@@ -156,7 +156,7 @@ func (e *Engine) changes() <-chan struct{} {
 	return e.changed
 }
 
-// DefaultPath returns the OS-appropriate state location, honouring the
+// DefaultPath returns the OS-appropriate state location, honoring the
 // ATASK_DB override. Task state lives outside any source repository.
 func DefaultPath() (string, error) {
 	if p := os.Getenv("ATASK_DB"); p != "" {

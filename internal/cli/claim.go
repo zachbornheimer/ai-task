@@ -99,8 +99,8 @@ func claimSubcommand(args []string) (string, []string) {
 		if a == "--" {
 			return "", args
 		}
-		if strings.HasPrefix(a, "-") {
-			if valueFlags[strings.TrimPrefix(a, "-")] || valueFlags[a] {
+		if after, ok := strings.CutPrefix(a, "-"); ok {
+			if valueFlags[after] || valueFlags[a] {
 				if !strings.Contains(a, "=") {
 					i++ // skip the flag's value
 				}

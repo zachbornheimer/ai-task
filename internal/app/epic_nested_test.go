@@ -22,7 +22,7 @@ func TestNestedEpicWaitsThroughPlainGroups(t *testing.T) {
 	s := f.claim(string(tt))
 	f.commit(s.Workspace, "t.txt", "x")
 	f.complete(s)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := f.e.RunPendingGroups(f.ctx, f.proj.ID, ""); err != nil {
 			t.Fatalf("run %d: %v", i, err)
 		}

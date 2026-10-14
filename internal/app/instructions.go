@@ -58,9 +58,9 @@ Edit this section for the repository; the block above is owned by ` + "`atask in
 - Prefer the smallest complete change that satisfies the task; follow the
   existing architecture and conventions; avoid unrelated refactoring,
   formatting, or dependency changes.
-- Handle errors explicitly; preserve existing behaviour and public
+- Handle errors explicitly; preserve existing behavior and public
   contracts unless the task requires otherwise.
-- Test observable behaviour, including failure paths, with deterministic
+- Test observable behavior, including failure paths, with deterministic
   tests; fix defects rather than weakening assertions.
 - Read the code and documentation the task needs, not the repository by
   default; keep documentation consistent when a documented contract changes.
@@ -178,7 +178,7 @@ func readUnder(root, name string) ([]byte, error) {
 // dropMarkerLines removes lines that are only a block marker.
 func dropMarkerLines(s string) string {
 	var kept []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if t := strings.TrimSpace(line); !beginMarkerRE.MatchString(t) && !endMarkerRE.MatchString(t) {
 			kept = append(kept, line)
 		}

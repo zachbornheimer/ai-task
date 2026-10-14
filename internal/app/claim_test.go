@@ -41,14 +41,14 @@ func TestClaimIsDeterministicOldestFirst(t *testing.T) {
 func TestConcurrentClaimsYieldDistinctSessions(t *testing.T) {
 	f := newFixture(t)
 	const ready, callers = 5, 20
-	for i := 0; i < ready; i++ {
+	for i := range ready {
 		f.add(string(rune('a' + i)))
 	}
 	var mu sync.Mutex
 	got := map[task.ID]int{}
 	var none int32
 	var wg sync.WaitGroup
-	for i := 0; i < callers; i++ {
+	for i := range callers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

@@ -313,7 +313,7 @@ func (e *Engine) buildView(tx *sqlite.Tx, r sqlite.Record, p project.Project, no
 	return e.buildViewDepth(tx, r, p, now, depth, head)
 }
 
-// relFor loads the light relation row for a neighbour.
+// relFor loads the light relation row for a neighbor.
 func relFor(tx *sqlite.Tx, id task.ID, p project.Project, now time.Time) (Rel, bool, error) {
 	n, err := tx.GetRecord(id)
 	if err != nil {

@@ -18,13 +18,13 @@ func TestRenderEvidenceLabelsRevisions(t *testing.T) {
 	}, false)
 	out := b.String()
 	if !strings.Contains(out, "@aaaaaaaaaaaa") || !strings.Contains(out, "@bbbbbbbbbbbb") {
-		t.Fatalf("rows not labelled with their revisions:\n%s", out)
+		t.Fatalf("rows not labeled with their revisions:\n%s", out)
 	}
 	// One revision: no labels.
 	b.Reset()
 	renderEvidence(&b, []verification.Evidence{{CheckID: "test", Required: true, Outcome: verification.OutcomePassed, Revision: branch}}, false)
 	if strings.Contains(b.String(), "@") {
-		t.Fatalf("single-revision run labelled:\n%s", b.String())
+		t.Fatalf("single-revision run labeled:\n%s", b.String())
 	}
 }
 

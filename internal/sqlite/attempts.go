@@ -9,7 +9,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
-// AttemptAuth is everything needed to authorise a token-bearing request:
+// AttemptAuth is everything needed to authorize a token-bearing request:
 // the attempt the token names and the task's current generation, read in
 // the same transaction.
 type AttemptAuth struct {

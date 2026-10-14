@@ -23,7 +23,6 @@ import (
 // when the clock passes the cooldown without anyone writing.
 func TestCooldownIsOneRuleEverywhere(t *testing.T) {
 	for _, via := range []string{"failed verification", "release --failed"} {
-		via := via
 		t.Run(via, func(t *testing.T) {
 			f := newGitFixture(t)
 			p, _ := f.e.Project(f.ctx, f.proj.ID)
@@ -118,7 +117,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sf.Token})
 	// exhausted (max attempts 2)
 	exhausted := f.add("exhausted")
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		s := f.claim(string(exhausted))
 		f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Failed: true})
 		f.c.Advance(time.Hour + time.Minute)

@@ -256,7 +256,7 @@ func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
 	r := newRepo(t)
 	const n = 6
 	cands := make([]Candidate, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		w, err := r.mgr.EnsureTask(r.ctx, fmt.Sprintf("at-conc%02d", i), "main", 0)
 		if err != nil {
 			t.Fatal(err)

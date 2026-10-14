@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 )
 
 func main() {
-	repo := flag.String("repo", "", "path to a Git repository to work in (created and initialised if empty)")
+	repo := flag.String("repo", "", "path to a Git repository to work in (created and initialized if empty)")
 	workers := flag.Int("workers", 4, "concurrent fake agents")
 	db := flag.String("db", "", "database path (default: a temp file)")
 	flag.Parse()
@@ -79,7 +80,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	// Step B: adversarial review until stable, bounded.
 	const maxReviewRounds = 6
 	stable := false
-	for round := 0; round < maxReviewRounds; round++ {
+	for round := range maxReviewRounds {
 		current, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.FilterAll})
 		if err != nil {
 			return err
@@ -107,7 +108,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	// Step C: N workers drain the graph continuously. No batch barriers.
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -148,7 +149,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 				}
 			}
 			printPlan(ctx, eng, project, out)
-			return fmt.Errorf("worker %d: stalled, human action needed: %v", n, err)
+			return fmt.Errorf("worker %d: stalled, human action needed: %w", n, err)
 		case err != nil:
 			return err
 		}
@@ -176,7 +177,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	}
 	// "Implement": write the file the task's check expects, commit it.
 	file := filepath.Join(s.Workspace, s.Task.Key+".txt")
-	if err := os.WriteFile(file, []byte("implemented by worker "+fmt.Sprint(n)), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte("implemented by worker "+strconv.Itoa(n)), 0o644); err != nil {
 		return err
 	}
 	if err := git(s.Workspace, "add", "."); err != nil {
@@ -307,7 +308,7 @@ func git(dir string, args ...string) error {
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=at-example", "GIT_AUTHOR_EMAIL=at@example", "GIT_COMMITTER_NAME=at-example", "GIT_COMMITTER_EMAIL=at@example", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git %v: %v\n%s", args, err, out)
+		return fmt.Errorf("git %v: %w\n%s", args, err, out)
 	}
 	return nil
 }

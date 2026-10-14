@@ -519,7 +519,7 @@ func renderHandoff(w io.Writer, h execution.Handoff) {
 			}
 			fmt.Fprintln(w)
 			for _, tail := range []string{c.StderrTail, c.StdoutTail} {
-				for _, line := range strings.Split(strings.TrimRight(tail, "\n"), "\n") {
+				for line := range strings.SplitSeq(strings.TrimRight(tail, "\n"), "\n") {
 					if line != "" {
 						fmt.Fprintf(w, "      %s\n", line)
 					}
@@ -591,7 +591,7 @@ func renderEvidence(w io.Writer, evidence []verification.Evidence, full bool) {
 					out = "... " + out[len(out)-2000:]
 				}
 				fmt.Fprintf(w, "      --- %s ---\n", name)
-				for _, l := range strings.Split(out, "\n") {
+				for l := range strings.SplitSeq(out, "\n") {
 					fmt.Fprintf(w, "      %s\n", l)
 				}
 			}

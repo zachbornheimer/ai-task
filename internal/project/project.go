@@ -161,7 +161,7 @@ func rootFromGitFile(path string) (string, error) {
 	line := strings.TrimSpace(string(b))
 	const prefix = "gitdir:"
 	if !strings.HasPrefix(line, prefix) {
-		return "", fmt.Errorf("unexpected .git file content")
+		return "", errors.New("unexpected .git file content")
 	}
 	gitdir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 	if !filepath.IsAbs(gitdir) {

@@ -46,7 +46,7 @@ type Result struct {
 }
 
 // Run executes the spec. It never uses a shell. The process is killed when
-// the timeout elapses or ctx is cancelled (on Unix the whole process group,
+// the timeout elapses or ctx is canceled (on Unix the whole process group,
 // so background children do not outlive the check); Go's WaitDelay guarantees Run
 // returns even if the process ignores the signal and its children hold the
 // pipes open.
@@ -132,10 +132,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	n := len(p)
 	if room := half - b.head.Len(); room > 0 {
-		take := room
-		if take > len(p) {
-			take = len(p)
-		}
+		take := min(room, len(p))
 		b.head.Write(p[:take])
 		p = p[take:]
 	}

@@ -273,7 +273,7 @@ func (m Manager) PrepareMerge(ctx context.Context, target string, sources []stri
 			_, _ = git(ctx, path, "merge", "--abort")
 			cleanup()
 			ce := &ConflictError{Source: src, Target: target, Err: err}
-			for _, f := range strings.Split(strings.TrimSpace(conflicts), "\n") {
+			for f := range strings.SplitSeq(strings.TrimSpace(conflicts), "\n") {
 				if f != "" {
 					ce.Files = append(ce.Files, f)
 				}
@@ -432,7 +432,7 @@ func (m Manager) worktreeFor(ctx context.Context, branch string) (string, error)
 		return "", fault.Wrap(err, fault.CodeNotReady, "list worktrees")
 	}
 	var path string
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			path = strings.TrimPrefix(line, "worktree ")

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -128,7 +129,8 @@ func (e *env) runIn(dir string, stdin string, extraEnv []string, args ...string)
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
 	r := result{stdout: out.String(), stderr: errb.String()}
-	if ee, ok := err.(*exec.ExitError); ok {
+	ee := &exec.ExitError{}
+	if errors.As(err, &ee) {
 		r.code = ee.ExitCode()
 	} else if err != nil {
 		e.t.Fatalf("run %v: %v", args, err)
@@ -343,7 +345,7 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	e.ok("init", "--name", "c")
 	const n = 6
 	ids := map[string]bool{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ids[taskID(e.ok("add", fmt.Sprintf("work-%d", i), "--proof", "run: test -d .", "--regression", "run: true"))] = true
 	}
 	results := make([]result, n+4)

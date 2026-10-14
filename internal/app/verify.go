@@ -372,7 +372,7 @@ type finalRun struct {
 	runID        int64
 	contractRev  int
 	regressionID string
-	// checkCtx is cancelled by the heartbeat when authority is lost, so
+	// checkCtx is canceled by the heartbeat when authority is lost, so
 	// check processes never outlive the claim.
 	checkCtx context.Context
 }
@@ -442,7 +442,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 }
 
 // executeFinal runs both suites on an immutable snapshot, integrates, and
-// finalises. It is used by the single-task path; cohorts have their own.
+// finalizes. It is used by the single-task path; cohorts have their own.
 func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, error) {
 	res := VerifyResult{TaskID: fr.rec.Task.ID, Mode: verification.ModeComplete, RunID: fr.runID, Revision: fr.revision, SubmissionID: fr.submission, LogDir: e.runLogDir(fr.proj.ID, fr.runID)}
 	fence := func(tx *sqlite.Tx) error {
@@ -530,7 +530,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		res.Message = "task complete; claim ended"
 		return res, nil
 	}
-	// refused maps a finalisation refusal (changed contract, lost
+	// refused maps a finalization refusal (changed contract, lost
 	// authority, ...) to the caller's error.
 	refused := func(err error) (VerifyResult, error) {
 		if fault.IsInternal(err) {

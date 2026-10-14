@@ -75,7 +75,7 @@ type Handoff struct {
 	// Inherited carries learnings recorded on this task's direct
 	// prerequisites: their outputs are this task's inputs.
 	Inherited []InheritedLearning `json:"inherited,omitempty"`
-	// LastFailure summarises the newest failed verification run so a new
+	// LastFailure summarizes the newest failed verification run so a new
 	// attempt does not start blind.
 	LastFailure *Failure `json:"last_failure,omitempty"`
 }

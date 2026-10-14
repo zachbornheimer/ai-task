@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -81,7 +81,7 @@ func pruneRunLogs(projDir string, keep int) {
 	if len(runs) <= keep {
 		return
 	}
-	sort.Slice(runs, func(i, j int) bool { return runs[i] < runs[j] })
+	slices.Sort(runs)
 	for _, id := range runs[:len(runs)-keep] {
 		_ = os.RemoveAll(filepath.Join(projDir, fmt.Sprintf("run-%d", id)))
 	}

@@ -207,7 +207,7 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 		return "", err
 	}
 	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := range 5 {
 		if attempt == 0 {
 			t.ID = a.e.newID()
 		} else {
