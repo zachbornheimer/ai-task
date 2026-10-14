@@ -81,6 +81,8 @@ type RunResult struct {
 	ReturnCode *int              `json:"return_code"`
 	Passed     bool              `json:"passed"`
 	Output     string            `json:"output"`
+	// Sandboxed is true when the command ran confined by a sandbox.
+	Sandboxed bool `json:"sandboxed"`
 }
 
 // Budget is the allowance the run had; zero when it had none.

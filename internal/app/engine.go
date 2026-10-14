@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/proof"
+
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -59,6 +61,9 @@ type Config struct {
 	Cwd string
 	// ProofBudget, when > 0, replaces every run's contract budget (tests).
 	ProofBudget time.Duration
+	// Sandbox confines checks and actions. Nil reads [sandbox] from the
+	// user's config.toml (strict when absent).
+	Sandbox *proof.SandboxConfig
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -77,6 +82,7 @@ type Engine struct {
 	actor          string
 	cwd            string
 	proofBudget    time.Duration
+	sandbox        proof.SandboxConfig
 
 	mu      sync.Mutex
 	changed chan struct{}
@@ -93,6 +99,10 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 		if path, err = DefaultPath(); err != nil {
 			return nil, err
 		}
+	}
+	sandbox, err := sandboxConfigOf(cfg)
+	if err != nil {
+		return nil, err
 	}
 	st, err := sqlite.Open(ctx, path)
 	if err != nil {
@@ -131,7 +141,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
 		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, lease: lease, changed: make(chan struct{}),
-		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget,
+		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget, sandbox: sandbox,
 	}, nil
 }
 
@@ -431,4 +441,11 @@ func (e *Engine) reconcile(ctx context.Context) error {
 // checks; the two namespaces never overlap by construction.
 func effectivePolicy(t task.Task, _ project.Project) verification.Policy {
 	return verification.Merge(t.Verification, t.Verification.Regression)
+}
+
+func sandboxConfigOf(cfg Config) (proof.SandboxConfig, error) {
+	if cfg.Sandbox != nil {
+		return *cfg.Sandbox, nil
+	}
+	return loadSandboxConfig()
 }

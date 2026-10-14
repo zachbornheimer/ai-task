@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -31,6 +32,9 @@ type Spec struct {
 	// Log, when non-nil, also receives both streams in full, interleaved
 	// in the order they arrive: the untruncated record of the run.
 	Log io.Writer
+	// Sandbox, when non-nil, confines the command. Internal tooling leaves
+	// it nil.
+	Sandbox *Sandbox
 }
 
 // Result records what happened. ExitCode is -1 when the process did not
@@ -46,6 +50,9 @@ type Result struct {
 	Err     error
 	Stdout  string
 	Stderr  string
+	// Sandboxed is true when the command ran confined, by its own profile
+	// or by the one it inherited.
+	Sandboxed bool
 }
 
 // Run executes the spec. It never uses a shell. The process is killed when
@@ -67,9 +74,20 @@ func Run(ctx context.Context, spec Spec) Result {
 	cctx, cancel := withOptionalTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := Command(cctx, spec.Dir, spec.Argv[0], spec.Argv[1:]...)
+	argv, cleanup, err := confine(spec)
+	if err != nil {
+		res.Err = err
+		res.FinishedAt = time.Now().UTC()
+		return res
+	}
+	defer cleanup()
+	res.Sandboxed = spec.Sandbox.Active()
+	cmd := Command(cctx, spec.Dir, argv[0], argv[1:]...)
 	if spec.Env != nil {
 		cmd.Env = spec.Env
+	}
+	if res.Sandboxed {
+		cmd.Env = append(envOrInherited(cmd.Env), SandboxEnvVar+"=1")
 	}
 	isolate(cmd)
 	cmd.WaitDelay = 5 * time.Second
@@ -80,7 +98,7 @@ func Run(ctx context.Context, spec Spec) Result {
 		cmd.Stdout, cmd.Stderr = io.MultiWriter(&stdout, log), io.MultiWriter(&stderr, log)
 	}
 
-	err := cmd.Run()
+	err = cmd.Run()
 	res.FinishedAt = time.Now().UTC()
 	res.Stdout, res.Stderr = stdout.String(), stderr.String()
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
@@ -164,4 +182,32 @@ func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Co
 		return context.WithCancel(ctx)
 	}
 	return context.WithTimeout(ctx, timeout)
+}
+
+func envOrInherited(env []string) []string {
+	if env != nil {
+		return env
+	}
+	return os.Environ()
+}
+
+// confine returns the argv to execute: spec's own, or wrapped in the
+// sandbox. A process that already runs confined passes through unwrapped.
+func confine(spec Spec) ([]string, func(), error) {
+	if !spec.Sandbox.Active() {
+		return spec.Argv, func() {}, nil
+	}
+	if Inherited() {
+		return spec.Argv, func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "atask-sandbox-")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create sandbox profile dir: %w", err)
+	}
+	argv, err := spec.Sandbox.wrap(spec.Argv, dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, nil, err
+	}
+	return argv, func() { _ = os.RemoveAll(dir) }, nil
 }

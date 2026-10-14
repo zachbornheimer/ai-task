@@ -139,7 +139,8 @@ that exceeds it is killed and fails. Each run records one shape, shown by
   "timed_out": false,
   "return_code": 0,
   "passed": true,
-  "output": "last 64 KiB of combined stdout and stderr"
+  "output": "last 64 KiB of combined stdout and stderr",
+  "sandboxed": true
 }
 ```
 
@@ -149,6 +150,27 @@ that exceeds it is killed and fails. Each run records one shape, shown by
 | `--regression`         | its `size=`: 30 s unless set or the preset's  |
 | `--on-complete`        | its `size=`: 900 s unless set                 |
 | `--on-complete-detach` | its `size=` (900 s unless set), not waited on |
+
+### Sandbox
+
+On macOS every proof, regression and `--on-complete` command runs under a
+generated Seatbelt profile (`sandbox-exec`): writes under `$HOME` are denied
+except to the check's worktree and its git directory, the Go, mise and
+tool caches, and `TMPDIR`; reads of `~/.ssh`, `~/.aws`, `~/.gnupg`,
+`~/.config/op`, `~/.config/gh`, `~/Library/Keychains`, `~/.netrc`, `~/.docker`
+and `~/.local/state/atask` are denied. Run results report `"sandboxed": true`.
+A check run by an already confined `atask` inherits that confinement.
+
+```toml
+# ~/.config/atask/config.toml
+[sandbox]
+mode = "strict" # default; "none" runs checks unconfined
+extra_write = ["~/scratch"]
+```
+
+Strict mode fails closed: without `sandbox-exec` the run fails `INVALID_INPUT`
+("sandbox unavailable: ...") before any check starts. On other platforms
+checks run unconfined and report `"sandboxed": false`.
 
 ### Output and errors
 
@@ -230,6 +252,7 @@ type RunResult struct {
     ReturnCode *int               // nil when detached or killed
     Passed     bool
     Output     string             // last 64 KiB
+    Sandboxed  bool               // ran inside the Seatbelt sandbox
 }
 
 type ActionResult struct {

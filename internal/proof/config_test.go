@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/process"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -97,3 +98,24 @@ size = "medium"
 }
 
 func runLike(name string) Preset { return CustomPreset{name: name, command: []string{"x"}} }
+
+func TestLoadSandboxConfig(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if cfg, err := LoadSandboxConfig(filepath.Join(dir, "missing.toml")); err != nil || cfg.Mode != process.SandboxStrict {
+		t.Fatalf("default: %+v %v", cfg, err)
+	}
+	cfg, err := LoadSandboxConfig(write("[sandbox]\nmode = \"none\"\nextra_write = [\"~/x\"]\n"))
+	if err != nil || cfg.Mode != process.SandboxNone || len(cfg.ExtraWrite) != 1 {
+		t.Fatalf("%+v %v", cfg, err)
+	}
+	if _, err := LoadSandboxConfig(write("[sandbox]\nmode = \"loose\"\n")); err == nil {
+		t.Fatal("unknown mode must be rejected")
+	}
+}

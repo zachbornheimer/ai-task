@@ -21,7 +21,15 @@ type Runner struct {
 	budget   time.Duration // when > 0, overrides every budget (tests)
 	hasMise  func(workdir string) bool
 	env      []string // when non-nil, the whole environment of every process
+	sandbox  SandboxPolicy
 }
+
+// SandboxPolicy chooses the confinement of a run in dir with env; nil
+// means the run is not confined.
+type SandboxPolicy func(dir string, env []string) *process.Sandbox
+
+// WithSandbox confines every command the runner starts.
+func WithSandbox(p SandboxPolicy) RunnerOption { return func(r *Runner) { r.sandbox = p } }
 
 // RunnerOption configures a Runner.
 type RunnerOption func(*Runner)
@@ -124,7 +132,11 @@ func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, c
 	if r.hasMise(cmd.Dir) {
 		argv = wrapMise(argv)
 	}
-	out := process.Run(ctx, process.Spec{Argv: argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: processTimeout(budget), Log: log})
+	spec2 := process.Spec{Argv: argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: processTimeout(budget), Log: log}
+	if r.sandbox != nil {
+		spec2.Sandbox = r.sandbox(cmd.Dir, cmd.Env)
+	}
+	out := process.Run(ctx, spec2)
 	return r.finishRun(res, spec, cmd.Dir, out, tail), out
 }
 
@@ -132,6 +144,7 @@ func (r *Runner) finishRun(res RunResult, spec ProofSpec, workdir string, out pr
 	res.StartedAt = out.StartedAt
 	res.ElapsedMS = out.FinishedAt.Sub(out.StartedAt).Milliseconds()
 	res.TimedOut = out.TimedOut
+	res.Sandboxed = out.Sandboxed
 	res.Output = tail.String()
 	if !out.Started {
 		res.Output = out.Err.Error()

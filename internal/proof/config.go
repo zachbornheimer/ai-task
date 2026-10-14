@@ -14,6 +14,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/process"
 )
 
 // Injectable boundaries for locating the config file.
@@ -46,9 +47,10 @@ func ConfigPath() string {
 }
 
 type configFile struct {
-	// Sandbox mode and extra_write land separately; the table is shared.
 	Sandbox struct {
-		ExtraEnv []string `toml:"extra_env"`
+		ExtraEnv   []string `toml:"extra_env"`
+		Mode       string   `toml:"mode"`
+		ExtraWrite []string `toml:"extra_write"`
 	} `toml:"sandbox"`
 	Presets map[string]struct {
 		Command []string `toml:"command"`
@@ -174,4 +176,32 @@ func (p CustomPreset) Argv(spec ProofSpec, _ Env) ([]string, error) {
 		return nil, fault.New(fault.CodeInvalidInput, "%s needs option(s): %s", p.name, strings.Join(missing, ", "))
 	}
 	return argv, nil
+}
+
+// SandboxConfig is the [sandbox] table: how checks are confined.
+type SandboxConfig struct {
+	Mode       process.SandboxMode
+	ExtraWrite []string
+}
+
+// LoadSandboxConfig reads [sandbox] from the config file. A missing file or
+// table yields strict mode with no extra paths.
+func LoadSandboxConfig(path string) (SandboxConfig, error) {
+	cfg := SandboxConfig{Mode: process.SandboxStrict}
+	var cf configFile
+	if _, err := toml.DecodeFile(path, &cf); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return cfg, nil
+		}
+		return cfg, fault.Wrap(err, fault.CodeInvalidInput, "config %s", path)
+	}
+	switch mode := process.SandboxMode(cf.Sandbox.Mode); mode {
+	case "":
+	case process.SandboxStrict, process.SandboxNone:
+		cfg.Mode = mode
+	default:
+		return cfg, fault.New(fault.CodeInvalidInput, "config %s: [sandbox] mode %q must be \"strict\" or \"none\"", path, mode)
+	}
+	cfg.ExtraWrite = cf.Sandbox.ExtraWrite
+	return cfg, nil
 }

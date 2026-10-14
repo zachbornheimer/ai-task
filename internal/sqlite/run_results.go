@@ -9,7 +9,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-const runResultColumns = `check_type, preset, subject, options_json, started_at, elapsed_ms, budget_ms, timed_out, return_code, passed, output`
+const runResultColumns = `check_type, preset, subject, options_json, started_at, elapsed_ms, budget_ms, timed_out, return_code, passed, output, sandboxed`
 
 // InsertRunResult records the RunResult of the check that produced evidence
 // evidenceID. Task and attempt come from the verification run.
@@ -24,8 +24,8 @@ func (t *Tx) InsertRunResult(runID, evidenceID int64, r proof.RunResult) error {
 	}
 	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO run_results
 		(task_id, attempt_id, run_id, evidence_id, `+runResultColumns+`)
-		SELECT task_id, attempt_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM verification_runs WHERE id = ?`,
-		runID, evidenceID, r.CheckType, r.Preset, r.Subject, string(opts), ms(r.StartedAt), r.ElapsedMS, budgetColumn(r), r.TimedOut, code, r.Passed, r.Output, runID)
+		SELECT task_id, attempt_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM verification_runs WHERE id = ?`,
+		runID, evidenceID, r.CheckType, r.Preset, r.Subject, string(opts), ms(r.StartedAt), r.ElapsedMS, budgetColumn(r), r.TimedOut, code, r.Passed, r.Output, r.Sandboxed, runID)
 	return wrapInternal(err, "insert run result")
 }
 
@@ -43,7 +43,7 @@ func scanRunResult(sc interface{ Scan(...any) error }) (proof.RunResult, error) 
 	var opts string
 	var started, budget int64
 	var code sql.NullInt64
-	if err := sc.Scan(&r.CheckType, &r.Preset, &r.Subject, &opts, &started, &r.ElapsedMS, &budget, &r.TimedOut, &code, &r.Passed, &r.Output); err != nil {
+	if err := sc.Scan(&r.CheckType, &r.Preset, &r.Subject, &opts, &started, &r.ElapsedMS, &budget, &r.TimedOut, &code, &r.Passed, &r.Output, &r.Sandboxed); err != nil {
 		return r, err
 	}
 	r.StartedAt = fromMS(started)

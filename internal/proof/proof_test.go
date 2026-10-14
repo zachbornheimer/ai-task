@@ -108,12 +108,12 @@ func TestProofSpecContract(t *testing.T) {
 		}
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
-		for _, k := range []string{"check_type", "preset", "subject", "options", "started_at", "elapsed_ms", "budget_ms", "timed_out", "return_code", "passed", "output"} {
+		for _, k := range []string{"check_type", "preset", "subject", "options", "started_at", "elapsed_ms", "budget_ms", "timed_out", "return_code", "passed", "output", "sandboxed"} {
 			if _, ok := m[k]; !ok {
 				t.Errorf("missing key %q in %s", k, b)
 			}
 		}
-		if len(m) != 11 {
+		if len(m) != 12 {
 			t.Errorf("got %d keys: %s", len(m), b)
 		}
 	})
