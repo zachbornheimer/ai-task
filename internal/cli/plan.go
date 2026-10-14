@@ -17,9 +17,9 @@ import (
 )
 
 func init() {
-	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import; re-run to refresh", runInit)
+	register("init", "adopt a directory as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import; re-run to refresh. For a project with no repository use `atask project add NAME`", runInit)
 	register("projects", "list registered projects", runProjects)
-	register("project", "show or configure the current project (trusted): --target-branch, --attempts", runProject)
+	register("project", "show or configure the current project (trusted): --target-branch, --attempts; `project add NAME` creates a project with no repository, whose checks run in the directory the task was claimed from", runProject)
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" | atask add -f plan.yaml|plan.json|-", runAdd)
 	register("update", "change a plan item: atask update REF [--requires REF]* [--remove-requires REF]* [--proof ..] [--regression ..] [--archive --reason ..] [--reset-attempts]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
@@ -143,6 +143,9 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(c.args) > 0 {
+		return runProjectAdd(ctx, c, e)
+	}
 	pid, err := c.resolveProject(ctx)
 	if err != nil {
 		return err
@@ -169,6 +172,21 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 	v := ProjectView{ID: p.ID, Name: p.Name, Path: p.RootPath, TargetBranch: p.TargetBranch, Attempts: p.MaxAttempts}
 	return c.emit(v, func(w io.Writer) {
 		say(w, "Project:  %s · %s\nPath:     %s\nTarget:   %s\nAttempts: %d\n", v.ID, v.Name, v.Path, v.TargetBranch, v.Attempts)
+	})
+}
+
+// runProjectAdd handles `atask project add NAME`: a project with no
+// repository, created idempotently by name.
+func runProjectAdd(ctx context.Context, c *ctxt, e *app.Engine) error {
+	if len(c.args) != 2 || c.args[0] != "add" {
+		return usage("usage: atask project add NAME")
+	}
+	p, err := e.AddProject(ctx, c.args[1])
+	if err != nil {
+		return err
+	}
+	return c.emit(p, func(w io.Writer) {
+		say(w, "✓ Project %s · %s (no repository; checks run in the directory a task is claimed from)\n", p.ID, p.Name)
 	})
 }
 

@@ -189,7 +189,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // leaves behind can be the reason a regression check passes.
 func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project, workDir string) ([]verification.Evidence, error) {
 	var out []verification.Evidence
-	inPlace := proj.IsGeneral() || proj.RootPath == ""
+	inPlace := proj.Rootless()
 	var changed []string
 	if !inPlace {
 		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
@@ -398,7 +398,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		return VerifyResult{}, fault.New(fault.CodeNotReady, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
 	}
 	revision := "general"
-	if !p.proj.IsGeneral() && p.proj.RootPath != "" {
+	if !p.proj.Rootless() {
 		st, err := workspace.RequireClean(ctx, p.dir)
 		if err != nil {
 			return VerifyResult{}, err

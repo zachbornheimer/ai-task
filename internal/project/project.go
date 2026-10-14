@@ -70,6 +70,12 @@ const GeneralName = "general"
 // IsGeneral reports whether p is the default project.
 func (p Project) IsGeneral() bool { return p.Name == GeneralName && p.RootPath == "" }
 
+// Rootless reports whether p has no repository: no root path, so no
+// worktree, no target branch and no base resolution. Checks run in the
+// directory the task was claimed from. general is the built-in rootless
+// project; `atask project add` creates others.
+func (p Project) Rootless() bool { return p.RootPath == "" }
+
 // Validate enforces structural rules on a project record.
 func (p Project) Validate() error {
 	if p.Name == GeneralName {
@@ -77,6 +83,9 @@ func (p Project) Validate() error {
 			return fault.New(fault.CodeInvalidInput, "project name %s is reserved for the default project, which has no root path", GeneralName)
 		}
 		return nil
+	}
+	if p.Rootless() && p.TargetBranch != "" {
+		return fault.New(fault.CodeInvalidInput, "project %s has no repository, so it has no target branch", p.Name)
 	}
 	if strings.TrimSpace(p.Name) == "" {
 		return fault.New(fault.CodeInvalidInput, "project name must not be empty")

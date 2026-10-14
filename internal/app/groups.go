@@ -87,7 +87,7 @@ func (e *Engine) projectHeads(ctx context.Context) (map[project.ID]targetHead, e
 	out := make(map[project.ID]targetHead, len(ps))
 	for i := range ps {
 		p := &ps[i]
-		if p.IsGeneral() || p.RootPath == "" {
+		if p.Rootless() {
 			continue
 		}
 		out[p.ID] = e.targetHeadOf(ctx, *p)

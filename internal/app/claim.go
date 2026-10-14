@@ -184,7 +184,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
-	if proj.IsGeneral() || proj.RootPath == "" {
+	if proj.Rootless() {
 		dir := sess.Task.CreatedCwd
 		if dir == "" {
 			dir = e.cwd

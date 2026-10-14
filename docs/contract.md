@@ -27,6 +27,7 @@ atask verify regression
 atask verify complete [TASK_ID] [--reverify]
 
 atask init [--name NAME] [--path PATH]
+atask project add NAME
 atask projects
 atask project [FLAGS]
 atask doctor
@@ -375,5 +376,9 @@ const (
 - Projects: `general` exists by default and holds tasks filed outside a
   registered repo. `init` registers a repo. `project` sets target branch and
   attempt budget only; a project holds no checks. Agents do not run it.
+  `project add NAME` creates a project with no repository, stored like
+  `general` (no root, no target branch, so `project --target-branch` on it is
+  `INVALID_INPUT`); adding an existing name returns it. Its tasks have no
+  worktree, and their checks run in the directory the task was claimed from.
 - Agent execution, worker pools, planning loops, and model calls stay outside
   atask.
