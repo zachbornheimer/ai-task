@@ -44,6 +44,9 @@ func (c *ctxt) token(ctx context.Context, positional []string) (execution.Token,
 		}
 		raw = line
 	case len(positional) == 1:
+		if !looksLikeToken(positional[0]) {
+			return "", strayArgument(positional[0])
+		}
 		raw = positional[0]
 	}
 	if strings.TrimSpace(raw) == "" {
@@ -372,4 +375,21 @@ func (c *ctxt) findGroup(ctx context.Context, ref string) (project.ID, *app.Engi
 	}
 	v, err := e.Show(ctx, pid, ref, false)
 	return pid, e, err == nil && v.Kind == task.KindGroup
+}
+
+// looksLikeToken reports whether s has the shape of a session token, so a
+// stray word is never mistaken for one.
+func looksLikeToken(s string) bool {
+	_, err := execution.ParseToken(s)
+	return err == nil
+}
+
+// strayArgument explains an extra positional that is not a session token:
+// usually an unquoted multi-word flag value or a task id.
+func strayArgument(arg string) error {
+	what := "an extra argument"
+	if task.IsID(arg) {
+		what = "a task id"
+	}
+	return usage("%q is %s, not a session token: quote flag values (--done \"two words\"); the token comes from the task worktree, ATASK_SESSION, or one positional TOKEN (or '-' for stdin); log and verify act on the claimed task and take no task id", arg, what)
 }

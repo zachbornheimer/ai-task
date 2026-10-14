@@ -330,6 +330,8 @@ in any read view.
 
 ## Token transport
 
+The claim JSON field is `result.token` (`result.session.token` after `add --claim`). `log`, `verify`, `claim renew` and `claim release` accept it identically from the worktree, `ATASK_SESSION`, or one positional `TOKEN` (`-` reads stdin). `log` and `verify` take no task id; any other positional is a usage error, never `malformed session token`.
+
 `claim` is the only command that prints a token, and it also stores the
 token inside the task worktree's private Git directory
 (`.git/worktrees/<name>/atask-session`, never in the tree, never in the
