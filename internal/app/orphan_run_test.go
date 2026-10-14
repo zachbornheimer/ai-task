@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"runtime"
 	"testing"
 	"time"
 
@@ -24,8 +25,14 @@ func startSleepingVerify(t *testing.T, f *fixture) (*app.Engine, app.Session, ta
 	}
 	f.commit(s.Workspace, "o.txt", "o")
 	vctx, cancel := context.WithCancel(f.ctx)
-	t.Cleanup(cancel)
-	go func() { _, _ = e.Verify(vctx, s.Token, verification.ModeComplete) }()
+	verifyDone := make(chan struct{})
+	go func() {
+		defer close(verifyDone)
+		_, _ = e.Verify(vctx, s.Token, verification.ModeComplete)
+	}()
+	// Registered after f's TempDir cleanup, so it runs before it: the run
+	// must be canceled and joined before its files are removed.
+	t.Cleanup(func() { cancel(); <-verifyDone })
 	deadline := time.Now().Add(10 * time.Second)
 	for e != nil && time.Now().Before(deadline) {
 		if v, err := e.Show(f.ctx, f.proj.ID, string(id), false); err == nil && v.Status == task.StatusVerifying {
@@ -100,5 +107,46 @@ func TestLiveVerificationRunIsNotReaped(t *testing.T) {
 	}
 	if v.Status != task.StatusVerifying {
 		t.Fatalf("live run reaped: status %s", v.Status)
+	}
+}
+
+// The run pulse is joined before Verify returns: once the run ends, no
+// goroutine survives and the run's heartbeat is never written again.
+func TestRunPulseStopsWithRun(t *testing.T) {
+	f := newGitFixture(t)
+	e := f.realClockEngine()
+	id := f.addWith("pulse", "sleep 1")
+	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.commit(s.Workspace, "p.txt", "p")
+	before := runtime.NumGoroutine()
+	if _, err := e.Verify(f.ctx, s.Token, verification.ModeComplete); err != nil {
+		t.Fatal(err)
+	}
+	beat := func() int64 {
+		db, err := sql.Open("sqlite", f.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var at int64
+		if err := db.QueryRow(`SELECT heartbeat_at FROM verification_runs ORDER BY id DESC LIMIT 1`).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	first := beat()
+	time.Sleep(3 * testLease / 3)
+	if second := beat(); second != first {
+		t.Fatalf("heartbeat written after Verify returned: %d then %d", first, second)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if after := runtime.NumGoroutine(); after > before {
+		t.Fatalf("goroutines leaked by the run: %d before, %d after", before, after)
 	}
 }
