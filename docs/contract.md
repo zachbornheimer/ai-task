@@ -1,8 +1,8 @@
 # atask contract
 
-# CLI
+## CLI
 
-```
+```text
 atask
 atask help [COMMAND]
 atask version
@@ -33,9 +33,9 @@ atask doctor
 atask prune
 ```
 
-**Task flags** (`add` and `update`)
+### Task flags (`add` and `update`)
 
-```
+```text
 --key KEY
 --group
 --parent TASK_ID
@@ -55,22 +55,22 @@ atask prune
 --reset-attempts
 ```
 
-**Project flags** (`project`, human-configured; a project holds no checks)
+### Project flags (`project`, human-configured; a project holds no checks)
 
-```
+```text
 --target-branch NAME
 --attempts N
 ```
 
-**Global flags**
+### Global flags
 
-```
+```text
 --project NAME|ID      default: general
 --db PATH
 --json                 also ATASK_OUTPUT=json
 ```
 
-**Presets**
+### Presets
 
 Every task declares two proofs: `--proof` proves this task works, `--regression`
 proves it broke nothing else. Every command is `"PRESET: SUBJECT [key=value ...]"`.
@@ -116,7 +116,7 @@ small `go_test` on a whole tree with no `name`, and `run` arguments that embed
 encoded code. A `*_test` that runs zero tests fails at verify; exit 0 alone
 never passes a `*_test` preset.
 
-**Run result**
+### Run result
 
 Every proof, regression, and action run must finish inside its budget. A run
 that exceeds it is killed and fails. Each run records one shape, shown by
@@ -145,7 +145,7 @@ that exceeds it is killed and fails. Each run records one shape, shown by
 | `--on-complete`        | 900 s                  |
 | `--on-complete-detach` | none, not waited on    |
 
-**Output and errors**
+### Output and errors
 
 Every command prints `{"ok":true,"result":...}` or
 `{"ok":false,"error":{"code":CODE,"message":TEXT}}` under `--json`. Codes:
@@ -156,7 +156,7 @@ with an empty board), `STALLED` (claim --wait with only blocked tasks).
 Lease is 30 minutes; `claim renew` extends it by 30 minutes from now and never
 shortens it. Default attempt budget is 3 per task.
 
-# Public Code API
+## Public Code API
 
 ```go
 type Engine interface {
@@ -176,7 +176,7 @@ type Engine interface {
 }
 ```
 
-**Core types**
+### Core types
 
 ```go
 type ChangeSet struct {
@@ -261,7 +261,7 @@ type VerifyRequest struct {
 }
 ```
 
-**Constants**
+### Constants
 
 ```go
 const (
@@ -306,7 +306,7 @@ const (
 )
 ```
 
-**Contract semantics**
+### Contract semantics
 
 - `Apply`: atomic creation, updates, parent relationships, dependencies, both
   proofs, and `on_complete` configuration. A task filed without both proofs is a draft: listed under its own glyph, never claimable, no attempt budget. Giving it both proofs makes it ready. Vacuity rules apply once proofs are supplied. A task missing any required field is a draft; the required fields are proof and regression (the title is required at add). Adding an open title that already exists

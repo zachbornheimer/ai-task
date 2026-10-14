@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	cliHeading        = "# CLI"
-	taskFlagsMarker   = "**Task flags**"
-	projectFlagMarker = "**Project flags**"
-	globalFlagsMarker = "**Global flags**"
+	cliHeading        = "## CLI"
+	taskFlagsMarker   = "### Task flags"
+	projectFlagMarker = "### Project flags"
+	globalFlagsMarker = "### Global flags"
 	engineDeclaration = "type Engine interface"
 	commandPrefix     = "atask"
 	flagPrefix        = "--"
@@ -269,7 +269,7 @@ func appendUnique(list []string, item string) []string {
 	return append(list, item)
 }
 
-const errorsMarker = "**Output and errors**"
+const errorsMarker = "### Output and errors"
 
 var errorCode = regexp.MustCompile("`([A-Z][A-Z_]+)`")
 
