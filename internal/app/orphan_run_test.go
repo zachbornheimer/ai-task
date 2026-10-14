@@ -124,11 +124,22 @@ func TestLiveVerificationRunIsNotReaped(t *testing.T) {
 	}
 }
 
+const (
+	// pulseTestLease is far longer than the 1s run, so scheduler delay under
+	// load cannot expire the claim; the renewal interval is set separately
+	// so the pulse still ticks several times during the run.
+	pulseTestLease = time.Minute
+	pulseInterval  = 500 * time.Millisecond
+	// pulseQuietPeriod is three pulse intervals: a leaked pulse would tick
+	// within it.
+	pulseQuietPeriod = 3 * pulseInterval
+)
+
 // The run pulse is joined before Verify returns: once the run ends, no
 // goroutine survives and the run's heartbeat is never written again.
 func TestRunPulseStopsWithRun(t *testing.T) {
 	f := newGitFixture(t)
-	e := f.realClockEngine()
+	e := f.realClockEngineWithLease(pulseTestLease, pulseInterval)
 	id := f.addWith("pulse", "sleep 1")
 	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id})
 	if err != nil {
@@ -152,7 +163,7 @@ func TestRunPulseStopsWithRun(t *testing.T) {
 		return at
 	}
 	first := beat()
-	time.Sleep(3 * testLease / 3)
+	time.Sleep(pulseQuietPeriod)
 	if second := beat(); second != first {
 		t.Fatalf("heartbeat written after Verify returned: %d then %d", first, second)
 	}

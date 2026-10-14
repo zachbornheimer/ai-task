@@ -22,8 +22,15 @@ const (
 // wall-clock time and accepts sub-minute leases, so a run can genuinely
 // outlive its lease.
 func (f *fixture) realClockEngine() *app.Engine {
+	return f.realClockEngineWithLease(testLease, 0)
+}
+
+// realClockEngineWithLease is realClockEngine with an explicit lease and
+// renewal interval (zero keeps the lease/3 default), for tests that must not
+// lose their lease to scheduler delay under load.
+func (f *fixture) realClockEngineWithLease(lease, renewEvery time.Duration) *app.Engine {
 	e, err := app.Open(f.ctx, app.Config{
-		Path: f.path, PollInterval: 50 * time.Millisecond, Lease: testLease,
+		Path: f.path, PollInterval: 50 * time.Millisecond, Lease: lease, HeartbeatInterval: renewEvery,
 		Switch: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")},
 	})
 	if err != nil {
