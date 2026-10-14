@@ -14,7 +14,6 @@ import (
 const (
 	testLease      = 2 * time.Second
 	testRunLength  = "5"
-	testMinLease   = time.Second
 	supersedeAfter = 700 * time.Millisecond
 )
 
@@ -23,7 +22,7 @@ const (
 // outlive its lease.
 func (f *fixture) realClockEngine() *app.Engine {
 	e, err := app.Open(f.ctx, app.Config{
-		Path: f.path, PollInterval: 50 * time.Millisecond, MinLease: testMinLease,
+		Path: f.path, PollInterval: 50 * time.Millisecond, Lease: testLease,
 		Switch: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")},
 	})
 	if err != nil {
@@ -39,7 +38,7 @@ func TestVerifyRenewsLeaseDuringRun(t *testing.T) {
 	f := newGitFixture(t)
 	e := f.realClockEngine()
 	a := f.addWith("a", "sleep "+testRunLength)
-	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &a, Lease: testLease})
+	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +66,7 @@ func TestVerifyCancelsRunWhenSessionLostMidRun(t *testing.T) {
 	f := newGitFixture(t)
 	e := f.realClockEngine()
 	b := f.addWith("b", "sleep "+testRunLength)
-	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &b, Lease: testLease})
+	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &b})
 	if err != nil {
 		t.Fatal(err)
 	}

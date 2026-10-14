@@ -55,20 +55,19 @@ type SubmissionView struct {
 
 // RunView is a verification run with its evidence.
 type RunView struct {
-	ID                 int64                   `json:"id"`
-	Mode               verification.Mode       `json:"mode"`
-	Status             sqlite.RunStatus        `json:"status"`
-	AttemptSeq         int                     `json:"attempt,omitempty"`
-	SubmissionID       int64                   `json:"submission_id,omitempty"`
-	JobID              int64                   `json:"job_id,omitempty"`
-	Revision           string                  `json:"revision,omitempty"`
-	IntegratedRevision string                  `json:"integrated_revision,omitempty"`
-	PolicyDigest       string                  `json:"policy_digest"`
-	Environment        string                  `json:"environment,omitempty"`
-	StartedAt          *time.Time              `json:"started_at,omitempty"`
-	FinishedAt         *time.Time              `json:"finished_at,omitempty"`
-	Summary            string                  `json:"summary,omitempty"`
-	Evidence           []verification.Evidence `json:"evidence,omitempty"`
+	ID           int64                   `json:"id"`
+	Mode         verification.Mode       `json:"mode"`
+	Status       sqlite.RunStatus        `json:"status"`
+	AttemptSeq   int                     `json:"attempt,omitempty"`
+	SubmissionID int64                   `json:"submission_id,omitempty"`
+	JobID        int64                   `json:"job_id,omitempty"`
+	Revision     string                  `json:"revision,omitempty"`
+	PolicyDigest string                  `json:"policy_digest"`
+	Environment  string                  `json:"environment,omitempty"`
+	StartedAt    *time.Time              `json:"started_at,omitempty"`
+	FinishedAt   *time.Time              `json:"finished_at,omitempty"`
+	Summary      string                  `json:"summary,omitempty"`
+	Evidence     []verification.Evidence `json:"evidence,omitempty"`
 }
 
 // VerificationSummary shows the latest run of each kind.
@@ -80,11 +79,10 @@ type VerificationSummary struct {
 
 // History is the opt-in full record of a task.
 type History struct {
-	Logs         []execution.RecordedLog `json:"logs"`
-	Attempts     []AttemptView           `json:"attempts"`
-	Submissions  []SubmissionView        `json:"submissions"`
-	Runs         []RunView               `json:"runs"`
-	Integrations []sqlite.Integration    `json:"integrations"`
+	Logs        []execution.RecordedLog `json:"logs"`
+	Attempts    []AttemptView           `json:"attempts"`
+	Submissions []SubmissionView        `json:"submissions"`
+	Runs        []RunView               `json:"runs"`
 }
 
 // TaskView is the read model for one task or group.
@@ -103,7 +101,6 @@ type TaskView struct {
 	Checks      []verification.CheckSpec   `json:"task_checks,omitempty"`
 	Proof       *proof.ProofSpec           `json:"proof,omitempty"`
 	Regression  *proof.ProofSpec           `json:"regression,omitempty"`
-	Pins        []string                   `json:"pins,omitempty"`
 	Size        string                     `json:"size,omitempty"`
 	ContractRev int                        `json:"contract_rev"`
 	Status      task.Status                `json:"status"`
@@ -122,11 +119,7 @@ type TaskView struct {
 	// GroupVerification is an epic's own verification state (groups with
 	// checks only).
 	GroupVerification *GroupVerification `json:"group_verification,omitempty"`
-	// Integration is the open promotion intent while the task is
-	// awaiting_integration: the candidate has been verified and is being
-	// (or was) promoted; completion follows.
-	Integration *IntentView `json:"integration,omitempty"`
-	Failures    int         `json:"failures,omitempty"`
+	Failures          int                `json:"failures,omitempty"`
 	// RunResults is every recorded check run of the task, oldest first
 	// (full depth only).
 	RunResults []proof.RunResult `json:"run_results,omitempty"`
@@ -236,22 +229,18 @@ type Session struct {
 
 // VerifyResult reports one verification invocation.
 type VerifyResult struct {
-	TaskID             task.ID                 `json:"task_id"`
-	Mode               verification.Mode       `json:"mode"`
-	RunID              int64                   `json:"run_id,omitempty"`
-	Revision           string                  `json:"revision,omitempty"`
-	IntegratedRevision string                  `json:"integrated_revision,omitempty"`
-	Passed             bool                    `json:"passed"`
-	Completed          bool                    `json:"completed"`
-	SubmissionID       int64                   `json:"submission_id,omitempty"`
-	Status             task.Status             `json:"status"`
-	Summary            string                  `json:"summary"`
-	Evidence           []verification.Evidence `json:"evidence"`
-	Message            string                  `json:"message,omitempty"`
-	Replayed           bool                    `json:"replayed,omitempty"`
-	// Conflicts lists the files that stopped the submitted revision from
-	// merging into the target branch (BASE_CONFLICT only).
-	Conflicts []string `json:"conflicts,omitempty"`
+	TaskID       task.ID                 `json:"task_id"`
+	Mode         verification.Mode       `json:"mode"`
+	RunID        int64                   `json:"run_id,omitempty"`
+	Revision     string                  `json:"revision,omitempty"`
+	Passed       bool                    `json:"passed"`
+	Completed    bool                    `json:"completed"`
+	SubmissionID int64                   `json:"submission_id,omitempty"`
+	Status       task.Status             `json:"status"`
+	Summary      string                  `json:"summary"`
+	Evidence     []verification.Evidence `json:"evidence"`
+	Message      string                  `json:"message,omitempty"`
+	Replayed     bool                    `json:"replayed,omitempty"`
 	// Warnings: checks that passed but used more than half their budget.
 	Warnings []string `json:"warnings,omitempty"`
 	// Actions are the task's on-complete actions after this call ran any
@@ -296,7 +285,7 @@ func submissionView(s *sqlite.Submission) *SubmissionView {
 }
 
 func runView(r sqlite.Run, attemptSeq int, evidence []verification.Evidence) RunView {
-	return RunView{ID: r.ID, Mode: r.Mode, Status: r.Status, AttemptSeq: attemptSeq, SubmissionID: r.SubmissionID, JobID: r.JobID, Revision: r.Revision, IntegratedRevision: r.IntegratedRevision, PolicyDigest: r.PolicyDigest, Environment: r.Environment, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt, Summary: r.Summary, Evidence: evidence}
+	return RunView{ID: r.ID, Mode: r.Mode, Status: r.Status, AttemptSeq: attemptSeq, SubmissionID: r.SubmissionID, JobID: r.JobID, Revision: r.Revision, PolicyDigest: r.PolicyDigest, Environment: r.Environment, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt, Summary: r.Summary, Evidence: evidence}
 }
 
 // viewDepth selects how much of a task to load.
@@ -338,7 +327,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	t := r.Task
 	v := TaskView{
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
-		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, Pins: t.Pins, Size: t.Size, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
+		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, Size: t.Size, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, Creator: t.Creator, CreatedCwd: t.CreatedCwd, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 	}
@@ -349,12 +338,6 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 			v.AttentionReason = fmt.Sprintf("attempts exhausted (%d failures); `atask update --reset-attempts` after fixing the cause", r.Failures)
 		case facts.WorkspaceBlocked:
 			v.AttentionReason = "workspace unusable: " + r.WorkspaceError + "; fix the worktree and `atask claim " + string(t.ID) + "`, or `atask update --reset-attempts`"
-		}
-	}
-	if st == task.StatusAwaitingIntegration {
-		if in, err := tx.ActiveIntentForTask(t.ID); err == nil && in != nil {
-			iv := intentView(*in)
-			v.Integration = &iv
 		}
 	}
 	if !r.NextEligibleAt.IsZero() && r.NextEligibleAt.After(now) {
@@ -471,7 +454,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		}
 	}
 	if depth == viewFull {
-		hist := &History{Logs: []execution.RecordedLog{}, Attempts: []AttemptView{}, Submissions: []SubmissionView{}, Runs: []RunView{}, Integrations: []sqlite.Integration{}}
+		hist := &History{Logs: []execution.RecordedLog{}, Attempts: []AttemptView{}, Submissions: []SubmissionView{}, Runs: []RunView{}}
 		if hist.Logs, err = tx.Logs(t.ID, 10000, 0); err != nil {
 			return v, err
 		}
@@ -492,14 +475,8 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 			}
 			hist.Runs = append(hist.Runs, runView(run, seqOf[run.AttemptID], ev))
 		}
-		if hist.Integrations, err = tx.IntegrationsForTask(t.ID); err != nil {
-			return v, err
-		}
 		if hist.Logs == nil {
 			hist.Logs = []execution.RecordedLog{}
-		}
-		if hist.Integrations == nil {
-			hist.Integrations = []sqlite.Integration{}
 		}
 		v.History = hist
 		if v.RunResults, err = tx.RunResultsForTask(string(t.ID)); err != nil {

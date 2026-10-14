@@ -24,9 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/project"
-	"github.com/zachbornheimer/ai-task/internal/proof"
-
 	at "github.com/zachbornheimer/ai-task"
 )
 
@@ -67,16 +64,11 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	if err != nil {
 		return err
 	}
-	// The cohort demo needs verified work to land on the target branch.
-	proj.Integration = project.IntegrationPromote
-	if err := eng.UpdateProject(ctx, proj); err != nil {
-		return err
-	}
 
 	// Step A: propose and apply atomically.
 	prompt := "Build the OAuth token endpoint with a Postgres token store and scope enforcement, then verify the flow end to end."
 	proposal := fakePlanner(prompt)
-	snap, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.ListAll})
+	snap, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.FilterAll})
 	if err != nil {
 		return err
 	}
@@ -88,7 +80,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	const maxReviewRounds = 6
 	stable := false
 	for round := 0; round < maxReviewRounds; round++ {
-		current, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.ListAll})
+		current, err := eng.List(ctx, at.ListQuery{ProjectID: proj.ID, Filter: at.FilterAll})
 		if err != nil {
 			return err
 		}
@@ -166,7 +158,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 			// Verify(complete) already ended nothing; the claim is still
 			// ours, so release it for the next attempt.
 			fmt.Fprintf(out, "worker %d: %s agent error: %v\n", n, session.Task.ID, err)
-			_, _ = eng.Log(ctx, session.Token, at.LogEntry{Note: "agent error: " + err.Error()})
+			_ = eng.Log(ctx, session.Token, at.LogEntry{Note: "agent error: " + err.Error()})
 			_ = eng.Release(ctx, at.ReleaseRequest{Token: session.Token, Note: "released after agent error", Failed: true})
 		}
 	}
@@ -179,7 +171,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	stop := heartbeat(ctx, eng, s.Token)
 	defer stop()
 	fmt.Fprintf(out, "worker %d: claimed %s (%s)\n", n, s.Task.ID, s.Task.Title)
-	if _, err := eng.Log(ctx, s.Token, at.LogEntry{Done: "read the contract", Next: "implement " + s.Task.Title}); err != nil {
+	if err := eng.Log(ctx, s.Token, at.LogEntry{Done: "read the contract", Next: "implement " + s.Task.Title}); err != nil {
 		return err
 	}
 	// "Implement": write the file the task's check expects, commit it.
@@ -199,12 +191,12 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	}
 	// Iterate with provisional checks (a failure here is information for
 	// the agent, not an error), then establish completion.
-	if diag, err := eng.Verify(ctx, s.Token, at.VerifyProof); err != nil && at.ErrorCode(err) != "CHECK_FAILED" {
+	if diag, err := eng.Verify(ctx, at.VerifyRequest{TaskID: s.Task.ID, Token: s.Token, Mode: at.VerifyProof}); err != nil && at.ErrorCode(err) != "CHECK_FAILED" {
 		return err
 	} else if !diag.Passed {
-		_, _ = eng.Log(ctx, s.Token, at.LogEntry{Note: "provisional task checks: " + diag.Summary})
+		_ = eng.Log(ctx, s.Token, at.LogEntry{Note: "provisional task checks: " + diag.Summary})
 	}
-	res, err := eng.Verify(ctx, s.Token, at.VerifyComplete)
+	res, err := eng.Verify(ctx, at.VerifyRequest{TaskID: s.Task.ID, Token: s.Token, Mode: at.VerifyComplete})
 	if err != nil {
 		return err
 	}
@@ -235,23 +227,28 @@ func heartbeat(ctx context.Context, eng *at.Store, tok at.SessionToken) func() {
 }
 
 // regressionProof is every task's own "nothing else broke" proof.
-var regressionProof = &proof.ProofSpec{Preset: "run", Subject: "test -d .", Options: map[string]string{}, Size: proof.SizeSmall}
+var regressionProof = &at.ProofSpec{Preset: "run", Subject: "test -d .", Options: map[string]string{}, Size: at.SizeSmall}
+
+// fileProof proves a task wrote its file.
+func fileProof(file string) *at.ProofSpec {
+	return &at.ProofSpec{Preset: "run", Subject: "test -f " + file, Options: map[string]string{}}
+}
 
 // fakePlanner turns the prompt into a typed proposal. A real planner asks a
 // model and parses its answer into the same closed set of changes.
 func fakePlanner(prompt string) []at.Change {
-	check := func(key string) []at.CheckSpec {
-		return []at.CheckSpec{{ID: "unit-" + key, Command: []string{"test", "-f", key + ".txt"}, Required: true}}
+	task := func(key, title, parent string, requires ...at.Ref) at.AddTask {
+		return at.AddTask{Key: key, Title: title, Parent: at.Ref(parent), Requires: requires, Proof: fileProof(key + ".txt"), Regression: regressionProof}
 	}
 	return []at.Change{
-		at.AddGroup{Key: "identity", Title: "Identity Core"},
-		at.AddTask{Key: "compat", Regression: regressionProof, Title: "Confirm OAuth API compatibility", Parent: "identity", TaskChecks: check("compat")},
-		at.AddTask{Key: "store", Regression: regressionProof, Title: "Implement PostgreSQL token store", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("store")},
-		at.AddTask{Key: "scopes", Regression: regressionProof, Title: "Implement scope enforcement", Parent: "identity", Requires: []at.Ref{"compat"}, TaskChecks: check("scopes")},
-		at.AddTask{Key: "e2e", Regression: regressionProof, Title: "Verify end-to-end OAuth flow", Parent: "identity", Requires: []at.Ref{"store", "scopes"}, TaskChecks: check("e2e")},
-		at.AddGroup{Key: "oauth-flow", Title: "OAuth flow", TaskChecks: []at.CheckSpec{{ID: "flow", Command: []string{"sh", "-c", "test -f api.txt && test -f ui.txt"}, Required: true}}},
-		at.AddTask{Key: "api", Regression: regressionProof, Title: "OAuth API side", Parent: "oauth-flow", TaskChecks: check("api")},
-		at.AddTask{Key: "ui", Regression: regressionProof, Title: "OAuth UI side", Parent: "oauth-flow", TaskChecks: check("ui")},
+		at.AddGroup{Key: "identity", Title: "Identity Core", Proof: fileProof("compat.txt"), Regression: regressionProof},
+		task("compat", "Confirm OAuth API compatibility", "identity"),
+		task("store", "Implement PostgreSQL token store", "identity", "compat"),
+		task("scopes", "Implement scope enforcement", "identity", "compat"),
+		task("e2e", "Verify end-to-end OAuth flow", "identity", "store", "scopes"),
+		at.AddGroup{Key: "oauth-flow", Title: "OAuth flow", Proof: &at.ProofSpec{Preset: "run", Subject: "sh -c 'test -f api.txt && test -f ui.txt'", Options: map[string]string{}}, Regression: regressionProof},
+		task("api", "OAuth API side", "oauth-flow"),
+		task("ui", "OAuth UI side", "oauth-flow"),
 	}
 }
 
@@ -265,12 +262,12 @@ func fakeReviewer(current at.PlanSnapshot) []at.Change {
 		}
 	}
 	return []at.Change{
-		at.AddTask{Key: "rotate", Regression: regressionProof, Title: "Rotate leaked credentials", Blocks: []at.Ref{"store"}, TaskChecks: []at.CheckSpec{{ID: "unit-rotate", Command: []string{"test", "-f", "rotate.txt"}, Required: true}}},
+		at.AddTask{Key: "rotate", Title: "Rotate leaked credentials", Blocks: []at.Ref{"store"}, Proof: fileProof("rotate.txt"), Regression: regressionProof},
 	}
 }
 
 func printPlan(ctx context.Context, eng *at.Store, project at.ProjectID, out *os.File) {
-	snap, err := eng.List(ctx, at.ListQuery{ProjectID: project, Filter: at.ListAll})
+	snap, err := eng.List(ctx, at.ListQuery{ProjectID: project, Filter: at.FilterAll})
 	if err != nil {
 		fmt.Fprintln(out, err)
 		return

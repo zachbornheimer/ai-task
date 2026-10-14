@@ -10,7 +10,6 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
-	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -32,17 +31,7 @@ func (f *fixture) completeWith(id task.ID, file, content string) string {
 // a dependent's base is built from completed revisions alone.
 func stackedFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := newFixture(t)
-	p, err := f.e.Project(f.ctx, f.proj.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p.Integration = project.IntegrationNone
-	if err := f.e.UpdateProject(f.ctx, p); err != nil {
-		t.Fatal(err)
-	}
-	f.proj = p
-	return f
+	return newFixture(t)
 }
 
 func (f *fixture) isAncestor(dir, rev string) bool {

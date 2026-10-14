@@ -30,8 +30,7 @@ type ClaimRequest struct {
 	// nothing can proceed (ErrStalled), or ctx ends. While waiting, the
 	// caller runs any pending cohort verification job, since it has
 	// capacity and the job must not depend on a hidden extra command.
-	Wait  bool
-	Lease time.Duration
+	Wait bool
 }
 
 // Claim atomically starts an execution attempt and returns its session.
@@ -40,10 +39,7 @@ type ClaimRequest struct {
 // after the transaction (Git never runs inside one) and recorded by a
 // second short transaction.
 func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
-	lease, err := execution.LeaseDurationAtLeast(req.Lease, e.minLease)
-	if err != nil {
-		return Session{}, err
-	}
+	lease := e.lease
 	if req.TaskID == nil && req.ProjectID == "" {
 		if _, err := e.EnsureGeneral(ctx); err != nil {
 			return Session{}, err
@@ -355,8 +351,6 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 		return fault.New(fault.CodeConflict, "%s is claimed by attempt %d until %s", id, r.Attempt.Seq, r.Attempt.LeaseExpiresAt.Format(time.RFC3339))
 	case task.StatusVerifying, task.StatusAwaitingVerification:
 		return fault.New(fault.CodeNotReady, "%s has a submission being verified", id)
-	case task.StatusAwaitingIntegration:
-		return fault.New(fault.CodeNotReady, "%s is verified and awaiting integration", id)
 	case task.StatusComplete:
 		return fault.New(fault.CodeConflict, "%s is complete", id)
 	case task.StatusNeedsAttention:

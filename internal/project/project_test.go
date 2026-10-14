@@ -9,15 +9,12 @@ import (
 )
 
 func TestGeneralProjectValidates(t *testing.T) {
-	p := Project{Name: GeneralName, Integration: IntegrationNone, MaxAttempts: DefaultMaxAttempts}
+	p := Project{Name: GeneralName, MaxAttempts: DefaultMaxAttempts}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	if !p.IsGeneral() {
 		t.Fatal("name general with no root must be the default project")
-	}
-	if err := (Project{Name: GeneralName, Integration: IntegrationPromote}).Validate(); err == nil {
-		t.Fatal("general promote must be rejected")
 	}
 }
 
@@ -100,14 +97,13 @@ func TestMatchRoot(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	ok := Project{ID: NewID(), Name: "x", Integration: IntegrationNone}
+	ok := Project{ID: NewID(), Name: "x"}
 	if err := ok.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	bad := []Project{
-		{ID: NewID(), Name: " ", Integration: IntegrationNone},
-		{Name: "x", Integration: "weird"},
-		{Name: "x", Integration: IntegrationNone, RootPath: "relative"},
+		{ID: NewID(), Name: " "},
+		{Name: "x", RootPath: "relative"},
 	}
 	for _, p := range bad {
 		if err := p.Validate(); !fault.Is(err, fault.CodeInvalidInput) {

@@ -106,6 +106,7 @@ func TestNoEvidenceReuseAndSameSnapshot(t *testing.T) {
 	// the check again: no cross-run reuse.
 	b := f.apply(plan.AddTask{Key: "b", Title: "b", TaskChecks: []verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; test \"$(cat f.txt)\" = committed", true)}}).Created["b"]
 	sb := f.claim(string(b))
+	f.commit(sb.Workspace, "f.txt", "committed")
 	resB := f.complete(sb)
 	if runs() != 2 {
 		t.Fatalf("evidence reused: runs=%d", runs())
@@ -128,7 +129,7 @@ func TestNoEvidenceReuseAndSameSnapshot(t *testing.T) {
 	f.complete(sc)
 }
 
-func TestFinalSuccessIsAtomicAndPromotes(t *testing.T) {
+func TestFinalSuccessIsAtomicAndStacksDependents(t *testing.T) {
 	f := newGitFixture(t)
 	a := f.add("a")
 	d := f.add("d", "a")
@@ -141,18 +142,16 @@ func TestFinalSuccessIsAtomicAndPromotes(t *testing.T) {
 	// Claim ended atomically with completion.
 	_, err = f.e.Log(f.ctx, s.Token, execution.LogEntry{Done: "late"})
 	wantCode(t, err, fault.CodeInvalidSession)
-	// Promoted to main: the main worktree has the file.
-	if b, _ := os.ReadFile(filepath.Join(f.repo, "a.txt")); string(b) != "a" {
-		t.Fatal("not promoted")
-	}
-	if f.git(f.repo, "rev-parse", "main") != rev {
-		t.Fatal("main not at the verified revision")
+	// Completion leaves the target branch alone: moving it is an
+	// on_complete action's job.
+	if _, err := os.Stat(filepath.Join(f.repo, "a.txt")); err == nil {
+		t.Fatal("completion changed the target branch")
 	}
 	v := f.show(string(a))
 	if v.CompletedRevision != rev || v.Verification.Complete == nil || v.Verification.Complete.Status != "passed" {
 		t.Fatalf("%+v", v)
 	}
-	// Downstream is released and its worktree starts from the promoted main.
+	// Downstream is released and its worktree starts from the completed revision.
 	sd := f.claim(string(d))
 	if b, _ := os.ReadFile(filepath.Join(sd.Workspace, "a.txt")); string(b) != "a" {
 		t.Fatal("dependent worktree lacks the prerequisite's change")
@@ -163,11 +162,6 @@ func TestFinalSuccessIsAtomicAndPromotes(t *testing.T) {
 	again, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
 	if err != nil || !again.Replayed || !again.Completed || again.RunID != before {
 		t.Fatalf("%+v %v", again, err)
-	}
-	// Full history shows the integration record.
-	full, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true)
-	if full.History == nil || len(full.History.Integrations) != 1 || full.History.Integrations[0].ResultRevision != rev {
-		t.Fatalf("%+v", full.History)
 	}
 }
 
@@ -312,51 +306,6 @@ func TestVerifierCrashRecovery(t *testing.T) {
 		t.Fatal("work not carried over")
 	}
 	f.complete(s2)
-}
-
-func TestIntegrationConflictDoesNotComplete(t *testing.T) {
-	f := newGitFixture(t)
-	a := f.add("a")
-	s := f.claim(string(a))
-	f.commit(s.Workspace, "f.txt", "from a")
-	// main moves with a conflicting change before a verifies.
-	f.commit(f.repo, "f.txt", "from main")
-	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeBaseConflict)
-	if f.status(string(a)) == task.StatusComplete || f.git(f.repo, "rev-parse", "HEAD") != f.git(f.repo, "rev-parse", "main") {
-		t.Fatal("completed or moved target despite conflict")
-	}
-	// The refusal names the conflicting files and the remedy, and no check
-	// ran: the merge is checked before any check time is spent.
-	if len(res.Conflicts) != 1 || res.Conflicts[0] != "f.txt" || !strings.Contains(res.Message, "wt step rebase main") || len(res.Evidence) != 0 {
-		t.Fatalf("conflict result: %+v", res)
-	}
-	if v := f.show(string(a)); v.Failures != 0 || !strings.Contains(v.LastError, "f.txt") {
-		t.Fatalf("conflict must be recorded without a strike: failures=%d last_error=%q", v.Failures, v.LastError)
-	}
-	if b, _ := os.ReadFile(filepath.Join(f.repo, "f.txt")); string(b) != "from main" {
-		t.Fatal("target content changed")
-	}
-	// Non-conflicting divergence: merged candidate is verified, then promoted.
-	b := f.add("b")
-	sb := f.claim(string(b))
-	f.commit(sb.Workspace, "b.txt", "b")
-	f.commit(f.repo, "other.txt", "main again")
-	res, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	if err != nil || !res.Completed || res.IntegratedRevision == "" || res.IntegratedRevision == res.Revision {
-		t.Fatalf("%+v %v", res, err)
-	}
-	if f.git(f.repo, "rev-parse", "main") != res.IntegratedRevision {
-		t.Fatal("main not at merged candidate")
-	}
-	// Evidence exists for both the submitted revision and the candidate.
-	revs := map[string]bool{}
-	for _, ev := range res.Evidence {
-		revs[ev.Revision] = true
-	}
-	if !revs[res.Revision] || !revs[res.IntegratedRevision] {
-		t.Fatalf("evidence revisions: %v", revs)
-	}
 }
 
 func TestGoTestCacheDisabledInCheckEnvironment(t *testing.T) {

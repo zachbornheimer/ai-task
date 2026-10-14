@@ -47,9 +47,9 @@ type Config struct {
 	// HeartbeatInterval is how often a long operation renews its lease.
 	// Zero means execution.HeartbeatInterval.
 	HeartbeatInterval time.Duration
-	// MinLease lowers the shortest lease a claim may request. Zero means
-	// execution.MinLease; only tests need a smaller value.
-	MinLease time.Duration
+	// Lease is the lease every claim grants. Zero means
+	// execution.DefaultLease (30 minutes); only tests need another value.
+	Lease time.Duration
 	// Switch creates task worktrees. Nil means WorktrunkSwitcher.
 	Switch workspace.Switcher
 	// Actor is recorded on newly created tasks (ATASK_ACTOR or USER).
@@ -72,7 +72,7 @@ type Engine struct {
 	poll    time.Duration
 	// heartbeatEvery is the lease renewal interval of long operations.
 	heartbeatEvery time.Duration
-	minLease       time.Duration
+	lease          time.Duration
 	swt            workspace.Switcher
 	actor          string
 	cwd            string
@@ -122,15 +122,15 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if hb <= 0 {
 		hb = execution.HeartbeatInterval
 	}
-	minLease := cfg.MinLease
-	if minLease <= 0 {
-		minLease = execution.MinLease
+	lease := cfg.Lease
+	if lease <= 0 {
+		lease = execution.DefaultLease
 	}
 	// Storage keeps millisecond precision; truncating here keeps values the
 	// caller sees identical to what a later read returns.
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
-		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, minLease: minLease, changed: make(chan struct{}),
+		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, lease: lease, changed: make(chan struct{}),
 		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget,
 	}, nil
 }
@@ -246,7 +246,7 @@ func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitR
 		return res, fault.New(fault.CodeInvalidInput, "a project needs a directory")
 	}
 	now := e.now()
-	p := project.Project{ID: project.NewID(), Name: strings.TrimSpace(name), Integration: project.IntegrationNone, MaxAttempts: project.DefaultMaxAttempts, CreatedAt: now, UpdatedAt: now}
+	p := project.Project{ID: project.NewID(), Name: strings.TrimSpace(name), MaxAttempts: project.DefaultMaxAttempts, CreatedAt: now, UpdatedAt: now}
 	root, err := project.LocateRoot(dir)
 	if err != nil {
 		return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
@@ -424,10 +424,7 @@ func (e *Engine) reconcile(ctx context.Context) error {
 	if err == nil && n > 0 {
 		e.notify()
 	}
-	if err != nil {
-		return err
-	}
-	return e.reconcileIntents(ctx)
+	return err
 }
 
 // effectivePolicy merges a task's checks with the project regression

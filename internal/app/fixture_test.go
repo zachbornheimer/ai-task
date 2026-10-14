@@ -83,7 +83,6 @@ func newGitFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.promote()
 	f.setRegression(check("regress", "test -d .", true))
 	return f
 }
@@ -117,13 +116,6 @@ func (f *fixture) setRegression(checks ...verification.CheckSpec) {
 	f.t.Helper()
 	f.regression = checks
 	f.stampRegression()
-}
-
-// promote switches the project to the promote integration policy, which no
-// CLI flag can set any more.
-func (f *fixture) promote() {
-	f.t.Helper()
-	f.sql(`UPDATE projects SET integration = 'promote' WHERE id = ?`, f.proj.ID)
 }
 
 func (f *fixture) sql(query string, args ...any) {
@@ -297,4 +289,17 @@ func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 		return "", fmt.Errorf("worktree add: %w\n%s", err, out)
 	}
 	return path, nil
+}
+
+// waitStatus polls until the task reports the wanted status.
+func (f *fixture) waitStatus(ref string, want task.Status) {
+	f.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if f.status(ref) == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	f.t.Fatalf("%s never reached %s (now %s)", ref, want, f.status(ref))
 }

@@ -97,7 +97,7 @@ func TestExplicitClaimEnforcesEligibility(t *testing.T) {
 func TestTokenFencingAcrossExpiryAndSupersession(t *testing.T) {
 	f := newFixture(t)
 	a := f.add("a")
-	s1, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a, Lease: 30 * time.Minute})
+	s1, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
 	if err != nil {
 		t.Fatal(err)
 	}

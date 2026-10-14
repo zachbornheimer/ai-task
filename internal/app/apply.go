@@ -206,7 +206,7 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Pins: spec.Pins, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := 0; attempt < 5; attempt++ {
 		if attempt == 0 {
 			t.ID = a.e.newID()
@@ -240,7 +240,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Pins: c.Pins, Size: c.Size}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Size: c.Size}
 	if err := applyProofs(&spec.Verification, c.Proof, c.Regression); err != nil {
 		return err
 	}
@@ -314,9 +314,6 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 		if rec.CompletedAt != nil {
 			return fault.New(fault.CodeConflict, "%s is complete; a new prerequisite cannot be added to a completed task", rec.Task.ID)
 		}
-		if err := a.integrating(rec.Task.ID); err != nil {
-			return err
-		}
 		if err := a.requireLiveIfHeld(rec.Task.ID); err != nil {
 			return err
 		}
@@ -353,7 +350,7 @@ func (a *applier) sameDefinition(existing sqlite.Record, spec task.Spec, require
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return false, err
 	}
-	if !reflect.DeepEqual(nonEmpty(t.Constraints), nonEmpty(spec.Constraints)) || !reflect.DeepEqual(nonEmpty(t.Pins), nonEmpty(spec.Pins)) || len(t.Acceptance) != len(spec.Acceptance) {
+	if !reflect.DeepEqual(nonEmpty(t.Constraints), nonEmpty(spec.Constraints)) || len(t.Acceptance) != len(spec.Acceptance) {
 		return false, nil
 	}
 	for i := range t.Acceptance {
@@ -414,20 +411,6 @@ func nonEmpty(s []string) []string {
 		return []string{}
 	}
 	return s
-}
-
-// integrating refuses any plan change to a task whose verified candidate
-// is being promoted: the intent pinned the contract and prerequisites,
-// and the target may already carry the candidate.
-func (a *applier) integrating(id task.ID) error {
-	in, err := a.tx.ActiveIntentForTask(id)
-	if err != nil {
-		return err
-	}
-	if in != nil {
-		return fault.New(fault.CodeConflict, "%s is being integrated (candidate %s onto %s); it cannot change until completion is recorded", id, short(in.CandidateRevision), in.TargetBranch)
-	}
-	return nil
 }
 
 // holdsTask reports whether the caller presents the session token of
@@ -515,15 +498,10 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.TaskChecks.Set || c.Parent != nil || c.Pins.Set || c.Size != nil
+	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.TaskChecks.Set || c.Parent != nil || c.Size != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
 		return fault.New(fault.CodeConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
-	}
-	if contract || edges {
-		if err := a.integrating(t.ID); err != nil {
-			return err
-		}
 	}
 	claimed := rec.Attempt != nil && rec.Attempt.EndedAt == nil && rec.Attempt.LeaseActive(a.now)
 	if claimed && (contract || edges) {
@@ -532,11 +510,6 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	changed := false
-	if edges {
-		if err := a.integrating(rec.Task.ID); err != nil {
-			return err
-		}
-	}
 	if c.Title != nil {
 		t.Description, changed = *c.Title, true
 	}
@@ -552,9 +525,6 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			t.Acceptance = append(t.Acceptance, task.AcceptanceCriterion{Description: s})
 		}
 		changed = true
-	}
-	if c.Pins.Set {
-		t.Pins, changed = c.Pins.Value, true
 	}
 	if c.Size != nil {
 		t.Size, changed = *c.Size, true
@@ -609,11 +579,11 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	if contract {
-		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Pins: t.Pins, Size: t.Size}
+		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Size: t.Size}
 		if err := spec.Validate(); err != nil {
 			return err
 		}
-		t.Pins, t.Size = spec.Pins, spec.Size
+		t.Size = spec.Size
 		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Size != nil) {
 			if err := vacuityError(spec); err != nil {
 				return err
@@ -725,9 +695,6 @@ func (a *applier) archive(c plan.ArchiveTask) error {
 	}
 	if rec.Submission != nil && rec.Submission.RunStatus() == sqlite.RunPending {
 		return fault.New(fault.CodeConflict, "%s has a submission awaiting verification; it cannot be archived", t.ID)
-	}
-	if err := a.integrating(t.ID); err != nil {
-		return err
 	}
 	if err := a.tx.ArchiveTask(t.ID, strings.TrimSpace(c.Reason), a.now); err != nil {
 		return err

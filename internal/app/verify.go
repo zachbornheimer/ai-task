@@ -2,10 +2,8 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -391,12 +389,8 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 	if p.rec.Task.Kind != task.KindTask {
 		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s is a group", p.rec.Task.ID)
 	}
-	if p.proj.Integration == project.IntegrationPromote {
-		if missing := p.policy.MissingCategory(); missing != "" {
-			return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
-		}
-	} else if !verification.HasRequired(p.policy.TaskChecks) {
-		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s cannot complete: no required task checks are defined (completion fails closed)", p.rec.Task.ID)
+	if missing := p.policy.MissingCategory(); missing != "" {
+		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s cannot complete: no %s are defined (completion fails closed)", p.rec.Task.ID, missing)
 	}
 	if p.rec.UnmetRequires > 0 {
 		return VerifyResult{}, fault.New(fault.CodeNotReady, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
@@ -487,10 +481,6 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 			// a check ran out of budget: message set by the caller
 		case class == classAttempt:
 			res.Message = "task NOT complete: a required check failed; the claim stays live for repair (counted against the attempt budget once)"
-		case code == fault.CodeBaseConflict && len(res.Conflicts) > 0:
-			res.Message = fmt.Sprintf("task NOT complete: the submitted revision conflicts with %s (%s); in the worktree run %s, resolve the conflicts, commit, and `atask verify complete` again (not counted as a failure)", fr.proj.TargetBranch, strings.Join(res.Conflicts, ", "), integrateStep(fr.proj.TargetBranch))
-		case code == fault.CodeBaseConflict:
-			res.Message = fmt.Sprintf("task NOT complete: the submitted revision could not be promoted to %s; in the worktree run %s, commit, and `atask verify complete` again (not counted as a failure)", fr.proj.TargetBranch, integrateStep(fr.proj.TargetBranch))
 		case class == classEnvironment:
 			res.Message = "task NOT complete: the environment stopped the run, not the checks; fix the cause and verify again (not counted as a failure)"
 		default:
@@ -506,53 +496,10 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	failTimeout := func(summary string, evidence []verification.Evidence) (VerifyResult, error) {
 		return failAs(classEnvironment, sqlite.RunFailed, fault.CodeCheckFailed, summary, evidence)
 	}
-	// conflict records the conflicting files of a merge failure on the
-	// result before fail renders it.
-	conflict := func(err error) (VerifyResult, error) {
-		if code := fault.CodeOf(err); code != fault.CodeBaseConflict {
-			// Not a merge outcome (no Git identity, an unusable repository):
-			// the environment's problem, reported with its own code.
-			return fail(sqlite.RunError, code, fault.MessageOf(err), res.Evidence)
-		}
-		var ce *workspace.ConflictError
-		if errors.As(err, &ce) {
-			res.Conflicts = ce.Files
-		}
-		return fail(sqlite.RunFailed, fault.CodeBaseConflict, fault.MessageOf(err), res.Evidence)
-	}
 	mgr := e.manager(fr.proj)
 	checkCtx := fr.checkCtx
 	if checkCtx == nil {
 		checkCtx = ctx
-	}
-	// Pinned paths are part of the contract: a submission that changed one
-	// fails as the attempt's own failure, before any check runs.
-	if len(fr.rec.Task.Pins) > 0 && !fr.proj.IsGeneral() && fr.proj.RootPath != "" {
-		changed, err := workspace.ChangedBetween(ctx, fr.proj.RootPath, "refs/heads/"+fr.proj.TargetBranch, fr.revision)
-		if err != nil {
-			return fail(sqlite.RunError, fault.CodeNotReady, "list changed files: "+fault.MessageOf(err), nil)
-		}
-		if hit := pinnedChanges(fr.rec.Task.Pins, changed); len(hit) > 0 {
-			return fail(sqlite.RunFailed, fault.CodeCheckFailed, "pinned path(s) changed by this task: "+strings.Join(hit, ", ")+"; the task may not modify them (revert the change, or ask the planner to unpin)", nil)
-		}
-	}
-	integrate := fmt.Sprintf("at: integrate %s (%s)\n\nAt-Task: %s", fr.rec.Task.ID, fr.rec.Task.Description, fr.rec.Task.ID)
-	// A submission that cannot merge into the target is refused before any
-	// check runs: the holder has a merge to resolve, and the checks would
-	// only be repeated on the merged result. The candidate built here is
-	// reused by the first promotion attempt below.
-	var prepared *workspace.Candidate
-	if fr.proj.Integration == project.IntegrationPromote {
-		cand, err := mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, integrate)
-		if err != nil {
-			return conflict(err)
-		}
-		prepared = &cand
-		defer func() {
-			if prepared != nil {
-				prepared.Cleanup()
-			}
-		}()
 	}
 	// Immutable inputs: detached snapshots of the submitted revision, one
 	// per check category.
@@ -575,20 +522,16 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		return fail(sqlite.RunFailed, fault.CodeCheckFailed, verdict.Summary, evidence)
 	}
 	res.Warnings = budgetWarnings(evidence, fr.policy, taskBudget, regBudget)
-	spec := intentSpec{proj: fr.proj, taskID: fr.rec.Task.ID, attemptID: fr.attempt.ID, runID: fr.runID, submission: fr.submission, owner: fr.token.Digest(), contractRev: fr.contractRev, regression: fr.regressionID, policy: fr.policy, source: fr.revision}
-	done := func(final string) (VerifyResult, error) {
+	spec := completionSpec{proj: fr.proj, taskID: fr.rec.Task.ID, attemptID: fr.attempt.ID, runID: fr.runID, submission: fr.submission, owner: fr.token.Digest(), contractRev: fr.contractRev, regression: fr.regressionID, policy: fr.policy, source: fr.revision}
+	done := func() (VerifyResult, error) {
 		res.Evidence, res.Passed, res.Completed = evidence, true, true
-		res.IntegratedRevision = final
-		if final == fr.revision {
-			res.IntegratedRevision = ""
-		}
 		res.Status = task.StatusComplete
 		res.Summary = verdict.Summary
 		res.Message = "task complete; claim ended"
 		return res, nil
 	}
 	// refused maps a finalisation refusal (changed contract, lost
-	// authority, ...) to the caller's error; the target never moved.
+	// authority, ...) to the caller's error.
 	refused := func(err error) (VerifyResult, error) {
 		if fault.IsInternal(err) {
 			return res, err
@@ -598,116 +541,30 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	if err := e.fault("final:after-checks"); err != nil {
 		return res, err
 	}
-	if fr.proj.Integration != project.IntegrationPromote {
-		// No promotion: one transaction re-checks everything completion
-		// depends on and records it.
-		now := e.now()
-		err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-			if err := fence(tx); err != nil {
-				return err
-			}
-			if _, err := e.recheckForCompletion(tx, spec, fr.revision); err != nil {
-				return err
-			}
-			if err := tx.FinishRun(fr.runID, sqlite.RunPassed, verdict.Summary, now); err != nil {
-				return err
-			}
-			if err := tx.MarkComplete(fr.rec.Task.ID, fr.submission, now); err != nil {
-				return err
-			}
-			return tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now)
-		})
-		if err != nil {
-			return refused(err)
+	// One transaction re-checks everything completion depends on and
+	// records it.
+	now := e.now()
+	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if err := fence(tx); err != nil {
+			return err
 		}
-		return done(fr.revision)
+		if _, err := e.recheckForCompletion(tx, spec, fr.revision); err != nil {
+			return err
+		}
+		if err := tx.FinishRun(fr.runID, sqlite.RunPassed, verdict.Summary, now); err != nil {
+			return err
+		}
+		if err := tx.MarkComplete(fr.rec.Task.ID, fr.submission, now); err != nil {
+			return err
+		}
+		return tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now)
+	})
+	if err != nil {
+		return refused(err)
 	}
-	// Guarded, recoverable promotion (see integrate.go): build the
-	// candidate on the current target, verify it when the merge changed
-	// content, pin an intent, compare-and-swap the target, then record
-	// completion. A moved target rebuilds (bounded); a crash anywhere is
-	// resolved by reconciliation from the intent and Git.
-	for attempt := 0; attempt < 3; attempt++ {
-		var cand workspace.Candidate
-		if prepared != nil {
-			cand, prepared = *prepared, nil
-		} else {
-			var err error
-			cand, err = mgr.PrepareMerge(ctx, fr.proj.TargetBranch, []string{fr.revision}, integrate)
-			if err != nil {
-				res.Evidence = evidence
-				return conflict(err)
-			}
-		}
-		final := fr.revision
-		if cand.Revision != fr.revision {
-			more, err := e.runSuites(checkCtx, mgr, cand.Revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, "")
-			if err != nil && fault.CodeOf(err) == fault.CodeNotReady && len(more) == 0 {
-				cand.Cleanup()
-				return fail(sqlite.RunError, fault.CodeNotReady, err.Error(), evidence)
-			}
-			if err != nil {
-				cand.Cleanup()
-				_ = e.store.Write(ctx, func(tx *sqlite.Tx) error { return tx.FinishRun(fr.runID, sqlite.RunError, err.Error(), e.now()) })
-				return res, err
-			}
-			evidence = append(evidence, more...)
-			if v := verification.Judge(fr.policy, more); !v.Passed {
-				cand.Cleanup()
-				summary := "integrated candidate " + short(cand.Revision) + ": " + v.Summary
-				if len(v.TimedOut) > 0 {
-					res.Message = timeoutMessage(v, fr.policy, taskBudget, regBudget, fr.rec.Task.Size)
-					return failTimeout(summary+"; "+res.Message, evidence)
-				}
-				return fail(sqlite.RunFailed, fault.CodeCheckFailed, summary, evidence)
-			}
-			final = cand.Revision
-		}
-		intentID, err := e.recordIntent(ctx, spec, cand, final, verdict.Summary, fence)
-		if err != nil {
-			cand.Cleanup()
-			return refused(err)
-		}
-		if err := e.fault("final:after-intent"); err != nil {
-			cand.Cleanup()
-			return res, err
-		}
-		err = mgr.Promote(ctx, fr.proj.TargetBranch, cand)
-		cand.Cleanup()
-		switch {
-		case err == nil:
-		case errors.Is(err, workspace.ErrTargetMoved):
-			e.abandonIntent(ctx, intentID, "target moved before promotion; rebuilding the candidate")
-			continue
-		default:
-			e.abandonIntent(ctx, intentID, "promotion failed: "+err.Error())
-			return fail(sqlite.RunFailed, fault.CodeBaseConflict, err.Error(), evidence)
-		}
-		if err := e.fault("final:after-promote"); err != nil {
-			return res, err
-		}
-		// The target carries the candidate: record completion for the intent.
-		// Authority is the intent (owned by this token), not the lease.
-		err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
-			in, err := tx.GetIntent(intentID)
-			if err != nil {
-				return err
-			}
-			return e.completeIntentTx(tx, in, spec.owner, verdict.Summary)
-		})
-		if err != nil {
-			// The intent stays open; reconciliation completes it from Git.
-			return res, fault.WrapInternal(err, "record completion of promoted %s (will be reconciled)", fr.rec.Task.ID)
-		}
-		e.notify()
-		if err := e.fault("final:after-complete"); err != nil {
-			return res, err
-		}
-		// The task is done: its quarantined directories are history.
-		_, _ = mgr.Prune(ctx, string(fr.rec.Task.ID), true)
-		return done(final)
-	}
-	return fail(sqlite.RunFailed, fault.CodeBaseConflict, "target branch kept moving; verify again", evidence)
+	// The task is done: its quarantined directories are history.
+	_, _ = mgr.Prune(ctx, string(fr.rec.Task.ID), true)
+	return done()
 }
 
 // replayCompletion returns the committed result when the token's attempt
@@ -750,7 +607,7 @@ func (e *Engine) replayCompletion(ctx context.Context, token execution.Token) (V
 			if err != nil {
 				return err
 			}
-			res = VerifyResult{TaskID: a.TaskID, Mode: verification.ModeComplete, RunID: s.Run.ID, Revision: s.Revision, IntegratedRevision: s.Run.IntegratedRevision, SubmissionID: s.ID, Passed: true, Completed: true, Status: task.StatusComplete, Summary: s.Run.Summary, Evidence: ev, Replayed: true, Message: "already complete; stored result returned, no checks re-run"}
+			res = VerifyResult{TaskID: a.TaskID, Mode: verification.ModeComplete, RunID: s.Run.ID, Revision: s.Revision, SubmissionID: s.ID, Passed: true, Completed: true, Status: task.StatusComplete, Summary: s.Run.Summary, Evidence: ev, Replayed: true, Message: "already complete; stored result returned, no checks re-run"}
 			ok = true
 		}
 		return nil
@@ -786,28 +643,6 @@ var _ = time.Second
 
 // integrateStep names the command that brings the target back into the
 // task branch: Worktrunk's rebase step when `wt` is installed, else git.
-func integrateStep(target string) string {
-	if _, err := exec.LookPath("wt"); err == nil {
-		return "`wt step rebase " + target + "`"
-	}
-	return "`git merge " + target + "`"
-}
-
-// pinnedChanges returns the changed paths that fall under a pin (exact
-// path, or inside a pinned directory).
-func pinnedChanges(pins, changed []string) []string {
-	var hit []string
-	for _, f := range changed {
-		for _, p := range pins {
-			if f == p || strings.HasPrefix(f, p+"/") {
-				hit = append(hit, f)
-				break
-			}
-		}
-	}
-	return hit
-}
-
 // timeoutMessage explains a timed-out verdict: a task-check timeout is a
 // verification-construction problem (or a hang) the agent can fix by
 // making the check faster or asking for a larger size; a regression

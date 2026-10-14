@@ -101,9 +101,9 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 	// Git identity: agents commit in the task worktrees, and at records
 	// integration merges as the same identity; Git refuses both without one.
 	if ident, err := workspace.Identity(ctx, p.RootPath); err != nil {
-		add("git_identity", false, "error", "no Git identity for the repository: agents cannot commit and at cannot record integration merges", fmt.Sprintf("git -C %s config user.name <name> && git -C %s config user.email <email>", p.RootPath, p.RootPath))
+		add("git_identity", false, "error", "no Git identity for the repository: agents cannot commit and at cannot record the merges that build a dependent's base", fmt.Sprintf("git -C %s config user.name <name> && git -C %s config user.email <email>", p.RootPath, p.RootPath))
 	} else {
-		add("git_identity", true, "info", "commits and integration merges as "+ident, "")
+		add("git_identity", true, "info", "commits and merges as "+ident, "")
 	}
 
 	// Workspace root writable.

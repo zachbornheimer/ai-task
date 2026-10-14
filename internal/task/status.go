@@ -9,7 +9,6 @@ type Status string
 const (
 	StatusArchived             Status = "archived"
 	StatusComplete             Status = "complete"
-	StatusAwaitingIntegration  Status = "awaiting_integration"
 	StatusVerifying            Status = "verifying"
 	StatusAwaitingVerification Status = "awaiting_verification"
 	StatusClaimed              Status = "claimed"
@@ -42,11 +41,9 @@ type Facts struct {
 	// SubmissionPending: the newest submission is waiting to be judged
 	// (cohort peers, or a verifier to pick it up).
 	SubmissionPending bool
-	// AwaitingIntegration: judged passed, integration not yet recorded.
-	AwaitingIntegration bool
 	// VerificationFailed: the newest final judgement failed, was charged
 	// against its attempt, and no claim is live. A failure without a
-	// strike (timeout, integration, environment) does not set it.
+	// strike (timeout, environment) does not set it.
 	VerificationFailed bool
 	// Exhausted: failures reached the project's attempt limit.
 	Exhausted bool
@@ -65,7 +62,7 @@ type Facts struct {
 
 // Derive applies the precedence documented in docs/invariants.md:
 //
-//	archived > complete > awaiting_integration > verifying
+//	archived > complete > verifying
 //	> awaiting_verification > claimed > draft > blocked > needs_attention
 //	> cooldown > verification_failed > interrupted > ready
 //
@@ -80,8 +77,6 @@ func Derive(f Facts) Status {
 		return StatusGroup
 	case f.Complete:
 		return StatusComplete
-	case f.AwaitingIntegration:
-		return StatusAwaitingIntegration
 	case f.Verifying:
 		return StatusVerifying
 	case f.SubmissionPending:
@@ -119,7 +114,7 @@ func (s Status) Claimable() bool {
 // waiting rather than declare the project stalled.
 func (s Status) Active() bool {
 	switch s {
-	case StatusClaimed, StatusVerifying, StatusAwaitingVerification, StatusAwaitingIntegration:
+	case StatusClaimed, StatusVerifying, StatusAwaitingVerification:
 		return true
 	}
 	return false
@@ -132,7 +127,7 @@ func (s Status) Open() bool {
 }
 
 // Glyph is the Beads-style progress glyph: ○ never started, ◐ started but
-// not complete (claimed, verifying, submitted, awaiting integration,
+// not complete (claimed, verifying, submitted,
 // interrupted, failed or cooling, or any state after an attempt existed),
 // ● complete, ◌ draft (missing a proof). It is a progress indicator, not a liveness indicator; the
 // annotation says why a ◐ task is not complete. started reports whether
@@ -142,7 +137,7 @@ func Glyph(s Status, started bool) string {
 	switch s {
 	case StatusComplete:
 		return "●"
-	case StatusClaimed, StatusVerifying, StatusAwaitingVerification, StatusAwaitingIntegration, StatusInterrupted, StatusVerificationFailed, StatusCooldown:
+	case StatusClaimed, StatusVerifying, StatusAwaitingVerification, StatusInterrupted, StatusVerificationFailed, StatusCooldown:
 		return "◐"
 	}
 	if s == StatusDraft {
@@ -169,8 +164,6 @@ func (s Status) Annotation() string {
 		return "[awaiting verification]"
 	case StatusVerifying:
 		return "[verifying]"
-	case StatusAwaitingIntegration:
-		return "[awaiting integration]"
 	case StatusVerificationFailed:
 		return "[failed]"
 	case StatusNeedsAttention:
@@ -188,7 +181,7 @@ func (s Status) Annotation() string {
 // ParseStatus validates a status string from user input.
 func ParseStatus(s string) (Status, bool) {
 	switch Status(s) {
-	case StatusArchived, StatusComplete, StatusAwaitingIntegration, StatusVerifying, StatusAwaitingVerification,
+	case StatusArchived, StatusComplete, StatusVerifying, StatusAwaitingVerification,
 		StatusClaimed, StatusBlocked, StatusDraft, StatusNeedsAttention, StatusVerificationFailed, StatusCooldown, StatusInterrupted, StatusReady, StatusGroup:
 		return Status(s), true
 	}

@@ -8,13 +8,13 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/project"
 )
 
-const projectColumns = `id, name, root_path, integration, plan_rev, target_branch, workspace_root, max_attempts, retry_cooldown_ms, created_at, updated_at`
+const projectColumns = `id, name, root_path, plan_rev, target_branch, workspace_root, max_attempts, retry_cooldown_ms, created_at, updated_at`
 
 func scanProject(sc interface{ Scan(...any) error }) (project.Project, error) {
 	var p project.Project
 	var root sql.NullString
 	var created, updated, cooldown int64
-	if err := sc.Scan(&p.ID, &p.Name, &root, &p.Integration, &p.PlanRev, &p.TargetBranch, &p.WorkspaceRoot, &p.MaxAttempts, &cooldown, &created, &updated); err != nil {
+	if err := sc.Scan(&p.ID, &p.Name, &root, &p.PlanRev, &p.TargetBranch, &p.WorkspaceRoot, &p.MaxAttempts, &cooldown, &created, &updated); err != nil {
 		return p, err
 	}
 	p.RootPath = root.String
@@ -30,8 +30,8 @@ func (t *Tx) InsertProject(p project.Project) error {
 	if p.RootPath != "" {
 		root = p.RootPath
 	}
-	_, err := t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, root, p.Integration, p.PlanRev, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(p.CreatedAt), ms(p.UpdatedAt))
+	_, err := t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, root, p.PlanRev, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(p.CreatedAt), ms(p.UpdatedAt))
 	if IsUniqueViolation(err) {
 		return fault.Wrap(err, fault.CodeInvalidInput, "project id or root path already registered")
 	}
@@ -125,8 +125,8 @@ func (t *Tx) UpdateProject(p project.Project, now time.Time) error {
 	if p.RootPath != "" {
 		root = p.RootPath
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, root_path = ?, integration = ?, target_branch = ?, workspace_root = ?, max_attempts = ?, retry_cooldown_ms = ?, updated_at = ? WHERE id = ?`,
-		p.Name, root, p.Integration, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(now), p.ID)
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, root_path = ?, target_branch = ?, workspace_root = ?, max_attempts = ?, retry_cooldown_ms = ?, updated_at = ? WHERE id = ?`,
+		p.Name, root, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(now), p.ID)
 	if IsUniqueViolation(err) {
 		return fault.Wrap(err, fault.CodeInvalidInput, "root path already registered to another project")
 	}

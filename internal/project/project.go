@@ -37,31 +37,15 @@ func ParseID(s string) (ID, error) {
 	return ID(s), nil
 }
 
-// IntegrationPolicy states what "the output of a completed task is usable by
-// dependents" means for the project.
-type IntegrationPolicy string
-
-const (
-	// IntegrationNone: a verified submission is complete. This is the only
-	// policy implemented in Milestone 1 and the right one for projects whose
-	// tasks do not produce Git revisions.
-	IntegrationNone IntegrationPolicy = "none"
-	// IntegrationPromote: a verified revision must additionally be promoted
-	// into the project's target branch before the task is complete and before
-	// dependents are released (Milestone 3).
-	IntegrationPromote IntegrationPolicy = "promote"
-)
-
 // Project is the registered identity plus project-wide configuration.
 type Project struct {
-	ID          ID                `json:"id"`
-	Name        string            `json:"name"`
-	RootPath    string            `json:"root_path,omitempty"` // canonical absolute path; "" for projects with no directory
-	Integration IntegrationPolicy `json:"-"`                   // always IntegrationNone through the CLI; promotion is owned by its removal task
+	ID       ID     `json:"id"`
+	Name     string `json:"name"`
+	RootPath string `json:"root_path,omitempty"` // canonical absolute path; "" for projects with no directory
 	// PlanRev increments on every applied ChangeSet; callers pass the
 	// revision they planned against for optimistic concurrency.
 	PlanRev uint64 `json:"plan_rev"`
-	// TargetBranch is where verified work is promoted (Git projects).
+	// TargetBranch is the branch task branches start from (Git projects).
 	TargetBranch string `json:"target_branch,omitempty"`
 	// WorkspaceRoot holds per-attempt worktrees; "" means the default
 	// state directory.
@@ -89,9 +73,6 @@ func (p Project) IsGeneral() bool { return p.Name == GeneralName && p.RootPath =
 // Validate enforces structural rules on a project record.
 func (p Project) Validate() error {
 	if p.Name == GeneralName {
-		if p.Integration != IntegrationNone {
-			return fault.New(fault.CodeInvalidInput, "project %s must use integration none", GeneralName)
-		}
 		if p.RootPath != "" {
 			return fault.New(fault.CodeInvalidInput, "project name %s is reserved for the default project, which has no root path", GeneralName)
 		}
@@ -102,11 +83,6 @@ func (p Project) Validate() error {
 	}
 	if len(p.Name) > 200 {
 		return fault.New(fault.CodeInvalidInput, "project name must be at most 200 characters")
-	}
-	switch p.Integration {
-	case IntegrationNone, IntegrationPromote:
-	default:
-		return fault.New(fault.CodeInvalidInput, "unknown integration policy %q", p.Integration)
 	}
 	if p.RootPath != "" && !filepath.IsAbs(p.RootPath) {
 		return fault.New(fault.CodeInvalidInput, "project root must be absolute: %q", p.RootPath)

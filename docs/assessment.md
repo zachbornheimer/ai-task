@@ -24,8 +24,7 @@ rationale for every deviation. It is kept current as milestones land.
    prerequisites.** Without a completion fact nothing with a dependency could
    ever become available. Resolved by implementing `finish` fully in
    Milestone 1 with one honest rule: a submission whose effective policy
-   requires _nothing_ is vacuously verified, and under integration policy
-   `none` the task is complete. A submission with checks is recorded as
+   requires _nothing_ is vacuously verified and the task is complete. A submission with checks is recorded as
    `awaiting_verification` and the task stays unreleased until Milestone 2
    executes the checks. No agent claim ever completes a task.
 
@@ -79,7 +78,7 @@ rationale for every deviation. It is kept current as milestones land.
   (task row, submission row). Digest equality is the version check.
 - No repository interfaces, no generic services. The store exposes typed
   queries on a transaction handle; the application calls them.
-- No `integration` or `workspace` packages yet: nothing consumes them.
+- No `workspace` package yet: nothing consumes it.
 - No `checkexec` package yet: Milestone 2 introduces it with its caller.
 - No `types.go` duplicating internal types: the root package aliases them.
 
@@ -113,7 +112,7 @@ Arrows are the only allowed import directions. Domain packages never import
 
 `internal/checkexec` (argv execution, bounded output) and
 `internal/workspace` (Git revision inspection) arrived with Milestone 2,
-each with one real consumer. `integration` and the worktree lifecycle are
+each with one real consumer. The worktree lifecycle was
 deferred to Milestone 3.
 
 ## 3. State and completion semantics
@@ -124,7 +123,7 @@ verification runs; `completed_at`.
 Derived status precedence:
 
 ```text
-complete > awaiting_integration > awaiting_verification > in_progress
+complete > awaiting_verification > in_progress
         > blocked > verification_failed > interrupted > available
 ```
 
@@ -132,12 +131,9 @@ Takeable: `available`, `interrupted`, `verification_failed`. Automatic
 selection order: interrupted, then verification_failed, then available;
 oldest first within a group.
 
-Completion (Milestone 1): `completed_at` is set iff the newest submission's
-newest verification run is `passed` **and** the project's integration policy
-is `none`. Under policy `promote` (Milestone 3) a passed run leaves the task
-`awaiting_integration` until the revision is promoted; only then is it
-complete and only then are dependents released. This is the explicit split
-between "verified on a branch" and "available to downstream work".
+Completion: `completed_at` is set iff the newest submission's newest
+verification run is `passed`. Completion records the revision; it never
+moves the target branch.
 
 A dependency is satisfied iff the prerequisite is complete. There is no
 weaker prerequisite kind in V1.
@@ -187,9 +183,8 @@ judge (tx). Each boundary leaves a recoverable state (see
   reuse across tasks/revisions/policies, tree mismatch, dirty submission,
   interrupted run recovery, nested database writes from inside a check.
 - **M3:** `workspace` interface, Git and Worktrunk adapters, task-named
-  branches, clean-revision capture at finish, integration policy `promote`.
-- **M4:** explicit integration candidates, shared regression once per batch,
-  guarded promotion, resource limits.
+  branches, clean-revision capture at finish.
+- **M4:** resource limits.
 
 ### Findings from the independent adversarial review (fixed)
 

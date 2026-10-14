@@ -1,7 +1,7 @@
 # Using `atask` from AI systems
 
 The goal: every request an agent receives in a repository is routed
-through `atask`, so work is planned with checks, done in isolated worktrees,
+through `atask`, so work is planned with proofs, done in isolated worktrees,
 completed only by fresh verification, and remembered across sessions and
 harnesses. This page says how each harness is wired. The engine never
 calls a model; the harness does.
@@ -12,28 +12,25 @@ calls a model; the harness does.
 | -------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bootstrap            | identity, the `atask` CLI, JSON envelopes, stop on lost authority   | the harness's system prompt where it can be set (`claude -p --append-system-prompt`, a bare model's system message); text in `docs/agent-contract.md` |
 | Project instructions | how work gets done here, the verbs, the execution contract          | `AGENTS.md` block installed by `atask init`; `CLAUDE.md` imports it                                                                                   |
-| Task turn            | outcome, constraints, acceptance, checks, workspace, state, handoff | `atask context ID` (worker handoff); `atask show` for the current claim; `atask list` for the plan                                                    |
+| Task turn            | outcome, constraints, acceptance, proofs, workspace, state, handoff | `atask context ID` (worker handoff); `atask show` for the current claim; `atask list` for the plan                                                    |
 
 The project file is the lever: it says that any change starts with the
 plan, that questions are not tasks, and that the target branch is never
-edited directly. Hooks make it hold when a long session forgets.
+edited directly.
 
 ## Setup, once per repository
 
 ```sh
 cd repo
-atask init --claude                                  # instructions + optional SessionStart hook only (omit --claude elsewhere)
+atask init                                           # AGENTS.md block + CLAUDE.md import
 atask project --target-branch main
-atask doctor                                         # repository, target, identity, suite green on the target
-git add AGENTS.md CLAUDE.md .claude && git commit -m "Route agent work through atask"
+atask doctor                                         # repository, target, identity, regression green on the target
+git add AGENTS.md CLAUDE.md && git commit -m "Route agent work through atask"
 ```
 
 ## Claude Code
 
-Interactive: open the repository; with `--claude`, SessionStart injects
-the current claim when one exists and writes nothing otherwise. It does
-not dump the board, does not install an edit guard, and does not block
-ending a turn because a claim is open. The agent runs `atask context`
+Interactive: open the repository. The agent runs `atask context`
 once for the contract, then `atask list` / `atask context ID`, claims,
 works in the workspace, commits, `atask verify complete`.
 
@@ -47,13 +44,13 @@ The script passes `--append-system-prompt` with the bootstrap and allows
 `Bash(atask *)`, `Bash(git *)` and the project's own build commands; widen
 the allow list for the repository's tools or run in a sandbox with
 `--dangerously-skip-permissions`. Several copies run in parallel; the
-engine serialises claims and promotion.
+engine serialises claims.
 
 ## Codex CLI
 
 Codex reads `AGENTS.md` natively and has no system-prompt flag, so the
 project instructions are the whole contract. Interactive sessions behave
-as above without hooks. Headless: `examples/hosts/codex.sh` (`codex exec
+as above. Headless: `examples/hosts/codex.sh` (`codex exec
 --full-auto` with `atask context ID` as the prompt). Commit messages: Worktrunk's
 `wt step commit` if installed, else git.
 
@@ -79,33 +76,31 @@ tasks:
     outcome: Package store exposes Open(path) backed by SQLite with Put/Get
     constraints: ["Use modernc.org/sqlite (pure Go)"]
     acceptance: ["Get on an unknown key returns ErrNotFound"]
-    checks: ["unit: go test ./store/..."]
-    pins: ["checks/", "go.mod"]
+    proof: "run: go test ./store/..."
+    regression: "run: go test ./..."
   - key: docs
     title: Document the store package
     requires: [store]
-    checks: ["readme: grep -q '## Store' README.md"]
+    proof: "grep: README.md pattern='## Store'"
+    regression: "run: go test ./..."
 ```
 
 `atask add -f plan.yaml` applies it; a bad item rejects the whole file.
 Rules that the pilots showed matter: the regression suite must pass on
 the target before tasks are added (`atask doctor`); tasks that share one
-dispatch site need a scaffolding task the others require; pin the files
-a task must not change; one task is one independently verifiable outcome.
+dispatch site need a scaffolding task the others require; one task is one independently verifiable outcome.
 
 ## Small changes
 
-`atask add "Fix the typo in README" --check "readme: grep -q Fixed README.md" --claim`
-adds, claims and prints the workspace in one step. The cost of a task is
-a worktree and two check suites; for a repository with a slow suite that
+`atask add "Fix the typo in README" --proof "grep: README.md pattern=Fixed" --regression "run: go test ./..."`
+then `atask claim` prints the workspace. The cost of a task is
+a worktree and two proofs; for a repository with a slow suite that
 is the price of a verified change, and the right fix is a faster
 regression suite, not a bypass.
 
 ## What is enforced and what is advice
 
 Enforced by the engine everywhere: nobody sets status; completion needs
-fresh passing checks; a claim is a lease; pinned files cannot change;
-promotion is a verified fast-forward or merge. Enforced by hooks in
-Claude Code: edits stay in worktrees; a turn does not end on an
-unfinished claim. Advice only, in every harness: that a request becomes
+fresh passing proofs; a claim is a lease; completion never moves the
+target branch. Advice only, in every harness: that a request becomes
 tasks at all. Keep the instruction block short so it keeps being read.

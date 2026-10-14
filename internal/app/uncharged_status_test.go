@@ -1,8 +1,6 @@
 package app_test
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +13,7 @@ import (
 )
 
 // TestUnchargedFailuresAreNotShownAsFailed: a final run that failed
-// without a strike (a timeout, a failed integration) leaves the task
+// without a strike (a timeout) leaves the task
 // claimable as interrupted (attempt still open) or ready (released), with
 // last_error kept and no [failed] annotation; verification_failed is only
 // for a run charged against the attempt.
@@ -43,18 +41,6 @@ func TestUnchargedFailuresAreNotShownAsFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	notFailed("timeout, released", a, task.StatusReady, "")
-
-	// A failed integration (an untracked file in the way on the target).
-	b := f.add("b")
-	sb := f.claim(string(b))
-	f.commit(sb.Workspace, "b.txt", "b")
-	scratch := filepath.Join(f.repo, "b.txt")
-	os.WriteFile(scratch, []byte("local draft"), 0o644)
-	_, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeBaseConflict)
-	f.c.Advance(execution.DefaultLease + time.Minute)
-	notFailed("integration failed, lease expired", b, task.StatusInterrupted, "BASE_CONFLICT")
-	os.Remove(scratch)
 
 	// A failed proof is charged and still shows as failed.
 	c := f.addWith("c", "false")

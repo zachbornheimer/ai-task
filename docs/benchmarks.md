@@ -31,11 +31,9 @@ engine.
 
 ## Known costs and their paths
 
-- `Summary` scans every live task to compute done/stalled and cohort
-  readiness. At thousands of tasks a waiting claim pays this on every
+- `Summary` scans every live task to compute done/stalled. At thousands of tasks a waiting claim pays this on every
   wake (bounded by the poll interval). A counts-only SQL aggregate is the
   next step if it matters.
 - A Git claim adds one `git worktree add` (tens of ms); a `verify
-  complete` adds a detached snapshot, the checks themselves, a scratch
-  merge, and a promotion. The engine's own overhead there is a handful of
+  complete` adds a detached snapshot, the proofs themselves. The engine's own overhead there is a handful of
   short transactions.

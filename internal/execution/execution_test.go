@@ -25,15 +25,9 @@ func TestTokens(t *testing.T) {
 	}
 }
 
-func TestLeaseDuration(t *testing.T) {
-	if d, _ := LeaseDuration(0); d != DefaultLease {
-		t.Fatal("default")
-	}
-	if _, err := LeaseDuration(time.Minute); !fault.Is(err, fault.CodeInvalidInput) {
-		t.Fatal("too short accepted")
-	}
-	if _, err := LeaseDuration(8 * time.Hour); !fault.Is(err, fault.CodeInvalidInput) {
-		t.Fatal("too long accepted")
+func TestDefaultLeaseIsThirtyMinutes(t *testing.T) {
+	if DefaultLease != 30*time.Minute {
+		t.Fatalf("default lease = %s", DefaultLease)
 	}
 }
 

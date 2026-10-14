@@ -16,29 +16,29 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-// A renewal extends by the attempt's own lease and never shortens it.
+// A renewal extends by the lease and never shortens it.
 func TestRenewNeverShortensLease(t *testing.T) {
 	f := newGitFixture(t)
 	a := f.add("a")
-	s, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a, Lease: 4 * time.Hour})
+	s, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := f.c.Now()
-	if !s.LeaseUntil.Equal(start.Add(4 * time.Hour)) {
+	if !s.LeaseUntil.Equal(start.Add(execution.DefaultLease)) {
 		t.Fatalf("lease until %s", s.LeaseUntil)
 	}
 	f.c.Advance(5 * time.Minute)
 	exp, err := f.e.Renew(f.ctx, s.Token)
-	if err != nil || !exp.Equal(f.c.Now().Add(4*time.Hour)) {
-		t.Fatalf("renew: %s %v (want %s)", exp, err, f.c.Now().Add(4*time.Hour))
+	if err != nil || !exp.Equal(f.c.Now().Add(execution.DefaultLease)) {
+		t.Fatalf("renew: %s %v (want %s)", exp, err, f.c.Now().Add(execution.DefaultLease))
 	}
 	// Implicit renewal by an authenticated command behaves the same.
 	f.c.Advance(5 * time.Minute)
 	if _, err := f.e.Log(f.ctx, s.Token, execution.LogEntry{Note: "alive"}); err != nil {
 		t.Fatal(err)
 	}
-	if v := f.show(string(a)); !v.Attempt.LeaseExpiresAt.Equal(f.c.Now().Add(4 * time.Hour)) {
+	if v := f.show(string(a)); !v.Attempt.LeaseExpiresAt.Equal(f.c.Now().Add(execution.DefaultLease)) {
 		t.Fatalf("after log: %s", v.Attempt.LeaseExpiresAt)
 	}
 	// A default-lease attempt renewed by a 30m command keeps 30m, not less.
@@ -130,11 +130,11 @@ func TestReleaseAfterExpiry(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		f := newFixture(t)
 		a := f.add("a")
-		s, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a, Lease: 5 * time.Minute})
+		s, err := f.e.Claim(f.ctx, app.ClaimRequest{TaskID: &a})
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.c.Advance(10 * time.Minute)
+		f.c.Advance(execution.DefaultLease + time.Minute)
 		v, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Failed: failed})
 		if err != nil {
 			t.Fatalf("failed=%v: release after expiry: %v", failed, err)

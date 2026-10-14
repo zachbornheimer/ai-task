@@ -28,48 +28,47 @@ SQLite file, `~/.local/state/atask/atask.db` on Linux (`ATASK_DB` overrides; `at
 
 Every repository you use it in needs a Git identity (`git config
 user.name` / `user.email`): agents commit with it, and `atask` records the
-merges it makes when the target branch has moved as the same identity,
-with an `At-Task:` trailer.
+merges it makes when building a task branch as the same identity, with an
+`At-Task:` trailer.
 
 ## Tour
 
 ```sh
 export ATASK_OUTPUT=json
-cd my-repo && atask init --claude                         # register the repo, install AGENTS.md + CLAUDE.md, and (--claude) the Claude Code hooks
-git add AGENTS.md CLAUDE.md .claude && git commit -m "Install atask"   # worktrees and checks see only committed files
-atask project --target-branch main --attempts 3           # a project holds a name, path, target branch and attempt budget, no checks
+cd my-repo && atask init                                  # register the repo, install the AGENTS.md block and the CLAUDE.md import
+git add AGENTS.md CLAUDE.md && git commit -m "Install atask"   # worktrees and checks see only committed files
+atask project --target-branch main --attempts 3           # a project holds a target branch and attempt budget, no checks
 atask doctor                                              # repository, target, identity, worktrees
 atask add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
-atask add "Fix the typo" --proof "run: go test ./..." --regression "run: go test ./..." --claim   # one small change: add and claim in one step
+atask add "Fix the typo" --proof "run: go test ./..." --regression "run: go test ./..."   # one small change ...
+atask claim                                               # ... then claim it
 atask add "Identity Core" --group --key identity
 atask add "Confirm OAuth API compatibility" --key compat --parent identity --proof "run: go test ./auth/..." --regression "run: go test ./..."
 atask add "Implement token store" --key store --parent identity --requires compat --proof "run: go test ./store/..." --regression "run: go test ./..."
 atask list                                                # ○ ◐ ● hierarchy
 cd "$(atask claim | jq -r .result.workspace)"             # atomic leased claim; the task's worktree on atask/<id>, token stored inside
 atask context                                             # operating contract; atask context ID is the worker handoff
-atask show                                                # the current claim (pins, budgets, handoff); atask show ID for any task
+atask show                                                # the current claim (proofs, handoff); atask show ID for any task
 atask log --done "..." --next "..."                       # inside the worktree no token is needed; every command renews the lease
 atask verify proof                                        # diagnostic
 # commit in the worktree, then:
-atask verify complete                                     # both suites fresh on a snapshot, promote, complete
+atask verify complete                                     # both proofs fresh on a snapshot, then complete
 atask claim --wait                                        # next eligible task, or DONE / STALLED
 ```
 
 Things that surprise people the first time:
 
-- **A check must fail before the work exists.** `go test -run TestNew`
-  passes when no test matches, so a check like that proves nothing until
-  the test is written; name a test the task adds, or check for the
-  artefact itself.
+- **A proof must fail before the work exists.** A `go_test` with a `name`
+  that matches no test fails, so name a test the task adds, or check for
+  the artefact itself.
 - **`DONE` and `STALLED` exit with status 1** and a coded envelope, like
   every other coded result; a worker loop treats both as its normal end
   (`examples/hosts/common.sh` shows the loop).
 - **`at` never rewrites history.** A failed attempt's commits stay on the
-  task branch and reach the target with the fix; squash before `verify
-  complete` (`wt step squash`, or git) if you want one commit per task.
-- **Every verify writes its full output to files**: `log_dir` in the
-  result (one `<check>.log` each, plus `result.json`), named in the human
-  output, so a failure in the middle of a long run is never lost.
+  task branch; squash before `verify complete` (`wt step squash`, or git)
+  if you want one commit per task.
+- **Every run records its output**: the last 64 KiB of each proof,
+  regression and action run is in `atask show --full`.
 
 Go:
 
@@ -77,15 +76,15 @@ Go:
 eng, _ := at.Open(ctx, at.Config{})
 proj, _ := eng.InitProject(ctx, "svc", "/path/to/repo")
 eng.Apply(ctx, at.ChangeSet{ProjectID: proj.ID, Operations: []at.Change{
-    at.AddTask{Key: "parse", Title: "Parse tokens", TaskChecks: []at.CheckSpec{{ID: "unit", Command: []string{"go", "test", "./auth/..."}, Required: true}}},
+    at.AddTask{Key: "parse", Title: "Parse tokens", Proof: &at.ProofSpec{Preset: "go_test", Subject: "./auth"}, Regression: &at.ProofSpec{Preset: "run", Subject: "go test ./..."}},
 }})
 s, _ := eng.Claim(ctx, at.ClaimRequest{ProjectID: proj.ID, Wait: true})
-res, err := eng.Verify(ctx, s.Token, at.VerifyComplete)
+res, err := eng.Verify(ctx, at.VerifyRequest{TaskID: s.Task.ID, Token: s.Token, Mode: at.VerifyComplete})
 ```
 
 `examples/embedded_runner` is the full host flow with a fake planner,
 reviewer and coding agent (no provider needed); its test drains a
-seven-task graph, including a coupled-verification cohort, with four
+seven-task graph, including a group, with four
 workers.
 
 ## Using it from your AI systems
@@ -93,10 +92,8 @@ workers.
 `atask init` installs the project instruction block into AGENTS.md (read by
 Codex, OpenCode and current Claude Code) and a CLAUDE.md that imports it,
 so every request an agent receives in that repository is routed through
-`at`: plan with checks, claim, work in the task worktree, `atask verify
-complete`. `atask init --claude` optionally installs SessionStart only
-(current claim, never the board). It does not install edit or stop
-guards. `docs/integrations.md` has the recipe per
+`at`: plan with proofs, claim, work in the task worktree, `atask verify
+complete`. It installs no hooks. `docs/integrations.md` has the recipe per
 harness, headless and interactive, and `examples/hosts/` the worker
 loops.
 
@@ -111,15 +108,16 @@ loops.
   attempts, carrying the session token so commands run there need none;
   an attempt that never ended has its worktree quarantined on takeover,
   so a stale process can neither act on the task nor reach the branch.
-- Checks are mandatory: a task cannot be planned without task checks and
-  no work is handed out until the project has regression checks.
-- Completion only from `verify complete`: both check categories fresh on a
-  detached snapshot of a clean commit, guarded promotion to the target
-  branch, and a finalising transaction that re-checks everything. Nothing
-  completes with missing checks, unmet prerequisites, a changed contract,
-  or a moved target.
-- Coupled verification for tasks that can only be proven together,
-  without dependency cycles, recoverable after crashes.
+- Proofs are mandatory: a task without both a proof and a regression is a
+  draft and is never handed out.
+- Completion only from `verify complete`: both proofs fresh on a
+  detached snapshot of a clean commit, then a finalising transaction that
+  re-checks everything. Nothing completes with missing proofs, unmet
+  prerequisites, or a changed contract. Completion records the task's
+  revision and never moves the target branch; dependents start from the
+  target branch plus their required tasks' revisions.
+- Groups for tasks that can only be proven together: a group's proofs run
+  on the merge of every child's completed revision.
 
 ## Docs
 

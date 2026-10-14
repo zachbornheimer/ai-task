@@ -328,12 +328,6 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			fmt.Fprintf(w, "  ↳ %s %s: %s\n", p.glyph(r.Status, false), r.ID, r.Title)
 		}
 	}
-	if len(v.Pins) > 0 {
-		fmt.Fprintln(w, "\nPINNED (must not change)")
-		for _, pin := range v.Pins {
-			fmt.Fprintf(w, "  • %s\n", pin)
-		}
-	}
 	if v.Proof != nil || v.Regression != nil {
 		fmt.Fprintln(w, "\nTASK CHECKS")
 		writeProofLine(w, "proof", v.Proof)
@@ -409,9 +403,6 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 		}
 		renderRunResults(w, v.RunResults)
 		renderActions(w, v.Actions)
-		for _, i := range v.History.Integrations {
-			fmt.Fprintf(w, "  %s — Promoted %s to %s as %s.\n", i.CreatedAt.Format("15:04"), short(i.SourceRevision), i.TargetBranch, short(i.ResultRevision))
-		}
 	}
 }
 
@@ -619,9 +610,6 @@ func renderVerify(w io.Writer, res app.VerifyResult) {
 	fmt.Fprintf(w, "✓ Verify %s · %s: %s\n", res.Mode, res.TaskID, outcome)
 	if res.Revision != "" {
 		fmt.Fprintf(w, "Revision:  %s\n", res.Revision)
-	}
-	if res.IntegratedRevision != "" {
-		fmt.Fprintf(w, "Promoted:  %s\n", res.IntegratedRevision)
 	}
 	if res.Summary != "" {
 		fmt.Fprintf(w, "Summary:   %s\n", res.Summary)

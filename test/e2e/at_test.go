@@ -240,13 +240,13 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if e.ok("show", a)["status"] != "claimed" {
 		t.Fatal("diagnostics must not change status")
 	}
-	// verify complete: completes, ends the claim, promotes to main.
+	// verify complete: completes and ends the claim; the target branch is untouched.
 	r = e.runIn(e.cwd, "", with, "verify", "complete")
 	if r.code != 0 || r.env["result"].(map[string]any)["completed"] != true {
 		t.Fatalf("verify complete: %s %s", r.stdout, r.stderr)
 	}
-	if _, err := os.Stat(filepath.Join(e.cwd, "parse.txt")); err != nil {
-		t.Fatal("not promoted to main")
+	if _, err := os.Stat(filepath.Join(e.cwd, "parse.txt")); err == nil {
+		t.Fatal("completion moved the target branch")
 	}
 	if r := e.runIn(e.cwd, "", with, "log", "--done", "late"); r.env["error"].(map[string]any)["code"] != "INVALID_SESSION" {
 		t.Fatalf("%s", r.stdout)

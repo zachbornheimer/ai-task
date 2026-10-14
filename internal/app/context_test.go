@@ -50,7 +50,7 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 		"# Task " + string(a),
 		"`sh -c 'test -f store.go && grep -q '\\''func Open'\\'' store.go'`", // the check, shell-quoted
 		"regress: `sh -c 'test -d .'`",
-		"promotes it to main",        // target branch
+		"started from main",          // target branch
 		"Workspace: " + s2.Workspace, // where to work
 		"Lease until",                // when to log
 		"Next step recorded by the last attempt: add Open(path)",

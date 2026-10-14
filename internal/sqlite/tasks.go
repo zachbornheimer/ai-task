@@ -35,22 +35,21 @@ func (s RunStatus) Final() bool {
 
 // Run is one verification run.
 type Run struct {
-	ID                 int64
-	TaskID             task.ID
-	AttemptID          int64
-	SubmissionID       int64 // 0 for diagnostic runs
-	JobID              int64 // cohort verifier job, if any
-	Mode               verification.Mode
-	Status             RunStatus
-	Revision           string
-	IntegratedRevision string
-	Policy             verification.Policy
-	PolicyDigest       string
-	Environment        string
-	CreatedAt          time.Time
-	StartedAt          *time.Time
-	FinishedAt         *time.Time
-	Summary            string
+	ID           int64
+	TaskID       task.ID
+	AttemptID    int64
+	SubmissionID int64 // 0 for diagnostic runs
+	JobID        int64 // cohort verifier job, if any
+	Mode         verification.Mode
+	Status       RunStatus
+	Revision     string
+	Policy       verification.Policy
+	PolicyDigest string
+	Environment  string
+	CreatedAt    time.Time
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+	Summary      string
 }
 
 // Submission is the stored submission fact plus its newest run.
@@ -120,7 +119,7 @@ func (r Record) Facts(now time.Time, maxAttempts int) task.Facts {
 	if s := r.Submission; s != nil {
 		switch s.RunStatus() {
 		case RunPassed:
-			f.AwaitingIntegration = !f.Complete
+			// A passed run completes the task in the same transaction.
 		case RunRunning:
 			f.Verifying = true
 		case RunFailed, RunError:
@@ -151,9 +150,9 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
          WHERE d.task_id = t.id AND r.completed_at IS NULL) AS unmet,
        a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch, a.lease_ms,
        s.id, s.attempt_id, sa.seq, s.revision, s.submitted_at,
-       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
+       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
-       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.pins_json, t.size,
+       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error, t.size,
        t.creator, t.created_cwd
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
@@ -166,7 +165,7 @@ LEFT JOIN verification_runs vr ON vr.id = (
 func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var r Record
 	var key, parent sql.NullString
-	var constraints, policy, pins string
+	var constraints, policy string
 	var archived, completed sql.NullInt64
 	var created, updated, nextEligible int64
 	var aID, aSeq, aStarted, aExpires, aEnded, aLease sql.NullInt64
@@ -181,8 +180,8 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		&completed, &created, &updated, &r.UnmetRequires,
 		&aID, &aSeq, &aStarted, &aExpires, &aEnded, &aReason, &aPath, &aBranch, &aLease,
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sAt,
-		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.integrated, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
-		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &pins, &r.Task.Size,
+		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
+		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError, &r.Task.Size,
 		&r.Task.Creator, &r.Task.CreatedCwd)
 	if err != nil {
 		return r, err
@@ -198,9 +197,6 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	}
 	if err := json.Unmarshal([]byte(constraints), &r.Task.Constraints); err != nil {
 		return r, wrapInternal(err, "decode constraints")
-	}
-	if err := json.Unmarshal([]byte(pins), &r.Task.Pins); err != nil {
-		return r, wrapInternal(err, "decode pins")
 	}
 	if r.Task.Verification, err = verification.Parse([]byte(policy)); err != nil {
 		return r, wrapInternal(err, "decode task policy")
@@ -230,7 +226,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 // runScan holds the nullable columns of a LEFT JOINed verification run.
 type runScan struct {
 	id, attempt, job, created, started, finished sql.NullInt64
-	mode, status, revision, integrated           sql.NullString
+	mode, status, revision                       sql.NullString
 	policy, digest, env, summary                 sql.NullString
 }
 
@@ -245,7 +241,7 @@ func (rs runScan) toRun(taskID task.ID, submissionID int64) (*Run, error) {
 	return &Run{
 		ID: rs.id.Int64, TaskID: taskID, AttemptID: rs.attempt.Int64, SubmissionID: submissionID, JobID: rs.job.Int64,
 		Mode: verification.Mode(rs.mode.String), Status: RunStatus(rs.status.String),
-		Revision: rs.revision.String, IntegratedRevision: rs.integrated.String, Policy: pol,
+		Revision: rs.revision.String, Policy: pol,
 		PolicyDigest: rs.digest.String, Environment: rs.env.String, CreatedAt: fromMS(rs.created.Int64),
 		StartedAt: nullMS(rs.started), FinishedAt: nullMS(rs.finished), Summary: rs.summary.String,
 	}, nil
@@ -268,17 +264,13 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if tk.ParentID != "" {
 		parent = tk.ParentID
 	}
-	pins, err := json.Marshal(nonNil(tk.Pins))
-	if err != nil {
-		return wrapInternal(err, "encode pins")
-	}
 	size := tk.Size
 	if size == "" {
 		size = task.SizeSmall
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, contract_rev, created_at, updated_at, pins_json, size, creator, created_cwd)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), ms(tk.CreatedAt), ms(tk.UpdatedAt), string(pins), size, tk.Creator, tk.CreatedCwd)
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, contract_rev, created_at, updated_at, size, creator, created_cwd)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), ms(tk.CreatedAt), ms(tk.UpdatedAt), size, tk.Creator, tk.CreatedCwd)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return err // caller distinguishes id vs key collisions
@@ -315,16 +307,12 @@ func (t *Tx) UpdateTaskContract(tk task.Task, now time.Time) error {
 	if tk.ParentID != "" {
 		parent = tk.ParentID
 	}
-	pins, err := json.Marshal(nonNil(tk.Pins))
-	if err != nil {
-		return wrapInternal(err, "encode pins")
-	}
 	size := tk.Size
 	if size == "" {
 		size = task.SizeSmall
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, pins_json = ?, size = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
-		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), string(pins), size, ms(now), tk.ID)
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET parent_id = ?, description = ?, outcome = ?, constraints_json = ?, policy_json = ?, policy_digest = ?, size = ?, contract_rev = contract_rev + 1, updated_at = ? WHERE id = ?`,
+		parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), size, ms(now), tk.ID)
 	if err != nil {
 		return wrapInternal(err, "update task")
 	}

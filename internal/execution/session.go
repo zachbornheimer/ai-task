@@ -42,37 +42,15 @@ func (t Token) Digest() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Lease bounds. A lease is the maximum silence before the engine assumes
-// the agent is dead: every session-authenticated command renews it, commits
-// renew it through the post-commit hook, and verification heart-beats
-// itself, so the default only has to cover a normal quiet stretch. Expiry
-// is cheap to recover from (the next attempt reuses the task worktree), a
-// stuck task is not.
-const (
-	DefaultLease = 30 * time.Minute
-	MinLease     = 5 * time.Minute
-	MaxLease     = 4 * time.Hour
-	// HeartbeatInterval is how often a long operation renews its lease.
-	HeartbeatInterval = 5 * time.Minute
-)
+// DefaultLease is the maximum silence before the engine assumes the agent
+// is dead: every session-authenticated command renews it, commits renew it
+// through the post-commit hook, and verification heart-beats itself, so it
+// only has to cover a normal quiet stretch. Expiry is cheap to recover from
+// (the next attempt reuses the task worktree), a stuck task is not.
+const DefaultLease = 30 * time.Minute
 
-// LeaseDuration resolves a requested lease length against the bounds.
-// Zero means DefaultLease.
-func LeaseDuration(requested time.Duration) (time.Duration, error) {
-	return LeaseDurationAtLeast(requested, MinLease)
-}
-
-// LeaseDurationAtLeast is LeaseDuration with a caller-chosen lower bound,
-// the seam that lets tests exercise leases shorter than a real minimum.
-func LeaseDurationAtLeast(requested, min time.Duration) (time.Duration, error) {
-	if requested == 0 {
-		return DefaultLease, nil
-	}
-	if requested < min || requested > MaxLease {
-		return 0, fault.New(fault.CodeInvalidInput, "lease must be between %s and %s", min, MaxLease)
-	}
-	return requested, nil
-}
+// HeartbeatInterval is how often a long operation renews its lease.
+const HeartbeatInterval = 5 * time.Minute
 
 // EndReason records why an attempt stopped holding authority.
 type EndReason string

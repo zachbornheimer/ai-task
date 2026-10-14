@@ -1,8 +1,6 @@
 package app_test
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -101,9 +99,6 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 	}
 	if v := f.show(string(g)); v.CompletedAt != nil || v.GroupVerification.Status != "pending" {
 		t.Fatalf("changed checks must reopen the epic: %+v", v.GroupVerification)
-	}
-	if _, err := os.Stat(filepath.Join(f.repo, "c.txt")); err != nil {
-		t.Fatal("members' work must be on the target")
 	}
 	// Timeouts are reported as the epic's construction problem.
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), Size: strptr("small"), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {

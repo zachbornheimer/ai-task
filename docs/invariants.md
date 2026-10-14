@@ -9,7 +9,7 @@ unless noted).
   bits) are random, never content-derived, never reused.
   (`task.TestIDs`)
 - Task-ID lookups and reads never convey authority. Every mutation needs a
-  session token (execution) or planner authority (planning).
+  session token (execution) or planner authority, the absence of a task token (planning).
 - A token writes only while its attempt is current (fencing generation),
   unexpired, not ended, and not superseded; the check runs in the same
   transaction as the write. (`TestTokenFencingAcrossExpiryAndSupersession`)
@@ -20,16 +20,14 @@ unless noted).
 
 - A ChangeSet is one atomic revision: any invalid operation leaves the plan
   untouched and the revision unchanged. (`TestAtomicProposalInsertsNothingOnInvalidEdge`)
-- `ExpectedPlanRev` mismatch is `CONFLICT`. Identical replays by
-  idempotency key or by stable key create nothing; conflicting definitions
+- `ChangeSet.ExpectedPlanRev` mismatch is `CONFLICT` (Go API only). Identical
+  replays by `ChangeSet.IdempotencyKey` or by stable key create nothing; conflicting definitions
   under an existing key are `CONFLICT`. (`TestStableKeysAndIdempotency`)
 - Hard edges form a DAG; validation and insertion share the write
   transaction. (`dependency.TestValidate`, `TestReviewMutationIsOneRevisionWithOptimisticConcurrency`)
 - Groups are organizational: never claimable, never an edge endpoint,
   progress derived, empty groups never complete, the hierarchy is a tree.
   (`TestGroupsAreOrganizationalOnly`)
-- Task checks and regression checks are separate namespaces; collisions
-  are rejected in both directions. (`TestRegressionNamespaceIsSeparate`)
 - Completed tasks accept no contract or edge changes and cannot be
   archived. (`TestCompletedContractsCannotChangeSilently`)
 - Eligibility changes to a claimed task need its session or the planner;
@@ -37,13 +35,13 @@ unless noted).
 
 ## Status derivation
 
-Precedence: archived > complete > awaiting_integration > verifying >
+Precedence: archived > complete > verifying >
 awaiting_verification > claimed > blocked > needs_attention >
 cooldown > verification_failed > interrupted > ready (a cooling task is
 not claimable however its last proof ended). Claimable: ready,
 interrupted, verification_failed (only a run charged against its attempt;
-a timeout or failed integration derives to interrupted or ready). Active (keeps a waiting worker waiting):
-claimed, verifying, and submissions whose cohort can be verified.
+a timeout derives to interrupted or ready). Active (keeps a waiting worker waiting):
+claimed and verifying.
 (`task.TestDerivePrecedence`, `TestWaitingClaimDoneAndStalled`)
 
 ## Claims
@@ -56,14 +54,13 @@ claimed, verifying, and submissions whose cohort can be verified.
 - Completing A makes its dependents claimable before unrelated work ends.
   (`TestContinuousQueueReleasesDependentsImmediately`)
 - `Claim(wait)` returns `DONE` only when every executable task is complete,
-  `STALLED` only when nothing is claimable, nothing (including a runnable
-  cohort job or an open integration) is in flight, and nothing is in
+  `STALLED` only when nothing is claimable, nothing is in flight, and nothing is in
   retry cooldown, and `ctx.Err()` on cancellation. A cooldown is waited
   for. (`TestCooldownIsOneRuleEverywhere`)
 - The SQL claim prefilter and the derived status agree on claimability
   for every state the engine produces.
   (`TestClaimablePrefilterMatchesDerivedStatus`)
-  (`TestWaitingClaimDoneAndStalled`, `TestCoupledVerificationRecoversAfterVerifierCrash`)
+  (`TestWaitingClaimDoneAndStalled`)
 - Release keeps the handoff; `--failed` counts a failure and applies the
   cooldown; exhausted tasks need a planner reset. (`TestReleaseAndCooldown`)
 - One unusable worktree never blocks the queue: the task is marked
@@ -71,17 +68,6 @@ claimed, verifying, and submissions whose cohort can be verified.
   and status agree), retried by an explicit claim, cleared by a planner
   reset; `list ready`, `status` and `claim` agree throughout.
   (`TestUnusableWorktreeDoesNotBlockTheQueue`)
-- A consumed cohort submission token is acknowledged idempotently and
-  gains no authority; a submission awaiting its peers pins the member's
-  contract until an explicit planner withdrawal; a late conflict sends
-  back only the member it concerns; a shared regression failure charges
-  nobody; a promotion that cannot land backs off (bounded, cooling, not a
-  stall) and completes once the cause is gone.
-  (`TestCohortSubmissionIsAcknowledgedIdempotently`,
-  `TestSubmittedCohortContractIsPinned`,
-  `TestCohortLateConflictBlamesOnlyThatMember`,
-  `TestCohortRegressionFailureChargesNobody`,
-  `TestCohortPromotionBackoffIsBounded`)
 - A diagnostic run left running by a dead process is closed by
   reconciliation without a task failure.
   (`TestOrphanedDiagnosticRunsAreReconciled`)
@@ -103,8 +89,7 @@ claimed, verifying, and submissions whose cohort can be verified.
   `last_error`, never counted; a stale attempt cannot count against its
   successor; a double-fired completion is refused, not raced.
   (`TestFailureAccountingIsFencedAndClassified`)
-- No claim without a project regression suite; no task without task
-  checks; a check set cannot be emptied. (`TestEmptyChecksFailClosed`,
+- No claim without both proofs; a proof cannot be emptied. (`TestEmptyChecksFailClosed`,
   `e2e.TestPlanningCommands`)
 - One worktree per task on `atask/<id>`, reused across clean handoffs; the
   claim stores the token in the worktree's Git directory, never in the
@@ -119,50 +104,30 @@ claimed, verifying, and submissions whose cohort can be verified.
   `e2e.TestDiscoveredBlockerFromWorktree`)
 - The handoff carries prerequisites' learnings and the newest failed
   run's evidence. (`TestHandoffCarriesPrerequisiteLearningsAndLastFailure`)
-- Concurrent promotions into a checked-out target: exactly one wins, the
-  rest see a moved target and rebuild, and the checkout stays clean.
-  (`workspace.TestConcurrentPromotionsIntoCheckout`)
-- A promotion into a dirty checkout proceeds when it touches none of the
-  dirty paths and refuses, changing nothing, when it would; local files
-  are never overwritten. (`workspace.TestPromoteIntoDirtyCheckoutIsSafe`)
-- Task checks and regression checks run on separate snapshots; a file a
-  task check leaves behind is not there for the regression suite; checks
+- The proof and the regression run on separate snapshots; a file the
+  proof leaves behind is not there for the regression; proofs
   never see `ATASK_SESSION`. (`TestCategoriesDoNotShareASnapshot`)
-- The target moves only after a fenced intent transaction re-checked
-  everything completion depends on, and completion is recorded exactly
-  when the candidate reached the target: a crash at any point is resolved
-  from Git by reconciliation (complete, or claimable with no failure
-  counted); a contract change or a superseded session during verification
-  never moves the target; while an intent is open the task cannot be
-  claimed, edited, blocked or archived.
-  (`TestIntegrationIntentCrashRecovery`, `TestCohortIntentCrashRecovery`,
-  `TestPlannerEditDuringVerificationNeverMovesTarget`,
-  `TestSupersededVerifierCannotPromote`)
 
 ## Verification and completion
 
 - `atask verify` with no mode is invalid. (`TestBareVerifyIsInvalid`)
-- Missing task checks or missing regression checks fail closed.
+- A missing proof or regression fails closed.
   (`TestEmptyChecksFailClosed`)
-- Diagnostic runs execute every time and never complete, release, or
-  integrate. (`TestProvisionalChecksRunFreshAndNeverComplete`)
+- Diagnostic runs execute every time and never complete or release. (`TestProvisionalChecksRunFreshAndNeverComplete`)
 - No run reuses prior evidence; Go's test cache is disabled for checks.
   (`TestNoEvidenceReuseAndSameSnapshot`, `TestGoTestCacheDisabledInCheckEnvironment`)
 - Final runs execute on a detached snapshot of the submitted revision; the
   worktree must be clean. (`TestNoEvidenceReuseAndSameSnapshot`)
 - Completion and claim end commit together after re-checking authority,
-  prerequisites, contract revision, regression policy, and evidence on the
-  final revision. (`TestFinalSuccessIsAtomicAndPromotes`, `TestLateBlockerPreventsCompletion`, `TestContractChangeDuringVerificationFailsClosed`)
+  prerequisites, contract revision, and evidence on the
+  final revision. (`TestFinalSuccessIsAtomicAndStacksDependents`, `TestLateBlockerPreventsCompletion`, `TestContractChangeDuringVerificationFailsClosed`)
 - Failure leaves the task incomplete with the claim live, records the
   failure, and releases nothing downstream. (`TestFinalFailureKeepsClaimAndBlocksDownstream`)
-- Promotion never advances the target on conflict or on a moved base
-  without re-verification; a merge that changed content is verified before
-  promotion. (`TestIntegrationConflictDoesNotComplete`, `workspace.TestPrepareMergeAndPromote`)
 - A crashed verifier leaves no phantom state: expired leases close runs,
   and another worker resumes. (`TestVerifierCrashRecovery`)
 - A committed completion is acknowledged idempotently to the same token
-  without a new run. (`TestFinalSuccessIsAtomicAndPromotes`)
-- Cohorts: members are claimable concurrently; the first submitter waits;
-  one candidate is verified fresh for all; all complete atomically or the
-  failing member is sent back; a dead verifier's job is retried by any
-  worker. (`cohort_test.go`)
+  without a new run. (`TestFinalSuccessIsAtomicAndStacksDependents`)
+- Completion never moves the target branch; dependents start from the
+  target branch plus every required task's completed revision.
+- Groups: a group's proofs run on the merge of every child's completed
+  revision, and the group completes only after every child is complete.

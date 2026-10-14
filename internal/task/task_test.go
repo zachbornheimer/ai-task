@@ -55,7 +55,6 @@ func TestSpecValidate(t *testing.T) {
 		{ProjectID: pid, Description: strings.Repeat("x", maxDescription+1)},
 		{ProjectID: pid, Kind: "epic", Description: "x"},
 		{ProjectID: pid, Key: "bad key", Description: "x"},
-		{ProjectID: pid, Kind: KindGroup, Description: "g", Pins: []string{"x"}},
 	}
 	for i, b := range bad {
 		if err := b.Validate(); !fault.Is(err, fault.CodeInvalidInput) {
@@ -90,7 +89,6 @@ func TestDerivePrecedence(t *testing.T) {
 		{"cooldown expired", Facts{Now: now, CooldownUntil: now.Add(-time.Minute)}, StatusReady},
 		{"cooldown beats failed", Facts{Now: now, VerificationFailed: true, CooldownUntil: now.Add(time.Minute)}, StatusCooldown},
 		{"failed once cooldown expired", Facts{Now: now, VerificationFailed: true, CooldownUntil: now.Add(-time.Minute)}, StatusVerificationFailed},
-		{"awaiting integration", Facts{AwaitingIntegration: true}, StatusAwaitingIntegration},
 		{"complete", Facts{Complete: true, UnmetRequires: 3, LeaseActive: true}, StatusComplete},
 	}
 	for _, c := range cases {
@@ -99,8 +97,8 @@ func TestDerivePrecedence(t *testing.T) {
 		}
 	}
 	claimable := map[Status]bool{StatusReady: true, StatusInterrupted: true, StatusVerificationFailed: true}
-	active := map[Status]bool{StatusClaimed: true, StatusVerifying: true, StatusAwaitingVerification: true, StatusAwaitingIntegration: true}
-	all := []Status{StatusArchived, StatusComplete, StatusAwaitingIntegration, StatusVerifying, StatusAwaitingVerification, StatusClaimed, StatusBlocked, StatusNeedsAttention, StatusVerificationFailed, StatusCooldown, StatusInterrupted, StatusReady, StatusGroup}
+	active := map[Status]bool{StatusClaimed: true, StatusVerifying: true, StatusAwaitingVerification: true}
+	all := []Status{StatusArchived, StatusComplete, StatusVerifying, StatusAwaitingVerification, StatusClaimed, StatusBlocked, StatusNeedsAttention, StatusVerificationFailed, StatusCooldown, StatusInterrupted, StatusReady, StatusGroup}
 	for _, s := range all {
 		if s.Claimable() != claimable[s] || s.Active() != active[s] {
 			t.Errorf("%s claimable=%v active=%v", s, s.Claimable(), s.Active())
@@ -112,7 +110,7 @@ func TestDerivePrecedence(t *testing.T) {
 	// Progress glyphs: ● complete; ◐ started but not complete (every state
 	// that implies an attempt, plus ready/blocked/needs_attention once an
 	// attempt existed); ○ never started.
-	if StatusComplete.Glyph() != "●" || StatusClaimed.Glyph() != "◐" || StatusVerifying.Glyph() != "◐" || StatusAwaitingVerification.Glyph() != "◐" || StatusAwaitingIntegration.Glyph() != "◐" || StatusVerificationFailed.Glyph() != "◐" || StatusCooldown.Glyph() != "◐" || StatusInterrupted.Glyph() != "◐" {
+	if StatusComplete.Glyph() != "●" || StatusClaimed.Glyph() != "◐" || StatusVerifying.Glyph() != "◐" || StatusAwaitingVerification.Glyph() != "◐" || StatusVerificationFailed.Glyph() != "◐" || StatusCooldown.Glyph() != "◐" || StatusInterrupted.Glyph() != "◐" {
 		t.Fatal("started glyphs")
 	}
 	if StatusReady.Glyph() != "○" || StatusBlocked.Glyph() != "○" || StatusNeedsAttention.Glyph() != "○" || Glyph(StatusReady, true) != "◐" || Glyph(StatusBlocked, true) != "◐" || Glyph(StatusNeedsAttention, true) != "◐" || Glyph(StatusArchived, true) != "○" || Glyph(StatusComplete, false) != "●" {

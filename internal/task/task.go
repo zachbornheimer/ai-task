@@ -111,9 +111,6 @@ type Spec struct {
 	Constraints  []string
 	Acceptance   []AcceptanceCriterion
 	Verification verification.Policy
-	// Pins are paths (files, or directories by prefix) the task's branch
-	// must leave untouched; a change to one fails completion.
-	Pins []string
 	// Size declares how long the task's checks may take: small (the
 	// default), medium or large; the project's budgets give the seconds.
 	Size string
@@ -139,7 +136,6 @@ type Task struct {
 	Constraints   []string              `json:"constraints,omitempty"`
 	Acceptance    []AcceptanceCriterion `json:"acceptance,omitempty"`
 	Verification  verification.Policy   `json:"verification"`
-	Pins          []string              `json:"pins,omitempty"`
 	Size          string                `json:"size"`
 	ContractRev   int                   `json:"contract_rev"`
 	ArchivedAt    *time.Time            `json:"archived_at,omitempty"`
@@ -205,23 +201,6 @@ func (s *Spec) Validate() error {
 		cleaned = append(cleaned, c)
 	}
 	s.Constraints = cleaned
-	if len(s.Pins) > maxListItems {
-		return fault.New(fault.CodeInvalidInput, "at most %d pinned paths", maxListItems)
-	}
-	pins := s.Pins[:0]
-	seen := map[string]bool{}
-	for _, p := range s.Pins {
-		p = strings.Trim(strings.TrimSpace(p), "/")
-		if p == "" || seen[p] {
-			continue
-		}
-		if strings.HasPrefix(p, "../") || p == ".." || strings.Contains(p, "/../") {
-			return fault.New(fault.CodeInvalidInput, "pinned path %q must be inside the repository", p)
-		}
-		seen[p] = true
-		pins = append(pins, p)
-	}
-	s.Pins = pins
 	s.Size = strings.ToLower(strings.TrimSpace(s.Size))
 	switch s.Size {
 	case "":
@@ -245,11 +224,6 @@ func (s *Spec) Validate() error {
 		accepted = append(accepted, a)
 	}
 	s.Acceptance = accepted
-	if s.Kind == KindGroup {
-		if len(s.Pins) > 0 {
-			return fault.New(fault.CodeInvalidInput, "a group cannot pin files; pins belong to the tasks that work")
-		}
-	}
 	return s.Verification.Validate()
 }
 

@@ -4,18 +4,18 @@
 // that only fresh verification can establish.
 //
 // The Go API is primary; the CLI is a thin adapter over the same engine.
-// Project bootstrap (Open, InitProject, UpdateProject) is trusted
-// configuration and lives outside the everyday Engine interface.
+// docs/contract.md is the one statement of it. Project bootstrap (Open,
+// InitProject, UpdateProject) is trusted configuration and lives outside
+// the everyday Engine interface.
 //
 //	eng, _ := at.Open(ctx, at.Config{})
 //	proj, _ := eng.InitProject(ctx, "svc", "/path/to/repo")
 //	eng.Apply(ctx, at.ChangeSet{ProjectID: proj.ID, Operations: []at.Change{
-//	    at.AddTask{Key: "parse", Title: "Parse tokens", TaskChecks: []at.CheckSpec{{ID: "unit", Command: []string{"go", "test", "./auth/..."}, Required: true}}},
-//	    at.AddTask{Key: "reject", Title: "Reject expired access tokens", Requires: []at.Ref{"parse"}, TaskChecks: ...},
+//	    at.AddTask{Key: "parse", Title: "Parse tokens", Proof: &at.ProofSpec{Preset: "go_test", Subject: "./auth"}, Regression: ...},
 //	}})
 //	s, _ := eng.Claim(ctx, at.ClaimRequest{ProjectID: proj.ID, Wait: true})
 //	eng.Log(ctx, s.Token, at.LogEntry{Done: "..."})
-//	res, err := eng.Verify(ctx, s.Token, at.VerifyComplete)
+//	res, err := eng.Verify(ctx, at.VerifyRequest{TaskID: s.Task.ID, Token: s.Token, Mode: at.VerifyComplete})
 package at
 
 import (
@@ -27,28 +27,41 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
 // Engine is the everyday task interface. *Store implements it.
 type Engine interface {
+	// Planning
 	Apply(ctx context.Context, set ChangeSet) (ApplyResult, error)
 	List(ctx context.Context, q ListQuery) (PlanSnapshot, error)
-	Show(ctx context.Context, project ProjectID, ref string, full bool) (TaskView, error)
+	Show(ctx context.Context, id TaskID) (TaskView, error)
 
+	// Execution
 	Claim(ctx context.Context, q ClaimRequest) (Session, error)
 	Renew(ctx context.Context, token SessionToken) (time.Time, error)
 	Release(ctx context.Context, q ReleaseRequest) error
-	Log(ctx context.Context, token SessionToken, entry LogEntry) (RecordedLog, error)
+	Log(ctx context.Context, token SessionToken, entry LogEntry) error
 
-	Verify(ctx context.Context, token SessionToken, mode VerifyMode) (VerifyResult, error)
+	// Verification, completion, action retries
+	Verify(ctx context.Context, q VerifyRequest) (VerifyResult, error)
 }
 
-// Store is the concrete engine returned by Open; it also carries the
-// trusted bootstrap operations (InitProject, UpdateProject, Projects,
-// ResolveProject, Summary, RunPendingGroups, VerifyGroup, Whoami, Close).
-type Store = app.Engine
+// VerifyRequest names what to verify and under which session. A group has
+// no session: its Token is empty and Mode is VerifyComplete.
+type VerifyRequest struct {
+	TaskID   TaskID
+	Token    SessionToken
+	Mode     VerifyMode
+	Reverify bool
+}
+
+// Store is the engine returned by Open. It implements Engine and also
+// carries the trusted bootstrap operations (InitProject, UpdateProject,
+// Projects, ResolveProject, Summary, Close).
+type Store struct{ *app.Engine }
 
 var _ Engine = (*Store)(nil)
 
@@ -56,10 +69,68 @@ var _ Engine = (*Store)(nil)
 type Config = app.Config
 
 // Open opens (creating if needed) the task store.
-func Open(ctx context.Context, cfg Config) (*Store, error) { return app.Open(ctx, cfg) }
+func Open(ctx context.Context, cfg Config) (*Store, error) {
+	e, err := app.Open(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{e}, nil
+}
 
 // DefaultPath returns the OS-appropriate database location.
 func DefaultPath() (string, error) { return app.DefaultPath() }
+
+// Show returns the task with its full history, run results and actions.
+func (s *Store) Show(ctx context.Context, id TaskID) (TaskView, error) {
+	return s.Engine.Show(ctx, "", string(id), true)
+}
+
+// Log appends a handoff entry under the session.
+func (s *Store) Log(ctx context.Context, token SessionToken, entry LogEntry) error {
+	_, err := s.Engine.Log(ctx, token, entry)
+	return err
+}
+
+// Verify runs the requested verification. Proof and regression runs are
+// diagnostic; complete completes the task and runs its on_complete
+// actions, and on a completed task retries the ones still owed. With
+// Reverify it appends evidence against the recorded revision.
+func (s *Store) Verify(ctx context.Context, q VerifyRequest) (VerifyResult, error) {
+	if q.Token == "" {
+		return s.verifyGroup(ctx, q)
+	}
+	if q.TaskID != "" {
+		held, err := s.Whoami(ctx, q.Token)
+		if err == nil && held.ID != q.TaskID {
+			return VerifyResult{}, fault.New(fault.CodeInvalidSession, "session token belongs to %s, not %s", held.ID, q.TaskID)
+		}
+	}
+	if q.Reverify {
+		if q.Mode != VerifyComplete {
+			return VerifyResult{}, fault.New(fault.CodeInvalidInput, "Reverify applies to %s only", VerifyComplete)
+		}
+		return s.Reverify(ctx, q.Token)
+	}
+	return s.Engine.Verify(ctx, q.Token, q.Mode)
+}
+
+func (s *Store) verifyGroup(ctx context.Context, q VerifyRequest) (VerifyResult, error) {
+	if q.TaskID == "" || q.Mode != VerifyComplete || q.Reverify {
+		return VerifyResult{}, fault.New(fault.CodeInvalidSession, "a session token is required, except to complete a group")
+	}
+	v, err := s.Engine.Show(ctx, "", string(q.TaskID), false)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if v.Kind != KindGroup {
+		return VerifyResult{}, fault.New(fault.CodeInvalidSession, "%s is a task: a session token is required", q.TaskID)
+	}
+	proj, err := s.ResolveProject(ctx, v.Project, "")
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	return s.VerifyGroup(ctx, proj.ID, string(q.TaskID))
+}
 
 // Identity types.
 type (
@@ -89,20 +160,27 @@ func Replace[T any](v []T) Patch[T] { return plan.Replace(v) }
 // Contract types.
 type (
 	Task                = task.Task
-	Kind                = task.Kind
+	TaskKind            = task.Kind
 	AcceptanceCriterion = task.AcceptanceCriterion
 	Status              = task.Status
-	CheckSpec           = verification.CheckSpec
-	VerificationPolicy  = verification.Policy
 	VerifyMode          = verification.Mode
 	Project             = project.Project
-	IntegrationPolicy   = project.IntegrationPolicy
+)
+
+// Proof types.
+type (
+	ProofSpec    = proof.ProofSpec
+	ActionSpec   = proof.ActionSpec
+	RunResult    = proof.RunResult
+	ActionResult = proof.ActionResult
+	Size         = proof.Size
+	CheckType    = proof.CheckType
+	ActionStatus = proof.ActionStatus
 )
 
 // Execution types.
 type (
 	LogEntry       = execution.LogEntry
-	RecordedLog    = execution.RecordedLog
 	Handoff        = execution.Handoff
 	Session        = app.Session
 	ClaimRequest   = app.ClaimRequest
@@ -112,7 +190,7 @@ type (
 // Read models.
 type (
 	ListQuery    = app.ListQuery
-	Filter       = app.Filter
+	ListFilter   = app.Filter
 	PlanSnapshot = app.PlanSnapshot
 	TaskView     = app.TaskView
 	GroupView    = app.GroupView
@@ -128,13 +206,44 @@ const (
 	VerifyComplete   = verification.ModeComplete
 )
 
+// Task kinds.
+const (
+	KindTask  = task.KindTask
+	KindGroup = task.KindGroup
+)
+
+// Regression sizes.
+const (
+	SizeSmall  = proof.SizeSmall
+	SizeMedium = proof.SizeMedium
+	SizeLarge  = proof.SizeLarge
+)
+
+// Run types.
+const (
+	CheckProof      = proof.CheckProof
+	CheckRegression = proof.CheckRegression
+	CheckOnComplete = proof.CheckOnComplete
+)
+
+// Action states.
+const (
+	ActionPending   = proof.ActionPending
+	ActionRunning   = proof.ActionRunning
+	ActionDetached  = proof.ActionDetached
+	ActionSucceeded = proof.ActionSucceeded
+	ActionFailed    = proof.ActionFailed
+)
+
 // List filters.
 const (
-	ListAll      = app.FilterAll
-	ListOpen     = app.FilterOpen
-	ListReady    = app.FilterReady
-	ListBlocked  = app.FilterBlocked
-	ListArchived = app.FilterArchived
+	FilterAll      = app.FilterAll
+	FilterOpen     = app.FilterOpen
+	FilterReady    = app.FilterReady
+	FilterBlocked  = app.FilterBlocked
+	FilterDraft    = app.FilterDraft
+	FilterComplete = app.FilterComplete
+	FilterArchived = app.FilterArchived
 )
 
 // Typed outcomes of a waiting Claim; test with errors.Is.

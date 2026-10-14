@@ -18,7 +18,7 @@ func startSleepingVerify(t *testing.T, f *fixture) (*app.Engine, app.Session, ta
 	t.Helper()
 	e := f.realClockEngine()
 	id := f.addWith("orphan", "sleep 30")
-	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id, Lease: 30 * time.Minute})
+	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestOrphanedVerificationRunIsReaped(t *testing.T) {
 	if err := e.Release(f.ctx, app.ReleaseRequest{Token: s.Token}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id, Lease: 30 * time.Minute}); err != nil {
+	if _, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id}); err != nil {
 		t.Fatalf("claim after reap: %v", err)
 	}
 }

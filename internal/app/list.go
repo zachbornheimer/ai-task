@@ -69,7 +69,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 			proj = p
 			snap.Revision = proj.PlanRev
 		} else {
-			proj = project.Project{MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+			proj = project.Project{MaxAttempts: project.DefaultMaxAttempts}
 			ps, err := tx.ListProjects()
 			if err != nil {
 				return err
@@ -236,7 +236,7 @@ func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 		var byID map[project.ID]project.Project
 		var err error
 		if pid == "" {
-			proj = project.Project{Name: project.GeneralName, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+			proj = project.Project{Name: project.GeneralName, MaxAttempts: project.DefaultMaxAttempts}
 			ps, err := tx.ListProjects()
 			if err != nil {
 				return err
@@ -315,7 +315,7 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, now interface{ I
 				ne := r.NextEligibleAt
 				s.NextEligibleAt = &ne
 			}
-		case st == task.StatusClaimed, st == task.StatusVerifying, st == task.StatusAwaitingIntegration:
+		case st == task.StatusClaimed, st == task.StatusVerifying:
 			// An open integration intent is work in flight: its owner is
 			// promoting, or reconciliation will resolve it from Git once
 			// the owner's lease expires.

@@ -53,26 +53,6 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 		t.Fatalf("second attempt's failure not counted: %d", failures(a))
 	}
 
-	// 2. The environment stopping the run (an untracked file in the target
-	//    checkout at a path the promotion would create) is not a strike: it
-	//    is recorded as last_error and cleared on completion.
-	b := f.add("b")
-	sb := f.claim(string(b))
-	f.commit(sb.Workspace, "b.txt", "b")
-	scratch := filepath.Join(f.repo, "b.txt")
-	os.WriteFile(scratch, []byte("local draft"), 0o644)
-	_, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeBaseConflict)
-	v := f.show(string(b))
-	if v.Failures != 0 || v.LastError == "" || v.Status != task.StatusClaimed {
-		t.Fatalf("environment failure misclassified: failures=%d last_error=%q status=%s", v.Failures, v.LastError, v.Status)
-	}
-	os.Remove(scratch)
-	f.complete(sb)
-	if v := f.show(string(b)); v.LastError != "" || v.Failures != 0 {
-		t.Fatalf("completion did not clear last_error: %+v", v)
-	}
-
 	// 3. A double-fired `verify complete` is refused while its twin runs and
 	//    replays the stored result afterwards; nothing is counted.
 	flag := filepath.Join(t.TempDir(), "go")

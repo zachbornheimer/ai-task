@@ -33,10 +33,12 @@ func TestRunnerDrainsGraphWithFakeModel(t *testing.T) {
 	if err := run(ctx, repo, filepath.Join(t.TempDir(), "at.db"), 4, os.Stdout); err != nil {
 		t.Fatal(err)
 	}
-	// Every task's file was promoted into main.
+	// Every task's file was committed on its task branch; completion leaves
+	// the target branch alone.
 	for _, f := range []string{"compat.txt", "store.txt", "scopes.txt", "e2e.txt", "rotate.txt", "api.txt", "ui.txt"} {
-		if _, err := os.Stat(filepath.Join(repo, f)); err != nil {
-			t.Fatalf("%s not promoted", f)
+		out, err := exec.Command("git", "-C", repo, "log", "--all", "--oneline", "--", f).Output()
+		if err != nil || len(out) == 0 {
+			t.Fatalf("%s was not committed on any task branch: %v", f, err)
 		}
 	}
 }

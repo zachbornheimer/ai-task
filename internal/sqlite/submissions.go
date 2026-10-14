@@ -92,20 +92,13 @@ func heartbeatStamp(r NewRun, now time.Time) int64 {
 	return ms(now)
 }
 
-// SetRunIntegratedRevision records the revision a run's evidence finally
-// applied to after integration.
-func (t *Tx) SetRunIntegratedRevision(runID int64, rev string) error {
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET integrated_revision = ? WHERE id = ?`, rev, runID)
-	return wrapInternal(err, "set integrated revision")
-}
-
-const runColumns = `id, task_id, attempt_id, submission_id, job_id, mode, status, revision, integrated_revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary`
+const runColumns = `id, task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary`
 
 func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var rs runScan
 	var taskID task.ID
 	var submission nullInt
-	err := sc.Scan(&rs.id, &taskID, &rs.attempt, &submission, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.integrated, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary)
+	err := sc.Scan(&rs.id, &taskID, &rs.attempt, &submission, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary)
 	if err != nil {
 		return Run{}, err
 	}
@@ -141,7 +134,7 @@ func (t *Tx) LatestRunID(submissionID int64) (int64, error) {
 func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 	rows, err := t.tx.QueryContext(t.ctx, `
 		SELECT s.id, s.attempt_id, a.seq, s.revision, s.submitted_at,
-		       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.integrated_revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary
+		       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary
 		FROM submissions s JOIN execution_attempts a ON a.id = s.attempt_id
 		LEFT JOIN verification_runs vr ON vr.id = (SELECT id FROM verification_runs WHERE submission_id = s.id ORDER BY id DESC LIMIT 1)
 		WHERE s.task_id = ? ORDER BY s.id`, id)
@@ -154,7 +147,7 @@ func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 		var s Submission
 		var at int64
 		var rs runScan
-		if err := rows.Scan(&s.ID, &s.AttemptID, &s.AttemptSeq, &s.Revision, &at, &rs.id, &rs.attempt, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.integrated, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary); err != nil {
+		if err := rows.Scan(&s.ID, &s.AttemptID, &s.AttemptSeq, &s.Revision, &at, &rs.id, &rs.attempt, &rs.job, &rs.mode, &rs.status, &rs.revision, &rs.policy, &rs.digest, &rs.env, &rs.created, &rs.started, &rs.finished, &rs.summary); err != nil {
 			return nil, wrapInternal(err, "scan submission")
 		}
 		s.TaskID = id

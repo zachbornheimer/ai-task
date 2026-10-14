@@ -11,7 +11,8 @@ cleanup() {
 }
 trap cleanup EXIT
 git -C "$d" init -q
-ATASK_DB="$d/db" atask init --path "$d" --name claimed-host --no-instructions --db "$d/db" >/dev/null
+ATASK_DB="$d/db" atask init --path "$d" --name claimed-host --db "$d/db" >/dev/null
+git -C "$d" add -A && git -C "$d" -c user.name=atask -c user.email=atask@localhost commit -qm init
 ATASK_DB="$d/db" atask project --db "$d/db" --project claimed-host >/dev/null
 ATASK_DB="$d/db" atask add --db "$d/db" --project claimed-host "stub task" --outcome "stub harness is invoked" --proof "run: true" --regression "run: true" >/dev/null
 mkdir -p "$d/bin"

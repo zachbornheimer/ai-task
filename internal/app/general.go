@@ -24,7 +24,6 @@ func (e *Engine) EnsureGeneral(ctx context.Context) (project.Project, error) {
 		p := project.Project{
 			ID:          project.NewID(),
 			Name:        project.GeneralName,
-			Integration: project.IntegrationNone,
 			MaxAttempts: project.DefaultMaxAttempts,
 			CreatedAt:   now,
 			UpdatedAt:   now,

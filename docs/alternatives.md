@@ -26,7 +26,7 @@ could not verify are marked. We compare documented behaviour, not marketing.
   fields and commands to set them. We store facts (lease, submission, run,
   completion) and compute the state, so an agent cannot mark itself done.
 - **Verification is executable and revision-bound.** No prior-art task tool
-  binds a completion to a policy digest and an immutable revision with
+  binds a completion to an immutable revision with
   recorded evidence; Taskmaster's `testStrategy` is text, Beads has none.
   Worktrunk's pre-merge hooks run checks but record nothing durable.
 - **One authoritative store, no export mirror.** Beads Rust keeps JSONL in
@@ -54,8 +54,8 @@ thin layer without changing semantics).
 
 - **Worktrunk** for the whole worktree lifecycle in Milestone 3: `wt switch
   -c task-<id>` to create, `wt list --format=json` to locate, `wt merge` to
-  promote (never as a dry run: it advances the target and removes the
-  source). Our verification should be runnable as a `pre-merge` hook.
+  land finished work, as an `--on-complete` action (it advances the target
+  and removes the source).
 - **Plain `git worktree`** as the fallback adapter.
 - **The build tools' own caches** (Go test cache, Bazel, Nx) instead of a
   custom result cache.

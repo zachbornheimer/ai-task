@@ -156,7 +156,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 		}
 		proj = p
 	} else {
-		proj = project.Project{Name: project.GeneralName, MaxAttempts: project.DefaultMaxAttempts, Integration: project.IntegrationNone}
+		proj = project.Project{Name: project.GeneralName, MaxAttempts: project.DefaultMaxAttempts}
 	}
 	sum, err := e.Summary(ctx, pid)
 	if err != nil {
@@ -206,7 +206,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `atask claim --wait` blocks until something is.\n")
 	}
 	if proj.TargetBranch != "" {
-		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask show` there. Verified work is promoted to %s; never edit it directly.\n", proj.TargetBranch)
+		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask show` there. Never edit %s directly.\n", proj.TargetBranch)
 	} else {
 		w.WriteString("\nClaim with `atask claim <id>`. Work in general completes without git.\n")
 	}
@@ -274,9 +274,6 @@ func renderContext(c Context) string {
 		}
 		w.WriteString("\n")
 	}
-	if len(v.Pins) > 0 {
-		fmt.Fprintf(&w, "Pinned (this task may not change them; `atask verify complete` refuses if it did): %s\n\n", strings.Join(v.Pins, ", "))
-	}
 	w.WriteString("Regression checks (`atask verify regression`):\n")
 	for _, ch := range c.Regression {
 		fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, CheckText(ch))
@@ -297,7 +294,7 @@ func renderContext(c Context) string {
 		w.WriteString("\n")
 	}
 	if c.Workspace != "" {
-		fmt.Fprintf(&w, "Workspace: %s (branch %s; completion promotes it to %s).", c.Workspace, c.Branch, c.TargetBranch)
+		fmt.Fprintf(&w, "Workspace: %s (branch %s; it started from %s).", c.Workspace, c.Branch, c.TargetBranch)
 		if c.LeaseUntil != nil {
 			fmt.Fprintf(&w, " Lease until %s.", c.LeaseUntil.UTC().Format(time.RFC3339))
 		}
@@ -306,7 +303,7 @@ func renderContext(c Context) string {
 			renderState(&w, c)
 		}
 	} else {
-		fmt.Fprintf(&w, "Completion promotes the task branch to %s. ", c.TargetBranch)
+		fmt.Fprintf(&w, "Completion records the task branch revision; it does not move %s. ", c.TargetBranch)
 		switch v.Status {
 		case task.StatusComplete:
 			fmt.Fprintf(&w, "This task is complete (revision %s); nothing is left to do.\n", short(v.CompletedRevision))
@@ -411,7 +408,7 @@ Execute
 Complete
 
 - Commit before ` + "`atask verify complete`" + ` (` + "`wt step commit`" + ` where Worktrunk is installed, plain git otherwise). The tree must be clean; nothing is committed for you.
-- You never set status. Only a passing ` + "`atask verify complete`" + ` completes the task: it runs every required task check and regression check fresh on the committed revision, then promotes the branch to the target. When the target had moved it merges for you and reports ` + "`integrated_revision`" + `.
+- You never set status. Only a passing ` + "`atask verify complete`" + ` completes the task: it runs every required task check and regression check fresh on the committed revision, and records the revision; any on_complete actions then run.
 - On CHECK_FAILED, read ` + "`error.details`" + `, fix the cause, commit, verify again. Your claim stays live.
 - On BASE_CONFLICT, the target moved against you: ` + "`wt step rebase <target>`" + ` (or ` + "`git merge <target>`" + `), resolve ` + "`error.details.conflicts`" + `, commit, verify again. It is not counted against you.
 - If completion depends on work that is not yours: ` + "`atask add \"prereq\" --blocks <task> --proof \"run: cmd\" --regression \"run: cmd\"`" + `, ` + "`atask log`" + ` the handoff, ` + "`atask claim release`" + `. Do not implement the blocking task.

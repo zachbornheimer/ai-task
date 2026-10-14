@@ -60,8 +60,6 @@ type AddTask struct {
 	Regression *proof.ProofSpec
 	// OnComplete are the actions that run after the task completes.
 	OnComplete []proof.ActionSpec
-	// Pins are paths the task's branch must leave untouched.
-	Pins []string
 	// Size: small (default), medium or large; caps the task checks' time.
 	Size string
 }
@@ -80,7 +78,6 @@ type UpdateTask struct {
 	Proof          *proof.ProofSpec
 	Regression     *proof.ProofSpec
 	OnComplete     Patch[proof.ActionSpec]
-	Pins           Patch[string]
 	Size           *string
 	Requires       Patch[Ref] // replace the whole prerequisite set
 	AddRequires    []Ref

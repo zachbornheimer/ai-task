@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
-	"github.com/zachbornheimer/ai-task/internal/fault"
-	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
 // isolateGitIdentity hides the global and system Git configuration from
@@ -24,53 +22,6 @@ func isolateGitIdentity(t *testing.T) {
 			t.Setenv(k, "")
 			os.Unsetenv(k)
 		}
-	}
-}
-
-func TestIntegrationMergeIdentity(t *testing.T) {
-	f := newGitFixture(t)
-	isolateGitIdentity(t)
-	f.git(f.repo, "config", "user.useConfigOnly", "true")
-	f.git(f.repo, "config", "user.name", "Repo Owner")
-	f.git(f.repo, "config", "user.email", "owner@example.com")
-
-	// The target moved, so at records a merge: as the repository's
-	// identity, naming the task it integrates.
-	a := f.add("a")
-	s := f.claim(string(a))
-	f.commit(s.Workspace, "a.txt", "a")
-	f.commit(f.repo, "other.txt", "main moved")
-	res, err := f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	if err != nil || !res.Completed || res.IntegratedRevision == "" || res.IntegratedRevision == res.Revision {
-		t.Fatalf("%+v %v", res, err)
-	}
-	who := f.git(f.repo, "log", "-1", "--format=%an <%ae>|%cn <%ce>", res.IntegratedRevision)
-	if who != "Repo Owner <owner@example.com>|Repo Owner <owner@example.com>" {
-		t.Fatalf("merge recorded as %q, want the repository's identity", who)
-	}
-	if trailers := f.git(f.repo, "log", "-1", "--format=%(trailers:key=At-Task,valueonly)", res.IntegratedRevision); trailers != string(a) {
-		t.Fatalf("At-Task trailer = %q, want %s", trailers, a)
-	}
-
-	// Without an identity the merge cannot be recorded: a setup problem
-	// named as such, not a conflict, and not counted against the attempt.
-	f.git(f.repo, "config", "--unset", "user.name")
-	f.git(f.repo, "config", "--unset", "user.email")
-	b := f.add("b")
-	sb := f.claim(string(b))
-	f.commit(sb.Workspace, "b.txt", "b")
-	f.commit(f.repo, "other.txt", "main moved again")
-	before := f.git(f.repo, "rev-parse", "main")
-	res, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	wantCode(t, err, fault.CodeNotReady)
-	if res.Completed || len(res.Conflicts) != 0 || !strings.Contains(res.Summary, "config user.name") {
-		t.Fatalf("missing identity result: %+v", res)
-	}
-	if f.git(f.repo, "rev-parse", "main") != before {
-		t.Fatal("target moved without an identity")
-	}
-	if v := f.show(string(b)); v.Failures != 0 {
-		t.Fatalf("missing identity charged a strike: failures=%d", v.Failures)
 	}
 }
 

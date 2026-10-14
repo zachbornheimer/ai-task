@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -185,7 +188,11 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 	gv.Status = "pending"
 	if run != nil && (run.Status == sqlite.RunFailed || run.Status == sqlite.RunError) {
 		// Failed on the current target and contract: a planner must act.
-		if run.Revision == head.rev && run.Status == sqlite.RunFailed {
+		reqs, err := groupRequirements(tx, rec.Task.ID)
+		if err != nil {
+			return gv, err
+		}
+		if run.Revision == groupInputRevision(head.rev, reqs) && run.Status == sqlite.RunFailed {
 			gv.Status = "failed"
 			return gv, nil
 		}
@@ -196,6 +203,19 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 		gv.NextRetry = &next
 	}
 	return gv, nil
+}
+
+// groupInputRevision names what a group's proofs are judged on: the target
+// head and the completed revision of every task beneath the group. A failed
+// run is not repeated until one of them changes.
+func groupInputRevision(head string, reqs []workspace.Requirement) string {
+	lines := make([]string, 0, len(reqs))
+	for _, r := range reqs {
+		lines = append(lines, r.Task+"="+r.Revision)
+	}
+	slices.Sort(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return head + "+" + hex.EncodeToString(sum[:6])
 }
 
 // groupJob is one claimed group verification.
@@ -360,9 +380,14 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			if err != nil {
 				return err
 			}
+			requirements, err := groupRequirements(tx, r.Task.ID)
+			if err != nil {
+				return err
+			}
+			input := groupInputRevision(head.rev, requirements)
 			// Nothing changed since a failure on this very revision and
 			// contract: the planner has to act, not the verifier.
-			if last != nil && last.Status == sqlite.RunFailed && last.Revision == head.rev && last.PolicyDigest == effectivePolicy(r.Task, proj).Digest() && only == "" {
+			if last != nil && last.Status == sqlite.RunFailed && last.Revision == input && last.PolicyDigest == effectivePolicy(r.Task, proj).Digest() && only == "" {
 				continue
 			}
 			if next, _, err := jobBackoff(tx, pid, name); err != nil {
@@ -370,16 +395,12 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			} else if next.After(now) && only == "" {
 				continue
 			}
-			requirements, err := groupRequirements(tx, r.Task.ID)
-			if err != nil {
-				return err
-			}
 			jobID, err := tx.InsertJob(pid, name, nil, owner.Digest(), now.Add(execution.DefaultLease), now)
 			if err != nil {
 				return err
 			}
 			policy := effectivePolicy(r.Task, proj)
-			runID, err := tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, JobID: jobID, Mode: verification.ModeGroup, Status: sqlite.RunRunning, Revision: head.rev, Policy: policy, Environment: environmentFingerprint()}, now)
+			runID, err := tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, JobID: jobID, Mode: verification.ModeGroup, Status: sqlite.RunRunning, Revision: input, Policy: policy, Environment: environmentFingerprint()}, now)
 			if err != nil {
 				return err
 			}

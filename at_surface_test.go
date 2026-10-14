@@ -7,28 +7,30 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
 
 	at "github.com/zachbornheimer/ai-task"
+	"github.com/zachbornheimer/ai-task/internal/contract"
 )
 
 func TestPublicGoAPI(t *testing.T) {
-	wantTypes := []string{"AcceptanceCriterion", "AddGroup", "AddTask", "ApplyResult", "ArchiveTask", "Change", "ChangeSet", "CheckSpec", "ClaimRequest", "Code", "Config", "Engine", "Error", "Evidence", "Filter", "GroupView", "Handoff", "IntegrationPolicy", "Kind", "ListQuery", "LogEntry", "Patch", "PlanSnapshot", "Project", "ProjectID", "RecordedLog", "Ref", "ReleaseRequest", "Session", "SessionToken", "Status", "Store", "Summary", "Task", "TaskID", "TaskView", "UpdateTask", "VerificationPolicy", "VerifyMode", "VerifyResult"}
-	wantConsts := []string{"ListAll", "ListArchived", "ListBlocked", "ListOpen", "ListReady", "VerifyComplete", "VerifyProof", "VerifyRegression"}
+	wantTypes := []string{"AcceptanceCriterion", "ActionResult", "ActionSpec", "ActionStatus", "AddGroup", "AddTask", "ApplyResult", "ArchiveTask", "Change", "ChangeSet", "CheckType", "ClaimRequest", "Code", "Config", "Engine", "Error", "Evidence", "GroupView", "Handoff", "ListFilter", "ListQuery", "LogEntry", "Patch", "PlanSnapshot", "ProofSpec", "Project", "ProjectID", "Ref", "ReleaseRequest", "RunResult", "Session", "SessionToken", "Size", "Status", "Store", "Summary", "Task", "TaskID", "TaskKind", "TaskView", "UpdateTask", "VerifyMode", "VerifyRequest", "VerifyResult"}
+	wantConsts := []string{"ActionDetached", "ActionFailed", "ActionPending", "ActionRunning", "ActionSucceeded", "CheckOnComplete", "CheckProof", "CheckRegression", "FilterAll", "FilterArchived", "FilterBlocked", "FilterComplete", "FilterDraft", "FilterOpen", "FilterReady", "KindGroup", "KindTask", "SizeLarge", "SizeMedium", "SizeSmall", "VerifyComplete", "VerifyProof", "VerifyRegression"}
 	wantFuncs := []string{"DefaultPath", "ErrorCode", "Glyph", "Open", "ParseSessionToken", "ParseTaskID", "Replace"}
 	wantVars := []string{"ErrDone", "ErrStalled"}
 	wantEngine := map[string]string{
 		"Apply":   "Apply(context.Context, ChangeSet) (ApplyResult, error)",
 		"List":    "List(context.Context, ListQuery) (PlanSnapshot, error)",
-		"Show":    "Show(context.Context, ProjectID, string, bool) (TaskView, error)",
+		"Show":    "Show(context.Context, TaskID) (TaskView, error)",
 		"Claim":   "Claim(context.Context, ClaimRequest) (Session, error)",
 		"Renew":   "Renew(context.Context, SessionToken) (time.Time, error)",
 		"Release": "Release(context.Context, ReleaseRequest) error",
-		"Log":     "Log(context.Context, SessionToken, LogEntry) (RecordedLog, error)",
-		"Verify":  "Verify(context.Context, SessionToken, VerifyMode) (VerifyResult, error)",
+		"Log":     "Log(context.Context, SessionToken, LogEntry) error",
+		"Verify":  "Verify(context.Context, VerifyRequest) (VerifyResult, error)",
 	}
 
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -139,6 +141,7 @@ func shortType(t reflect.Type) string {
 	s := t.String()
 	repl := [][2]string{
 		{"plan.Result", "ApplyResult"},
+		{"at.VerifyRequest", "VerifyRequest"},
 		{"execution.Token", "SessionToken"},
 		{"project.ID", "ProjectID"},
 		{"verification.Mode", "VerifyMode"},
@@ -183,4 +186,44 @@ func assertExactNames(t *testing.T, label string, want, got []string) {
 		return
 	}
 	t.Errorf("%s: missing %v extra %v", label, missing, extra)
+}
+
+var contractConst = regexp.MustCompile(`(?m)^\s+(\w+)\s+\w+\s*=\s*"([a-z_]+)"`)
+
+// The Engine method names and every constant docs/contract.md lists exist in
+// package at with the value the document gives.
+func TestPublicSurfaceMatchesContract(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	root := filepath.Dir(thisFile)
+	want, err := contract.Parse(filepath.Join(root, "docs", "contract.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := reflect.TypeFor[at.Engine]()
+	var methods []string
+	for i := 0; i < engine.NumMethod(); i++ {
+		methods = append(methods, engine.Method(i).Name)
+	}
+	assertExactNames(t, "Engine methods", want.EngineMethods, methods)
+
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "contract.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, goAPI, _ := strings.Cut(string(raw), "# Public Code API")
+	docConsts := map[string]string{}
+	for _, m := range contractConst.FindAllStringSubmatch(goAPI, -1) {
+		docConsts[m[1]] = m[2]
+	}
+	got := map[string]string{
+		"VerifyProof": string(at.VerifyProof), "VerifyRegression": string(at.VerifyRegression), "VerifyComplete": string(at.VerifyComplete),
+		"KindTask": string(at.KindTask), "KindGroup": string(at.KindGroup),
+		"SizeSmall": string(at.SizeSmall), "SizeMedium": string(at.SizeMedium), "SizeLarge": string(at.SizeLarge),
+		"CheckProof": string(at.CheckProof), "CheckRegression": string(at.CheckRegression), "CheckOnComplete": string(at.CheckOnComplete),
+		"ActionPending": string(at.ActionPending), "ActionRunning": string(at.ActionRunning), "ActionDetached": string(at.ActionDetached), "ActionSucceeded": string(at.ActionSucceeded), "ActionFailed": string(at.ActionFailed),
+		"FilterAll": string(at.FilterAll), "FilterOpen": string(at.FilterOpen), "FilterReady": string(at.FilterReady), "FilterBlocked": string(at.FilterBlocked), "FilterDraft": string(at.FilterDraft), "FilterComplete": string(at.FilterComplete), "FilterArchived": string(at.FilterArchived),
+	}
+	if !reflect.DeepEqual(docConsts, got) {
+		t.Errorf("constants differ from docs/contract.md:\n  doc %v\n  got %v", docConsts, got)
+	}
 }
