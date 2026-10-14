@@ -15,11 +15,11 @@ import (
 
 // runner executes checks under the contract budgets (proof 30 s, regression
 // by size); a configured ProofBudget replaces them all.
-func (e *Engine) runner() *proof.Runner {
+func (e *Engine) runner(opts ...proof.RunnerOption) *proof.Runner {
 	if e.proofBudget > 0 {
-		return proof.NewRunner(proof.WithBudget(e.proofBudget))
+		opts = append(opts, proof.WithBudget(e.proofBudget))
 	}
-	return proof.NewRunner()
+	return proof.NewRunner(opts...)
 }
 
 // checkType is the kind of run a planned step is.

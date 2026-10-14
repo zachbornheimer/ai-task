@@ -287,17 +287,18 @@ func (e *Engine) suiteOpts(t task.Task, proj project.Project, changed []string) 
 	return taskOpts, regOpts
 }
 
-// checkEnv is the environment checks run with: the parent environment
-// minus any session token, plus GOFLAGS=-count=1 so Go's own test cache
-// cannot turn a fresh run into a replay, and a TMPDIR private to the
-// snapshot so temporary files of one suite never reach another.
+// checkEnv is the environment checks and actions run with: the allowlisted
+// part of the parent environment (see CheckEnvironment), GOFLAGS carrying
+// -count=1 so Go's own test cache cannot turn a fresh run into a replay,
+// and a TMPDIR private to the snapshot so temporary files of one suite
+// never reach another.
 func checkEnv(dir string) []string {
-	var env []string
+	extra, _ := proof.LoadExtraEnv(proof.ConfigPath()) // a bad config is reported where presets load
+	env := NewCheckEnvironment(extra).Filter(os.Environ())
 	flags := "-count=1"
-	for _, kv := range os.Environ() {
+	kept := env[:0:0]
+	for _, kv := range env {
 		switch {
-		case strings.HasPrefix(kv, "ATASK_SESSION="), strings.HasPrefix(kv, "TASKS_SESSION="):
-			continue
 		case strings.HasPrefix(kv, "GOFLAGS="):
 			// An at check can run a suite that itself runs at checks: keep
 			// the caller's flags and add -count=1 only when it is missing.
@@ -305,11 +306,10 @@ func checkEnv(dir string) []string {
 			if !hasField(flags, "-count=1") {
 				flags = strings.TrimSpace(flags + " -count=1")
 			}
-			continue
 		case strings.HasPrefix(kv, "TMPDIR="):
-			continue
+		default:
+			kept = append(kept, kv)
 		}
-		env = append(env, kv)
 	}
 	tmp := dir + ".tmp"
 	if dir == "" {
@@ -317,7 +317,7 @@ func checkEnv(dir string) []string {
 	} else {
 		_ = os.MkdirAll(tmp, 0o700)
 	}
-	return append(env, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+tmp)
+	return append(kept, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+tmp)
 }
 
 // changedFilesEnv writes the candidate's changed paths next to the

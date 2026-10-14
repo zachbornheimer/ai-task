@@ -22,6 +22,9 @@ func (r *Runner) Start(ct CheckType, spec ProofSpec, workdir string) RunResult {
 		return res
 	}
 	cmd := process.Command(context.Background(), workdir, argv[0], argv[1:]...)
+	if r.env != nil {
+		cmd.Env = r.env
+	}
 	cmd.SysProcAttr = detachedProcAttr()
 	if devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
 		defer discard.CloseReadOnly(devnull)

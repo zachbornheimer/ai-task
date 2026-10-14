@@ -46,6 +46,10 @@ func ConfigPath() string {
 }
 
 type configFile struct {
+	// Sandbox mode and extra_write land separately; the table is shared.
+	Sandbox struct {
+		ExtraEnv []string `toml:"extra_env"`
+	} `toml:"sandbox"`
 	Presets map[string]struct {
 		Command []string `toml:"command"`
 		Options []string `toml:"options"`
@@ -78,6 +82,19 @@ func LoadConfig(path string) ([]Preset, error) {
 		presets = append(presets, p)
 	}
 	return presets, nil
+}
+
+// LoadExtraEnv returns the variable names `[sandbox] extra_env` lets
+// through to checks. A missing file yields none.
+func LoadExtraEnv(path string) ([]string, error) {
+	var cf configFile
+	if _, err := toml.DecodeFile(path, &cf); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fault.Wrap(err, fault.CodeInvalidInput, "config %s", path)
+	}
+	return cf.Sandbox.ExtraEnv, nil
 }
 
 // RegisterCustom adds custom presets beside the built-ins; none may shadow

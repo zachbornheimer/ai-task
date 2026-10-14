@@ -71,7 +71,7 @@ func (e *Engine) runCompletionActions(ctx context.Context, token execution.Token
 	if err != nil {
 		return nil, err
 	}
-	runner := e.runner()
+	runner := e.runner(proof.WithEnv(checkEnv(c.dir)))
 	for i, a := range acts {
 		if !a.Status.Retryable() {
 			continue

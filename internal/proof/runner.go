@@ -20,6 +20,7 @@ type Runner struct {
 	target   string        // target branch handed to presets
 	budget   time.Duration // when > 0, overrides every budget (tests)
 	hasMise  func(workdir string) bool
+	env      []string // when non-nil, the whole environment of every process
 }
 
 // RunnerOption configures a Runner.
@@ -30,6 +31,9 @@ func WithBudget(d time.Duration) RunnerOption { return func(r *Runner) { r.budge
 
 // WithRegistry swaps the preset registry.
 func WithRegistry(reg *Registry) RunnerOption { return func(r *Runner) { r.registry = reg } }
+
+// WithEnv fixes the complete environment every process of the runner gets.
+func WithEnv(env []string) RunnerOption { return func(r *Runner) { r.env = env } }
 
 // WithTargetBranch tells presets which branch the project targets.
 func WithTargetBranch(b string) RunnerOption { return func(r *Runner) { r.target = b } }
@@ -77,7 +81,7 @@ func (r *Runner) Run(ctx context.Context, ct CheckType, spec ProofSpec, workdir 
 	if err != nil {
 		return r.rejected(ct, spec, err)
 	}
-	res, _ := r.RunCommand(ctx, ct, spec, Command{Argv: argv, Dir: workdir})
+	res, _ := r.RunCommand(ctx, ct, spec, Command{Argv: argv, Dir: workdir, Env: r.env})
 	return res
 }
 

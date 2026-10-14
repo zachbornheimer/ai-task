@@ -123,7 +123,7 @@ Size belongs to the check alone: a task or group has no size of its own, `show` 
 
 ### Run result
 
-Every proof, regression, and action run must finish inside its budget. A run
+Every proof, regression, and action run must finish inside its budget. Checks and actions inherit only PATH, HOME, USER, LOGNAME, SHELL, LANG, LC_*, TERM, TMPDIR, GO*, GIT_*, MISE_*, NODE_*, NPM_CONFIG_*, PLAYWRIGHT_*, UV_*, CI and ATASK_* from the parent (never a session token); `[sandbox] extra_env = ["NAME", ...]` in `config.toml` adds names. A run
 that exceeds it is killed and fails. Each run records one shape, shown by
 `atask show --full` and returned by `verify`:
 
