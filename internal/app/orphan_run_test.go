@@ -125,11 +125,11 @@ func TestLiveVerificationRunIsNotReaped(t *testing.T) {
 }
 
 const (
-	// pulseTestLease is far longer than the 1s run, so scheduler delay under
+	// pulseTestLease is far longer than the 0.3s run, so scheduler delay under
 	// load cannot expire the claim; the renewal interval is set separately
 	// so the pulse still ticks several times during the run.
 	pulseTestLease = time.Minute
-	pulseInterval  = 500 * time.Millisecond
+	pulseInterval  = 100 * time.Millisecond
 	// pulseQuietPeriod is three pulse intervals: a leaked pulse would tick
 	// within it.
 	pulseQuietPeriod = 3 * pulseInterval
@@ -140,7 +140,7 @@ const (
 func TestRunPulseStopsWithRun(t *testing.T) {
 	f := newGitFixture(t)
 	e := f.realClockEngineWithLease(pulseTestLease, pulseInterval)
-	id := f.addWith("pulse", "sleep 1")
+	id := f.addWith("pulse", "sleep 0.3")
 	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id})
 	if err != nil {
 		t.Fatal(err)
