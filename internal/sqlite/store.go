@@ -164,18 +164,19 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fault.WrapInternal(err, "create schema_migrations")
 	}
 	return s.Write(ctx, func(tx *Tx) error {
-		applied := map[int64]bool{}
-		rows, err := tx.tx.QueryContext(ctx, `SELECT version FROM schema_migrations`)
+		applied := map[int64]string{}
+		rows, err := tx.tx.QueryContext(ctx, `SELECT version, name FROM schema_migrations`)
 		if err != nil {
 			return fault.WrapInternal(err, "read schema_migrations")
 		}
 		for rows.Next() {
 			var v int64
-			if err := rows.Scan(&v); err != nil {
+			var recorded string
+			if err := rows.Scan(&v, &recorded); err != nil {
 				discard.CloseReadOnly(rows)
 				return err
 			}
-			applied[v] = true
+			applied[v] = recorded
 		}
 		discard.CloseReadOnly(rows)
 		for _, name := range names {
@@ -183,7 +184,10 @@ func (s *Store) migrate(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("migration %q: bad version prefix", name)
 			}
-			if applied[version] {
+			if recorded, done := applied[version]; done {
+				if recorded != name {
+					return fault.New(fault.CodeInvalidInput, "migration ledger in %s records version %d as %s but this build embeds %s; the database was migrated by a different build", s.path, version, recorded, name)
+				}
 				continue
 			}
 			body, err := migrationFS.ReadFile("migrations/" + name)

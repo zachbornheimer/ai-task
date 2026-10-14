@@ -3,8 +3,10 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
@@ -43,5 +45,38 @@ func TestBlankProjectBecomesGeneral(t *testing.T) {
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id = 't1'`).Scan(&taskProject); err != nil || taskProject != id {
 		t.Fatalf("task must follow the project: %q %v", taskProject, err)
+	}
+}
+
+// TestMigrationLedgerRefusesNameMismatch: a ledger that records a different
+// file name for an embedded migration number is refused, not skipped.
+func TestMigrationLedgerRefusesNameMismatch(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "at.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version int64
+	var embedded string
+	if err := s.db.QueryRowContext(ctx, `SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&version, &embedded); err != nil {
+		t.Fatal(err)
+	}
+	const recorded = "0022_other.sql"
+	if _, err := s.db.ExecContext(ctx, `UPDATE schema_migrations SET name = ? WHERE version = ?`, recorded, version); err != nil {
+		t.Fatal(err)
+	}
+	must.OK(t, s.Close())
+	_, err = Open(ctx, path)
+	if err == nil {
+		t.Fatal("Open succeeded despite a ledger name mismatch")
+	}
+	for _, want := range []string{recorded, embedded, path} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	if !fault.Is(err, fault.CodeInvalidInput) {
+		t.Errorf("code = %q, want INVALID_INPUT", fault.CodeOf(err))
 	}
 }
