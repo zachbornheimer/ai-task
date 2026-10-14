@@ -10,7 +10,6 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
-	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -31,26 +30,19 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 		t.Fatalf("diagnostic: %v %+v", err, r)
 	}
 	r, err = f.e.Verify(f.ctx, s.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "fixed 30s proof budget") || !strings.Contains(r.Message, "--size") || !strings.Contains(r.Summary, "timed out: unit-slow") {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "proof's size budget") || !strings.Contains(r.Message, "size=") || !strings.Contains(r.Summary, "timed out: unit-slow") {
 		t.Fatalf("complete: %v %+v", err, r)
 	}
 	v := f.show(string(a))
 	if v.Failures != 0 || !strings.Contains(v.LastError, "CHECK_FAILED") {
 		t.Fatalf("a timeout must not be a strike: failures=%d last_error=%q", v.Failures, v.LastError)
 	}
-	if !strings.Contains(v.LastError, "narrow the proof command") || !strings.Contains(v.LastError, "--size") {
-		t.Fatalf("timeout last_error must name the remedy and --size: %q", v.LastError)
+	if !strings.Contains(v.LastError, "narrow the proof command") || !strings.Contains(v.LastError, "size=") {
+		t.Fatalf("timeout last_error must name the remedy and size=: %q", v.LastError)
 	}
 	// The planner declares a larger size: same check, now within budget,
 	// and the warning says it used more than half of a small budget only
 	// when that is the case.
-	medium := "medium"
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Size: &medium}}}); err != nil {
-		t.Fatal(err)
-	}
-	if f.show(string(a)).Size != task.SizeMedium {
-		t.Fatal("size not updated")
-	}
 	f.setProofBudget(5 * time.Second)
 	res := f.complete(s)
 	if !res.Completed || len(res.Warnings) != 0 {
@@ -63,7 +55,7 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	sb := f.claim(string(b))
 	f.commit(sb.Workspace, "b.txt", "b")
 	r, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "regression budget") || !strings.Contains(r.Message, "atask update ID --size medium|large") {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "regression budget") || !strings.Contains(r.Message, "size=medium|large") {
 		t.Fatalf("regression timeout: %v %+v", err, r)
 	}
 	if f.show(string(b)).Failures != 0 {
@@ -103,7 +95,7 @@ func TestSmallSizeRejectsGoTestWithoutRun(t *testing.T) {
 	_, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
 		plan.AddTask{Key: "w", Title: "w", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}},
 	}})
-	if fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "-run") || !strings.Contains(err.Error(), "--size") {
+	if fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "-run") || !strings.Contains(err.Error(), "size=") {
 		t.Fatalf("unbounded go test on small: %v", err)
 	}
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{

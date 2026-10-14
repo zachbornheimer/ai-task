@@ -32,7 +32,7 @@ type proofFlags struct {
 func (c *ctxt) bindProofFlags() *proofFlags {
 	f := &proofFlags{}
 	c.fs.StringVar(&f.proof, "proof", "", "proves the task works, \"PRESET: SUBJECT [key=value ...]\" (e.g. \"run: go test ./pkg\"), 30s")
-	c.fs.StringVar(&f.regression, "regression", "", "proves nothing else broke, same grammar; --size sets its time class")
+	c.fs.StringVar(&f.regression, "regression", "", "proves nothing else broke, same grammar; size=small|medium|large|eternal sets its time class")
 	c.fs.Var(actionFlag{into: &f.actions}, "on-complete", "action run after the task completes, waited on (900s), \"PRESET: SUBJECT [key=value ...]\" (repeatable)")
 	c.fs.Var(actionFlag{detach: true, into: &f.actions}, "on-complete-detach", "action run after the task completes, spawned and not waited on (repeatable)")
 	return f
@@ -55,11 +55,11 @@ func (f *proofFlags) parseActions() ([]proof.ActionSpec, error) {
 	return out, nil
 }
 
-// parse reads both flags. Either may be empty; size, when given, becomes the
-// regression's time class.
-func (f *proofFlags) parse(size string) (proofSpec, regression *proof.ProofSpec, err error) {
+// parse reads both flags. Either may be empty; each spec carries its own
+// size= (a proof is small unless it says otherwise).
+func (f *proofFlags) parse() (proofSpec, regression *proof.ProofSpec, err error) {
 	if f.proof != "" {
-		s, err := proof.Parse(f.proof)
+		s, err := proof.ParseDefaulting(f.proof, proof.SizeSmall)
 		if err != nil {
 			return nil, nil, usage("--proof: %v", err)
 		}
@@ -69,9 +69,6 @@ func (f *proofFlags) parse(size string) (proofSpec, regression *proof.ProofSpec,
 		s, err := proof.Parse(f.regression)
 		if err != nil {
 			return nil, nil, usage("--regression: %v", err)
-		}
-		if size != "" {
-			s.Size = proof.Size(size)
 		}
 		regression = &s
 	}

@@ -30,10 +30,10 @@ func TestProofTimeoutMessageNamesFixedBudget(t *testing.T) {
 	if strings.Contains(r.Message, "medium budget") || strings.Contains(r.Message, "medium task") {
 		t.Errorf("message quotes the task size: %q", r.Message)
 	}
-	if !strings.Contains(r.Message, "fixed 30s proof budget") {
-		t.Errorf("message must name the fixed proof budget: %q", r.Message)
+	if !strings.Contains(r.Message, "proof's size budget") {
+		t.Errorf("message must name the proof size budget: %q", r.Message)
 	}
-	if !strings.Contains(r.Message, "narrow the proof command or move the long run to --regression with --size medium|large") {
+	if !strings.Contains(r.Message, "narrow the proof command, set size=medium|large on the proof") {
 		t.Errorf("message must name the remedy: %q", r.Message)
 	}
 }

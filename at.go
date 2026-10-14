@@ -214,9 +214,10 @@ const (
 
 // Regression sizes.
 const (
-	SizeSmall  = proof.SizeSmall
-	SizeMedium = proof.SizeMedium
-	SizeLarge  = proof.SizeLarge
+	SizeSmall   = proof.SizeSmall
+	SizeMedium  = proof.SizeMedium
+	SizeLarge   = proof.SizeLarge
+	SizeEternal = proof.SizeEternal
 )
 
 // Run types.

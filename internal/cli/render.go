@@ -425,7 +425,7 @@ func renderRunResults(w io.Writer, results []proof.RunResult) {
 	for i := range results {
 		r := &results[i]
 		say(w, "    %s %s %s/%s %s\n", r.CheckType, r.Preset,
-			(time.Duration(r.ElapsedMS) * time.Millisecond).String(), (time.Duration(r.BudgetMS) * time.Millisecond).String(), runOutcome(*r))
+			(time.Duration(r.ElapsedMS) * time.Millisecond).String(), budgetLabel(r.Budget()), runOutcome(*r))
 	}
 }
 
@@ -676,4 +676,12 @@ func proofText(spec proof.ProofSpec) string {
 	}
 	text += textSb655.String()
 	return text
+}
+
+// budgetLabel shows a run's allowance; a run with none is "unlimited".
+func budgetLabel(d time.Duration) string {
+	if d <= 0 {
+		return "unlimited"
+	}
+	return d.String()
 }

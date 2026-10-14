@@ -81,7 +81,7 @@ replay returns the committed result (even with a stale
 
 - Every task carries both a proof (`--proof "PRESET: SUBJECT"`, proves
   the task works) and a regression (`--regression "PRESET: SUBJECT"`, proves
-  nothing else broke; `--size` sets its time class). A task missing either one is a draft: `add` creates it, `list draft` shows it with `◌`, and `claim` is `NOT_READY` naming `--proof` and `--regression`. Never claim a draft; supply both with `update` and it becomes ready.
+  nothing else broke; `size=` on either sets its time class). A task missing either one is a draft: `add` creates it, `list draft` shows it with `◌`, and `claim` is `NOT_READY` naming `--proof` and `--regression`. Never claim a draft; supply both with `update` and it becomes ready.
   `update --proof` / `--regression`
   replace either one. `atask show` lists both under TASK CHECKS and
   `show --json` carries `proof` and `regression` objects
@@ -105,14 +105,14 @@ replay returns the committed result (even with a stale
   the proof and regression again against the revision that completed the
   task (in snapshots), appends the new RunResults, and leaves the task
   complete; it does not run actions.
-- `--size small|medium|large` (default small) declares how long the
-  task's checks may take; the proof package turns it into seconds
-  (60s, 300s, 900s). A project holds no checks or budgets: `atask project`
+- `size=small|medium|large|eternal` on any check (default small; large
+  for actions) declares how long that check may take: 30s, 300s, 900s, or
+  no budget. Write it last, e.g. `--regression 'run: go test ./... size=large'`. A project holds no checks or budgets: `atask project`
   takes `--target-branch` and `--attempts` only. The
   whole suite shares the budget: a check that would start after it is
   spent is recorded as `timed_out` without running. A small task whose
   check is `go test` without `-run` is rejected (`INVALID_INPUT`);
-  narrow with `-run` or set `--size medium|large`. `verify` results
+  narrow with `-run` or set `size=medium|large` on the check. `verify` results
   carry `warnings` for checks that passed using more than half their
   budget. Checks run with `ATASK_CHANGED_FILES` (a file listing the paths the
   candidate changed against the target) and `ATASK_TARGET_BRANCH`, so a
@@ -123,7 +123,7 @@ replay returns the committed result (even with a stale
 - Groups (`--group`, `--parent`) are organizational: membership never
   implies an edge, groups cannot be claimed, and group progress is derived.
   A group may carry its own proofs (`--group --proof ... --regression ...`,
-  `--size`, large by default). They run on the merge of every child's
+  each with its own `size=`). They run on the merge of every child's
   completed revision, built in a scratch worktree: no integration branch
   exists. `atask verify complete GROUP` runs them, or a worker waiting in
   `atask claim --wait` does. Before every child is complete it fails with

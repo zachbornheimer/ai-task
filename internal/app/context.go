@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/proof"
-
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -260,11 +258,8 @@ func renderContext(c Context) string {
 		w.WriteString("\n")
 	}
 	w.WriteString("Done when `atask verify complete` passes on the committed revision: every required task check, then every regression check, run fresh. The checks are the contract.\n")
-	size := v.Size
-	if size == "" {
-		size = task.SizeSmall
-	}
-	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(proof.Size(size).Budget()), size, budgetLabelFor(regressionBudgetOf(v.Regression, size)))
+	proofSize := checkSize(v.Proof)
+	fmt.Fprintf(&w, "Budgets: task checks %s (size %s), regression %s; a check that runs out of time fails the run as a timeout (never a strike) and means the verification needs fixing, not the code. Checks get ATASK_CHANGED_FILES (a file listing the paths this change touched) and ATASK_TARGET_BRANCH.\n\n", budgetLabelFor(proofSize.Budget()), proofSize, budgetLabelFor(checkSize(v.Regression).Budget()))
 	if len(v.Checks) > 0 {
 		w.WriteString("Task checks (`atask verify proof`):\n")
 		for _, ch := range v.Checks {
@@ -427,15 +422,6 @@ func budgetLabelFor(d time.Duration) string {
 		return "unlimited"
 	}
 	return d.String()
-}
-
-// regressionBudgetOf is the allowance of a regression proof (the task's size
-// when the proof declares none).
-func regressionBudgetOf(rp *proof.ProofSpec, size string) time.Duration {
-	if rp != nil && rp.Size != "" {
-		return rp.Size.Budget()
-	}
-	return proof.Size(size).Budget()
 }
 
 // CheckText renders a check as a person would type it: its argv, or for an

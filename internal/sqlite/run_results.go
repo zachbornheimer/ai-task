@@ -25,19 +25,31 @@ func (t *Tx) InsertRunResult(runID, evidenceID int64, r proof.RunResult) error {
 	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO run_results
 		(task_id, attempt_id, run_id, evidence_id, `+runResultColumns+`)
 		SELECT task_id, attempt_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM verification_runs WHERE id = ?`,
-		runID, evidenceID, r.CheckType, r.Preset, r.Subject, string(opts), ms(r.StartedAt), r.ElapsedMS, r.BudgetMS, r.TimedOut, code, r.Passed, r.Output, runID)
+		runID, evidenceID, r.CheckType, r.Preset, r.Subject, string(opts), ms(r.StartedAt), r.ElapsedMS, budgetColumn(r), r.TimedOut, code, r.Passed, r.Output, runID)
 	return wrapInternal(err, "insert run result")
+}
+
+// budgetColumn stores a run's budget; budget_ms is NOT NULL, so a run with
+// no budget (eternal) is stored as 0, which no budgeted run ever has.
+func budgetColumn(r proof.RunResult) int64 {
+	if r.BudgetMS == nil {
+		return 0
+	}
+	return *r.BudgetMS
 }
 
 func scanRunResult(sc interface{ Scan(...any) error }) (proof.RunResult, error) {
 	var r proof.RunResult
 	var opts string
-	var started int64
+	var started, budget int64
 	var code sql.NullInt64
-	if err := sc.Scan(&r.CheckType, &r.Preset, &r.Subject, &opts, &started, &r.ElapsedMS, &r.BudgetMS, &r.TimedOut, &code, &r.Passed, &r.Output); err != nil {
+	if err := sc.Scan(&r.CheckType, &r.Preset, &r.Subject, &opts, &started, &r.ElapsedMS, &budget, &r.TimedOut, &code, &r.Passed, &r.Output); err != nil {
 		return r, err
 	}
 	r.StartedAt = fromMS(started)
+	if budget > 0 {
+		r.BudgetMS = &budget
+	}
 	if err := json.Unmarshal([]byte(opts), &r.Options); err != nil || r.Options == nil {
 		r.Options = map[string]string{}
 	}

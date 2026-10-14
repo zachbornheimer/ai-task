@@ -59,7 +59,7 @@ func TestAddRequiresBothProofs(t *testing.T) {
 	}
 	h.failsWith([]string{"--proof"}, "add", "t", "--check", "x: y")
 
-	if code, _, errOut := h.run("add", "ok", "--key", "ok", "--proof", "run: go version", "--regression", "run: go version", "--size", "small"); code != ExitOK {
+	if code, _, errOut := h.run("add", "ok", "--key", "ok", "--proof", "run: go version", "--regression", "run: go version"); code != ExitOK {
 		t.Fatalf("valid add: %d %s", code, errOut)
 	}
 	code, out, errOut := h.run("show", "ok")

@@ -30,8 +30,8 @@ func TestRenderRunResultsOneLineEach(t *testing.T) {
 	code := 0
 	var b bytes.Buffer
 	renderRunResults(&b, []proof.RunResult{
-		{CheckType: proof.CheckProof, Preset: "run", ElapsedMS: 120, BudgetMS: 30000, ReturnCode: &code, Passed: true},
-		{CheckType: proof.CheckRegression, Preset: "run", ElapsedMS: 60000, BudgetMS: 60000, TimedOut: true},
+		{CheckType: proof.CheckProof, Preset: "run", ElapsedMS: 120, BudgetMS: new(int64(30000)), ReturnCode: &code, Passed: true},
+		{CheckType: proof.CheckRegression, Preset: "run", ElapsedMS: 60000, BudgetMS: new(int64(60000)), TimedOut: true},
 	})
 	want := "  run results\n    proof run 120ms/30s passed\n    regression run 1m0s/1m0s timed_out\n"
 	if b.String() != want {

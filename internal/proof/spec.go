@@ -2,31 +2,52 @@
 // grammar, the sizes that bound a run, and the RunResult every run records.
 package proof
 
-import "time"
+import (
+	"time"
 
-// ProofBudget is the fixed budget of a --proof run, whatever its size.
+	"github.com/zachbornheimer/ai-task/internal/fault"
+)
+
+// ProofBudget is the budget of a small check, the default of a --proof.
 const ProofBudget = 30 * time.Second
 
-// Size is the time class of a regression or on_complete run.
+// Size is the time class of any check: its size= option.
 type Size string
 
 const (
 	SizeSmall  Size = "small"
 	SizeMedium Size = "medium"
 	SizeLarge  Size = "large"
+	// SizeEternal has no budget; the run is still heartbeated and reaped
+	// when its owner dies.
+	SizeEternal Size = "eternal"
 )
 
-// Budget returns the wall-clock allowance for the size; unknown sizes get
-// the small allowance.
+// SizeOption is the reserved option every check spec accepts.
+const SizeOption = "size"
+
+// Budget returns the wall-clock allowance for the size, zero for eternal;
+// unknown sizes get the small allowance.
 func (s Size) Budget() time.Duration {
 	switch s {
+	case SizeEternal:
+		return 0
 	case SizeLarge:
 		return 900 * time.Second
 	case SizeMedium:
 		return 300 * time.Second
 	default:
-		return 60 * time.Second
+		return ProofBudget
 	}
+}
+
+// ParseSize reads a size= value; anything but the four sizes is INVALID_INPUT.
+func ParseSize(v string) (Size, error) {
+	switch s := Size(v); s {
+	case SizeSmall, SizeMedium, SizeLarge, SizeEternal:
+		return s, nil
+	}
+	return "", fault.New(fault.CodeInvalidInput, "size=%q must be small, medium, large or eternal", v)
 }
 
 // CheckType says why a run happens, and so which budget governs it.
@@ -55,15 +76,20 @@ type RunResult struct {
 	Options    map[string]string `json:"options"`
 	StartedAt  time.Time         `json:"started_at"`
 	ElapsedMS  int64             `json:"elapsed_ms"`
-	BudgetMS   int64             `json:"budget_ms"`
+	BudgetMS   *int64            `json:"budget_ms"` // nil for an eternal check
 	TimedOut   bool              `json:"timed_out"`
 	ReturnCode *int              `json:"return_code"`
 	Passed     bool              `json:"passed"`
 	Output     string            `json:"output"`
 }
 
-// OnCompleteBudget is the budget of a waited on-complete action.
-const OnCompleteBudget = 900 * time.Second
+// Budget is the allowance the run had; zero when it had none.
+func (r RunResult) Budget() time.Duration {
+	if r.BudgetMS == nil {
+		return 0
+	}
+	return time.Duration(*r.BudgetMS) * time.Millisecond
+}
 
 // ActionSpec is an --on-complete (waited) or --on-complete-detach (spawned,
 // not waited on) command that runs after a task completes. It parses with
@@ -73,21 +99,27 @@ type ActionSpec struct {
 	Subject string            `json:"subject"`
 	Options map[string]string `json:"options"`
 	Detach  bool              `json:"detach"`
+	// Size is the action's time class; empty (stored before size=) is large.
+	Size Size `json:"size,omitempty"`
 }
 
 // Proof is the ProofSpec the action runs as.
 func (a ActionSpec) Proof() ProofSpec {
-	return ProofSpec{Preset: a.Preset, Subject: a.Subject, Options: a.Options}
+	size := a.Size
+	if size == "" {
+		size = SizeLarge
+	}
+	return ProofSpec{Preset: a.Preset, Subject: a.Subject, Options: a.Options, Size: size}
 }
 
 // ParseAction reads "PRESET: SUBJECT [key=value ...]" as an action.
 // Unlike a proof, an action is not judged for vacuity: it does things.
 func ParseAction(s string, detach bool) (ActionSpec, error) {
-	p, err := Parse(s)
+	p, err := ParseDefaulting(s, SizeLarge)
 	if err != nil {
 		return ActionSpec{}, err
 	}
-	return ActionSpec{Preset: p.Preset, Subject: p.Subject, Options: p.Options, Detach: detach}, nil
+	return ActionSpec{Preset: p.Preset, Subject: p.Subject, Options: p.Options, Detach: detach, Size: p.Size}, nil
 }
 
 // ActionStatus is where an action stands.

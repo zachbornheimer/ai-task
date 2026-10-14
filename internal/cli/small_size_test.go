@@ -25,13 +25,13 @@ func TestSmallSizeAddCLIRejectsUnboundedGoTest(t *testing.T) {
 	if code == ExitOK {
 		t.Fatalf("unbounded go test on small must be rejected: %s", errOut)
 	}
-	if !strings.Contains(errOut, "-run") || !strings.Contains(errOut, "--size") {
-		t.Fatalf("reject must name -run and --size:\n%s", errOut)
+	if !strings.Contains(errOut, "-run") || !strings.Contains(errOut, "size=") {
+		t.Fatalf("reject must name -run and size=:\n%s", errOut)
 	}
 	if code, errOut = run("add", "narrow unit", "--proof", "run: go test ./internal/cli -count=1 -run TestSmallSize", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("narrowed go test: %d %s", code, errOut)
 	}
-	if code, errOut = run("add", "medium unit", "--size", "medium", "--proof", "run: go test ./internal/cli -count=1", "--regression", "run: true"); code != ExitOK {
+	if code, errOut = run("add", "medium unit", "--proof", "run: go test ./internal/cli -count=1 size=medium", "--regression", "run: true"); code != ExitOK {
 		t.Fatalf("medium unbounded: %d %s", code, errOut)
 	}
 }

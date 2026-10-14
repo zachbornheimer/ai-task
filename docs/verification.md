@@ -14,8 +14,8 @@ completes a task; only `verify complete` can, and only with fresh evidence.
 A task missing either proof is a draft and cannot be claimed or completed.
 
 Each proof is `"PRESET: SUBJECT [key=value ...]"`, run in the task worktree.
-A proof runs under the 30 s budget; a regression under its size budget
-(60/300/900 s). `docs/contract.md` lists the presets.
+Every check runs under its own `size=` budget (30/300/900 s, or none for
+`eternal`). `docs/contract.md` lists the presets.
 
 ## Modes
 
@@ -76,8 +76,8 @@ A group's proofs run on the merge of every child's completed revision, built in 
 
 ## Budgets: proofs must be fast
 
-A proof has 30 s. A regression declares a size (`--size small|medium|large`,
-60/300/900 s; default from the preset). A run over its budget is killed and
+Every check declares a size with `size=small|medium|large|eternal` (30/300/900 s,
+or no budget); a proof is small by default, a regression takes its preset's size. A run over its budget is killed and
 fails with `timed_out=true`. A timeout says the verification was built too
 slow for the task (or the code hangs), not that the software is wrong. A
 `go_test` on a whole tree with no `name` is rejected at add/update as a

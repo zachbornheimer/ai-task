@@ -18,6 +18,9 @@ import (
 // that both the first error and the final summary survive truncation.
 const OutputLimit = 32 * 1024
 
+// NoTimeout as Spec.Timeout lets the command run until it exits or is canceled.
+const NoTimeout time.Duration = -1
+
 // Spec describes one command to run.
 type Spec struct {
 	Argv    []string
@@ -58,10 +61,10 @@ func Run(ctx context.Context, spec Spec) Result {
 		return res
 	}
 	timeout := spec.Timeout
-	if timeout <= 0 {
+	if timeout == 0 {
 		timeout = 30 * time.Minute
 	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cctx, cancel := withOptionalTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := Command(cctx, spec.Dir, spec.Argv[0], spec.Argv[1:]...)
@@ -153,4 +156,12 @@ func (b *boundedBuffer) String() string {
 		return b.head.String() + string(b.tail)
 	}
 	return fmt.Sprintf("%s\n... [%d bytes truncated] ...\n%s", b.head.String(), b.dropped, b.tail)
+}
+
+// withOptionalTimeout bounds ctx by timeout; a negative timeout adds none.
+func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout < 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, timeout)
 }

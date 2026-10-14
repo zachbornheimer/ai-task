@@ -59,5 +59,5 @@ func isNoOp(subject string) bool {
 }
 
 func unboundedGoTest(subject string) error {
-	return fault.New(fault.CodeInvalidInput, "unbounded go_test: %q has no name= (-run) filter; a small proof must finish within %s. Narrow it so it proves only this outcome, or set --size medium|large", subject, SizeSmall.Budget())
+	return fault.New(fault.CodeInvalidInput, "unbounded go_test: %q has no name= (-run) filter; a small proof must finish within %s. Narrow it so it proves only this outcome, or set size=medium|large", subject, SizeSmall.Budget())
 }

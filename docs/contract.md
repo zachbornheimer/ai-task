@@ -44,10 +44,9 @@ atask prune
 --accept TEXT
 --requires TASK_ID
 --blocks TASK_ID
---proof "PRESET: SUBJECT [k=v]"        proves this task works, 30 s
---regression "PRESET: SUBJECT [k=v]"   proves nothing else broke, --size budget
---size small|medium|large              60/300/900 s, regression only
---on-complete "PRESET: SUBJECT [k=v]"  run after completion, waited, 900 s
+--proof "PRESET: SUBJECT [k=v]"        proves this task works, small (30 s) unless size= says otherwise
+--regression "PRESET: SUBJECT [k=v]"   proves nothing else broke, small unless size= says otherwise
+--on-complete "PRESET: SUBJECT [k=v]"  run after completion, waited, large (900 s) unless size= says otherwise
 --on-complete-detach "PRESET: ..."     run after completion, not waited on
 
 --remove-requires TASK_ID
@@ -110,8 +109,12 @@ options = ["grep"] # optional keys the preset accepts
 size = "medium"
 ```
 
-A preset's default size applies to `--regression` when `--size` is absent;
-`--proof` is always 30 s. Rejected at add: `run: true` and other no-ops, a
+Every check spec takes `size=small|medium|large|eternal` as its last option:
+30 s, 300 s, 900 s, or no budget (`budget_ms` is `null`; the run still
+heartbeats and the orphan reaper still applies). `size=` overrides a preset's
+`size`; any other value is `INVALID_INPUT`. Without `size=`, a `--proof` is
+small, a `--regression` takes its preset's default size, and an action is
+large. For example `--regression 'run: go test ./... size=large'`. Rejected at add: `run: true` and other no-ops, a
 small `go_test` on a whole tree with no `name`, and `run` arguments that embed
 encoded code. A `*_test` that runs zero tests fails at verify; exit 0 alone
 never passes a `*_test` preset.
@@ -138,12 +141,12 @@ that exceeds it is killed and fails. Each run records one shape, shown by
 }
 ```
 
-| Flag                   | Budget                 |
-| ---------------------- | ---------------------- |
-| `--proof`              | 30 s                   |
-| `--regression`         | `--size`: 60/300/900 s |
-| `--on-complete`        | 900 s                  |
-| `--on-complete-detach` | none, not waited on    |
+| Flag                   | Budget                                        |
+| ---------------------- | --------------------------------------------- |
+| `--proof`              | its `size=`: 30 s unless set                  |
+| `--regression`         | its `size=`: 30 s unless set or the preset's  |
+| `--on-complete`        | its `size=`: 900 s unless set                 |
+| `--on-complete-detach` | its `size=` (900 s unless set), not waited on |
 
 ### Output and errors
 
@@ -204,7 +207,7 @@ type ProofSpec struct {
     Preset  string            // "run", "ci", "go_test", ...
     Subject string
     Options map[string]string
-    Size    Size              // regression only; zero value = the preset default
+    Size    Size              // from size=; zero value = the preset default
 }
 
 type ActionSpec struct {
@@ -212,6 +215,7 @@ type ActionSpec struct {
     Subject string
     Options map[string]string
     Detach  bool
+    Size    Size   // from size=; zero value = SizeLarge
 }
 
 type RunResult struct {
@@ -276,9 +280,10 @@ const (
 )
 
 const (
-    SizeSmall  Size = "small"   // 60 s
-    SizeMedium Size = "medium"  // 300 s
-    SizeLarge  Size = "large"   // 900 s
+    SizeSmall   Size = "small"    // 30 s
+    SizeMedium  Size = "medium"   // 300 s
+    SizeLarge   Size = "large"    // 900 s
+    SizeEternal Size = "eternal"  // no budget
 )
 
 const (

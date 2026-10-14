@@ -115,7 +115,7 @@ func (it planItem) change(i int) (plan.Change, error) {
 		return nil, usage("item %d: title is required", i+1)
 	}
 	flags := proofFlags{proof: it.Proof, regression: it.Regression}
-	proof, regression, err := flags.parse(it.Size)
+	proof, regression, err := flags.parse()
 	if err != nil {
 		return nil, usage("item %d (%s): %v", i+1, it.Title, err)
 	}

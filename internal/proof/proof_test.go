@@ -45,7 +45,7 @@ func TestProofSpecContract(t *testing.T) {
 	})
 
 	t.Run("budgets", func(t *testing.T) {
-		for s, want := range map[Size]time.Duration{SizeSmall: 60 * time.Second, SizeMedium: 300 * time.Second, SizeLarge: 900 * time.Second} {
+		for s, want := range map[Size]time.Duration{SizeSmall: 30 * time.Second, SizeMedium: 300 * time.Second, SizeLarge: 900 * time.Second, SizeEternal: 0} {
 			if s.Budget() != want {
 				t.Errorf("%s budget = %s, want %s", s, s.Budget(), want)
 			}
@@ -54,10 +54,10 @@ func TestProofSpecContract(t *testing.T) {
 			t.Errorf("ProofBudget = %s", ProofBudget)
 		}
 		r := NewRunner()
-		if got := r.budgetFor(CheckProof, ProofSpec{Size: SizeLarge}); got != ProofBudget {
+		if got := r.Budget(ProofSpec{Size: SizeLarge}); got != 900*time.Second {
 			t.Errorf("proof budget = %s", got)
 		}
-		if got := r.budgetFor(CheckRegression, ProofSpec{Size: SizeMedium}); got != 300*time.Second {
+		if got := r.Budget(ProofSpec{Size: SizeMedium}); got != 300*time.Second {
 			t.Errorf("regression budget = %s", got)
 		}
 	})

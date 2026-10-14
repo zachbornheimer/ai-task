@@ -834,7 +834,10 @@ func vacuityError(spec task.Spec) error {
 	if spec.Kind != task.KindTask {
 		return nil
 	}
-	size := proof.Size(spec.Size)
+	size := proof.Size(spec.Size) // checks given without a proof spec: the task's own size
+	if spec.Verification.Proof != nil {
+		size = checkSize(spec.Verification.Proof)
+	}
 	for _, c := range spec.Verification.TaskChecks {
 		if c.Eval != nil {
 			continue

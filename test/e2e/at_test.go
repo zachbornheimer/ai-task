@@ -550,21 +550,20 @@ func TestInitInstallsInstructions(t *testing.T) {
 	}
 }
 
-// TestSizesBudgetsAndDoctorTiming: sizes travel through add, update, plan
+// TestSizesBudgetsAndDoctorTiming: size= travels through add, update, plan
 // files and show; project budgets are set with durations or "none"; the
 // context states them; doctor fails a project whose regression suite is
 // over budget.
 func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 	e := gitEnv(t)
-	big := e.ok("add", "Big", "--key", "big", "--size", "large", "--proof", "run: test -d .", "--regression", "run: true")
-	if must.As[map[string]any](big["task"])["size"] != "large" {
-		t.Fatalf("size: %v", big)
+	e.ok("add", "Big", "--key", "big", "--proof", "run: test -d . size=medium", "--regression", "run: true size=large")
+	big := must.As[map[string]any](e.ok("show", "big")["regression"])
+	if big["size"] != "large" {
+		t.Fatalf("regression size: %v", big)
 	}
-	e.fails("INVALID_INPUT", "add", "Odd", "--size", "huge", "--proof", "run: test -d .", "--regression", "run: true")
-	e.ok("update", "big", "--size", "medium")
-	if e.ok("show", "big")["size"] != "medium" {
-		t.Fatal("size not updated")
-	}
+	e.fails("INVALID_INPUT", "add", "Odd", "--proof", "run: test -d . size=huge", "--regression", "run: true")
+	e.fails("INVALID_INPUT", "add", "Old", "--size", "large", "--proof", "run: test -d .", "--regression", "run: true")
+	e.ok("update", "big", "--regression", "run: true size=medium")
 	r := e.runIn(e.cwd, `{"key":"s","title":"S","size":"small","proof":"run: test -d .","regression":"run: test -d ."}`, nil, "add", "-f", "-")
 	if r.code != 0 {
 		t.Fatalf("plan file size: %s", r.stdout)

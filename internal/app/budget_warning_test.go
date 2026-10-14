@@ -15,7 +15,7 @@ func goCheck(id string, argv ...string) verification.CheckSpec {
 
 func wantSmallSizeReject(t *testing.T, err error) {
 	t.Helper()
-	if fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "-run") || !strings.Contains(err.Error(), "--size") {
+	if fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "-run") || !strings.Contains(err.Error(), "size=") {
 		t.Fatalf("want INVALID_INPUT naming -run and --size, got %v", err)
 	}
 }

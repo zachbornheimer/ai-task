@@ -117,9 +117,9 @@ func newCustomPreset(name string, command, options []string, size string) (Custo
 	switch sz {
 	case "":
 		sz = SizeSmall
-	case SizeSmall, SizeMedium, SizeLarge:
+	case SizeSmall, SizeMedium, SizeLarge, SizeEternal:
 	default:
-		return CustomPreset{}, fmt.Errorf("preset %q: size %q must be small, medium, or large", name, size)
+		return CustomPreset{}, fmt.Errorf("preset %q: size %q must be small, medium, large or eternal", name, size)
 	}
 	return CustomPreset{name: name, command: command, options: options, size: sz}, nil
 }

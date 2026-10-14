@@ -72,7 +72,7 @@ func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.
 			suiteLeft = time.Until(deadline)
 		}
 		run := stepRun{runner: runner, size: opts.size, suiteLeft: suiteLeft, suiteSet: !deadline.IsZero(), env: extra, logDir: opts.logDir}
-		run.suiteLimited = run.suiteSet && suiteLeft < shortest(runner.Budget(checkType(step), stepSpec(step.Check, opts.size)), step.Check.Timeout)
+		run.suiteLimited = run.suiteSet && suiteLeft < shortest(runner.Budget(stepSpec(step.Check, opts.size)), step.Check.Timeout)
 		ev := e.execStep(ctx, dir, step, runID, revision, policy.Digest(), requiredTaskFailed, run)
 		// A check recorded without running keeps its own message (execStep
 		// says why); these describe a check that started.
@@ -115,7 +115,7 @@ func timeoutReason(r *proof.RunResult, run stepRun, opts runOpts) string {
 	if run.suiteLimited {
 		return fmt.Sprintf("exceeded %s (%s for the whole suite); the check is too slow for the task's size, or the code it runs hangs", opts.budgetName, opts.budget)
 	}
-	return fmt.Sprintf("exceeded its %s budget (%s); the check is too slow for the contract, or the code it runs hangs", r.CheckType, time.Duration(r.BudgetMS)*time.Millisecond)
+	return fmt.Sprintf("exceeded its %s budget (%s); the check is too slow for the contract, or the code it runs hangs", r.CheckType, r.Budget())
 }
 
 func (e *Engine) execStep(ctx context.Context, dir string, step verification.Step, runID int64, revision, policyDigest string, skipRegression bool, run stepRun) verification.Evidence {

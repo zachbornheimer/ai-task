@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zachbornheimer/ai-task/internal/proof"
-
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -480,12 +478,7 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 	}
 	base := resolved.Revision
 	res.Revision, res.Base = base, resolved.Explain()
-	size := job.rec.Task.Size
-	if size == "" {
-		size = task.SizeLarge
-	}
 	t := job.rec.Task
-	t.Size = size
 	policy := effectivePolicy(t, job.proj)
 	staleEvidence, staleFailure, err := e.proveStaleChildren(checkCtx, mgr, base, resolved.Stale, job, fence)
 	res.Evidence = staleEvidence
@@ -513,7 +506,7 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 		res.Summary, res.Message = v.Summary, "group complete: its proofs passed on the merge of every child's completed revision"
 		return res, nil
 	case len(v.TimedOut) > 0:
-		summary := fmt.Sprintf("%s; group check(s) %s exceeded the %s budget (%s): the group's verification is built too slow; narrow it or set a larger --size on the group", v.Summary, strings.Join(v.TimedOut, ", "), size, e.sizeBudget(proof.Size(size)))
+		summary := fmt.Sprintf("%s; group check(s) %s exceeded their size budget: the group's verification is built too slow; narrow it or set a larger size= on the group's check", v.Summary, strings.Join(v.TimedOut, ", "))
 		_ = finish(sqlite.RunFailed, "failed", summary, false)
 		return fail(fault.CodeCheckFailed, summary)
 	default:

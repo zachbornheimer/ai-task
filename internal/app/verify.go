@@ -278,12 +278,8 @@ type runOpts struct {
 // suiteOpts derives the task-check and regression allowances for a task
 // from its size and its regression proof's size.
 func (e *Engine) suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, regOpts runOpts) {
-	size := t.Size
-	if size == "" {
-		size = task.SizeSmall
-	}
-	regSize := regressionSize(t)
-	taskOpts = runOpts{budget: e.sizeBudget(proof.Size(size)), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: proof.Size(size)}
+	size, regSize := checkSizes(t)
+	taskOpts = runOpts{budget: e.sizeBudget(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: size}
 	regOpts = runOpts{budget: e.sizeBudget(regSize), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch, size: regSize}
 	return taskOpts, regOpts
 }
@@ -544,7 +540,8 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		return res, err
 	}
 	verdict := verification.Judge(fr.policy, evidence)
-	taskBudget, regBudget := e.sizeBudget(proof.Size(fr.rec.Task.Size)), e.sizeBudget(regressionSize(fr.rec.Task))
+	proofSize, regSize := checkSizes(fr.rec.Task)
+	taskBudget, regBudget := e.sizeBudget(proofSize), e.sizeBudget(regSize)
 	if len(verdict.TimedOut) > 0 {
 		res.Message = timeoutMessage(verdict, fr.policy, regBudget)
 		return failTimeout(verdict.Summary+"; "+res.Message, evidence)
@@ -694,10 +691,10 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, regBudge
 	}
 	var parts []string
 	if len(taskIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the fixed %s proof budget (proofs are not resized by task size): narrow the proof command or move the long run to --regression with --size medium|large", strings.Join(taskIDs, ", "), proof.ProofBudget))
+		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the proof's size budget: narrow the proof command, set size=medium|large on the proof, or move the long run to --regression", strings.Join(taskIDs, ", ")))
 	}
 	if len(regIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the regression is too slow for its size; run `atask update ID --size medium|large` (300s/900s) or narrow the command (ATASK_CHANGED_FILES lists what this change touched)", strings.Join(regIDs, ", "), regBudget))
+		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the regression is too slow for its size; set size=medium|large (300s/900s) on the regression, e.g. --regression 'run: go test ./... size=large', or narrow the command (ATASK_CHANGED_FILES lists what this change touched)", strings.Join(regIDs, ", "), regBudget))
 	}
 	return "task NOT complete: " + strings.Join(parts, "; ") + " (a timeout is never counted against the attempt)"
 }

@@ -67,16 +67,18 @@ func (e *Engine) sizeBudget(size proof.Size) time.Duration {
 	return size.Budget()
 }
 
-// regressionSize is the size class of a task's regression run: the size its
-// proof declares, else the task's own.
-func regressionSize(t task.Task) proof.Size {
-	if rp := t.Verification.RegressionProof; rp != nil && rp.Size != "" {
-		return rp.Size
-	}
-	if t.Size == "" {
+// checkSize is the size class a check runs under: the size its spec carries
+// (size=), small when it has none.
+func checkSize(sp *proof.ProofSpec) proof.Size {
+	if sp == nil || sp.Size == "" {
 		return proof.SizeSmall
 	}
-	return proof.Size(t.Size)
+	return sp.Size
+}
+
+// checkSizes are the size classes of a task's proof and regression runs.
+func checkSizes(t task.Task) (proofSize, regressionSize proof.Size) {
+	return checkSize(t.Verification.Proof), checkSize(t.Verification.RegressionProof)
 }
 
 // regressionChecks is the check a regression proof runs as; empty without one.

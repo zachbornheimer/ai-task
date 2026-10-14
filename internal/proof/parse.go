@@ -17,11 +17,19 @@ var (
 // Parse reads "PRESET: SUBJECT key=value ..." against the default registry.
 func Parse(s string) (ProofSpec, error) { return DefaultRegistry().Parse(s) }
 
+// ParseDefaulting is Parse for a check whose size, when the spec has no
+// size=, is fallback rather than the preset's default.
+func ParseDefaulting(s string, fallback Size) (ProofSpec, error) {
+	return DefaultRegistry().parse(s, fallback)
+}
+
 // Parse reads "PRESET: SUBJECT key=value ...". A bare registered-or-future
 // name ("ci") has an empty subject. The colon form needs a registered preset,
 // which is what rejects the legacy "id: shell command" form. Trailing
 // key=value words become options only when the preset declares that key.
-func (r *Registry) Parse(s string) (ProofSpec, error) {
+func (r *Registry) Parse(s string) (ProofSpec, error) { return r.parse(s, "") }
+
+func (r *Registry) parse(s string, fallback Size) (ProofSpec, error) {
 	s = strings.TrimSpace(s)
 	name, rest, hasColon := strings.Cut(s, ":")
 	name = strings.TrimSpace(name)
@@ -39,11 +47,20 @@ func (r *Registry) Parse(s string) (ProofSpec, error) {
 			s, name, strings.Join(r.List(), ", "))
 	}
 	spec.Size = preset.DefaultSize()
+	if fallback != "" {
+		spec.Size = fallback
+	}
 	toks, err := splitWords(rest)
 	if err != nil {
 		return ProofSpec{}, fault.Wrap(err, fault.CodeInvalidInput, "proof %q", s)
 	}
 	toks = takeOptions(toks, preset.Options(), spec.Options)
+	if raw, ok := spec.Options[SizeOption]; ok && !contains(preset.Options(), SizeOption) {
+		delete(spec.Options, SizeOption)
+		if spec.Size, err = ParseSize(raw); err != nil {
+			return ProofSpec{}, fault.Wrap(err, fault.CodeInvalidInput, "proof %q", s)
+		}
+	}
 	if len(toks) > 0 {
 		spec.Subject = strings.TrimSpace(rest[toks[0].start:toks[len(toks)-1].end])
 	}
@@ -60,7 +77,7 @@ func (r *Registry) Parse(s string) (ProofSpec, error) {
 func takeOptions(toks []token, declared []string, dst map[string]string) []token {
 	for len(toks) > 0 {
 		m := optionPair.FindStringSubmatch(toks[len(toks)-1].text)
-		if len(m) < 3 || !contains(declared, m[1]) {
+		if len(m) < 3 || (!contains(declared, m[1]) && m[1] != SizeOption) {
 			break
 		}
 		dst[m[1]] = m[2]

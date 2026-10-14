@@ -19,7 +19,7 @@ import (
 
 func TestPublicGoAPI(t *testing.T) {
 	wantTypes := []string{"AcceptanceCriterion", "ActionResult", "ActionSpec", "ActionStatus", "AddGroup", "AddTask", "ApplyResult", "ArchiveTask", "Change", "ChangeSet", "CheckType", "ClaimRequest", "Code", "Config", "Engine", "Error", "Evidence", "GroupView", "Handoff", "ListFilter", "ListQuery", "LogEntry", "Patch", "PlanSnapshot", "ProofSpec", "Project", "ProjectID", "Ref", "ReleaseRequest", "RunResult", "Session", "SessionToken", "Size", "Status", "Store", "Summary", "Task", "TaskID", "TaskKind", "TaskView", "UpdateTask", "VerifyMode", "VerifyRequest", "VerifyResult"}
-	wantConsts := []string{"ActionDetached", "ActionFailed", "ActionPending", "ActionRunning", "ActionSucceeded", "CheckOnComplete", "CheckProof", "CheckRegression", "FilterAll", "FilterArchived", "FilterBlocked", "FilterComplete", "FilterDraft", "FilterOpen", "FilterReady", "KindGroup", "KindTask", "SizeLarge", "SizeMedium", "SizeSmall", "VerifyComplete", "VerifyProof", "VerifyRegression"}
+	wantConsts := []string{"ActionDetached", "ActionFailed", "ActionPending", "ActionRunning", "ActionSucceeded", "CheckOnComplete", "CheckProof", "CheckRegression", "FilterAll", "FilterArchived", "FilterBlocked", "FilterComplete", "FilterDraft", "FilterOpen", "FilterReady", "KindGroup", "KindTask", "SizeEternal", "SizeLarge", "SizeMedium", "SizeSmall", "VerifyComplete", "VerifyProof", "VerifyRegression"}
 	wantFuncs := []string{"DefaultPath", "ErrorCode", "Glyph", "Open", "ParseSessionToken", "ParseTaskID", "Replace"}
 	wantVars := []string{"ErrDone", "ErrStalled"}
 	wantEngine := map[string]string{
@@ -223,7 +223,7 @@ func TestPublicSurfaceMatchesContract(t *testing.T) {
 	got := map[string]string{
 		"VerifyProof": string(at.VerifyProof), "VerifyRegression": string(at.VerifyRegression), "VerifyComplete": string(at.VerifyComplete),
 		"KindTask": string(at.KindTask), "KindGroup": string(at.KindGroup),
-		"SizeSmall": string(at.SizeSmall), "SizeMedium": string(at.SizeMedium), "SizeLarge": string(at.SizeLarge),
+		"SizeSmall": string(at.SizeSmall), "SizeMedium": string(at.SizeMedium), "SizeLarge": string(at.SizeLarge), "SizeEternal": string(at.SizeEternal),
 		"CheckProof": string(at.CheckProof), "CheckRegression": string(at.CheckRegression), "CheckOnComplete": string(at.CheckOnComplete),
 		"ActionPending": string(at.ActionPending), "ActionRunning": string(at.ActionRunning), "ActionDetached": string(at.ActionDetached), "ActionSucceeded": string(at.ActionSucceeded), "ActionFailed": string(at.ActionFailed),
 		"FilterAll": string(at.FilterAll), "FilterOpen": string(at.FilterOpen), "FilterReady": string(at.FilterReady), "FilterBlocked": string(at.FilterBlocked), "FilterDraft": string(at.FilterDraft), "FilterComplete": string(at.FilterComplete), "FilterArchived": string(at.FilterArchived),

@@ -53,22 +53,13 @@ type Command struct {
 	Cap  time.Duration
 }
 
-// Budget returns the allowance a run of this check type and spec gets.
-func (r *Runner) Budget(ct CheckType, spec ProofSpec) time.Duration {
-	return r.budgetFor(ct, spec)
-}
-
-func (r *Runner) budgetFor(ct CheckType, spec ProofSpec) time.Duration {
-	switch {
-	case r.budget > 0:
+// Budget returns the allowance a run of spec gets: the spec's own size,
+// zero when it has none (eternal).
+func (r *Runner) Budget(spec ProofSpec) time.Duration {
+	if r.budget > 0 {
 		return r.budget
-	case ct == CheckProof:
-		return ProofBudget
-	case ct == CheckOnComplete:
-		return OnCompleteBudget
-	default:
-		return spec.Size.Budget()
 	}
+	return spec.Size.Budget()
 }
 
 // Run executes spec in workdir. It never returns an error: every failure,
@@ -78,7 +69,7 @@ func (r *Runner) budgetFor(ct CheckType, spec ProofSpec) time.Duration {
 func (r *Runner) Run(ctx context.Context, ct CheckType, spec ProofSpec, workdir string) RunResult {
 	if p, ok := r.registry.Lookup(spec.Preset); ok {
 		if ev, isEval := p.(Evaluator); isEval {
-			res := newRunResult(ct, spec, r.budgetFor(ct, spec))
+			res := newRunResult(ct, spec, r.Budget(spec))
 			return r.evaluate(ev, spec, workdir, res)
 		}
 	}
@@ -91,15 +82,19 @@ func (r *Runner) Run(ctx context.Context, ct CheckType, spec ProofSpec, workdir 
 }
 
 func (r *Runner) rejected(ct CheckType, spec ProofSpec, err error) RunResult {
-	res := newRunResult(ct, spec, r.budgetFor(ct, spec))
+	res := newRunResult(ct, spec, r.Budget(spec))
 	res.Output = err.Error()
 	return res
 }
 
 func newRunResult(ct CheckType, spec ProofSpec, budget time.Duration) RunResult {
+	budgetMS := budget.Milliseconds()
 	res := RunResult{
 		CheckType: ct, Preset: spec.Preset, Subject: spec.Subject, Options: spec.Options,
-		StartedAt: time.Now().UTC(), BudgetMS: budget.Milliseconds(),
+		StartedAt: time.Now().UTC(), BudgetMS: &budgetMS,
+	}
+	if budget <= 0 {
+		res.BudgetMS = nil
 	}
 	if res.Options == nil {
 		res.Options = map[string]string{}
@@ -111,8 +106,8 @@ func newRunResult(ct CheckType, spec ProofSpec, budget time.Duration) RunResult 
 // kill, and recording rules as Run. The raw process result comes back too,
 // for callers that keep stdout and stderr apart.
 func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, cmd Command) (RunResult, process.Result) {
-	budget := r.budgetFor(ct, spec)
-	if r.budget <= 0 && cmd.Cap > 0 && cmd.Cap < budget {
+	budget := r.Budget(spec)
+	if r.budget <= 0 && cmd.Cap > 0 && (budget <= 0 || cmd.Cap < budget) {
 		budget = cmd.Cap
 	}
 	res := newRunResult(ct, spec, budget)
@@ -125,7 +120,7 @@ func (r *Runner) RunCommand(ctx context.Context, ct CheckType, spec ProofSpec, c
 	if r.hasMise(cmd.Dir) {
 		argv = wrapMise(argv)
 	}
-	out := process.Run(ctx, process.Spec{Argv: argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: budget, Log: log})
+	out := process.Run(ctx, process.Spec{Argv: argv, Dir: cmd.Dir, Env: cmd.Env, Timeout: processTimeout(budget), Log: log})
 	return r.finishRun(res, spec, cmd.Dir, out, tail), out
 }
 
@@ -211,17 +206,29 @@ func (r *Runner) evaluate(ev Evaluator, spec ProofSpec, workdir string, res RunR
 		passed, reason, err := ev.Evaluate(spec, workdir)
 		done <- verdict{passed, reason, err}
 	}()
-	timer := time.NewTimer(time.Duration(res.BudgetMS) * time.Millisecond)
-	defer timer.Stop()
+	var expired <-chan time.Time
+	if budget := res.Budget(); budget > 0 {
+		timer := time.NewTimer(budget)
+		defer timer.Stop()
+		expired = timer.C
+	}
 	select {
 	case v := <-done:
 		res.Passed, res.Output = v.passed, v.reason
 		if v.err != nil {
 			res.Passed, res.Output = false, v.err.Error()
 		}
-	case <-timer.C:
+	case <-expired:
 		res.TimedOut, res.Output = true, "evaluation exceeded the budget"
 	}
 	res.ElapsedMS = time.Since(res.StartedAt).Milliseconds()
 	return res
+}
+
+// processTimeout is the process deadline for a budget; no budget means none.
+func processTimeout(budget time.Duration) time.Duration {
+	if budget <= 0 {
+		return process.NoTimeout
+	}
+	return budget
 }

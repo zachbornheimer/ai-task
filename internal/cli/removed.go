@@ -10,7 +10,8 @@ const (
 	checkHint       = "give the task `--proof \"PRESET: SUBJECT\"` and `--regression \"PRESET: SUBJECT\"`"
 	cohortHint      = "cohorts were removed; use --group"
 	projectHoldsNo  = "a project holds no checks; give each task its own with `atask add --regression`"
-	projectBudgets  = "budgets come from the proof size; set it on the task's --regression"
+	projectBudgets  = "budgets come from the proof size; set size= on the check"
+	sizeOnCheck     = "size=large on the check, e.g. --regression 'run: go test ./... size=large'"
 	initWritesBlock = "`atask init` installs only the AGENTS.md block and the CLAUDE.md import"
 )
 
@@ -42,6 +43,7 @@ var removedFlags = map[string]map[string]string{
 		"idempotency-key": "not a CLI flag; set ChangeSet.IdempotencyKey through the Go API; adding an open title again returns the existing task",
 		"session":         sessionHint,
 		"claim":           "add the task, then `atask claim TASK_ID`",
+		"size":            sizeOnCheck,
 	},
 	"update": {
 		"check":           checkHint,
@@ -52,6 +54,7 @@ var removedFlags = map[string]map[string]string{
 		"session":         sessionHint,
 		"expect-rev":      "not a CLI flag; set ChangeSet.ExpectedPlanRev through the Go API",
 		"idempotency-key": "not a CLI flag; set ChangeSet.IdempotencyKey through the Go API",
+		"size":            sizeOnCheck,
 		"title":           "a task's title is fixed; `--archive --reason TEXT` it and add the new one",
 	},
 	"claim":   {"lease": "the lease is 30 minutes; extend it with `atask claim renew`", "session": sessionHint},

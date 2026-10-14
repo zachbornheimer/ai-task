@@ -21,7 +21,7 @@ Record progress with atask log --done "..." --next "..." --learned "..." --note 
 
 atask verify proof and atask verify regression are diagnostics. atask verify complete is the only completion path: commit first, then required checks run fresh. The engine decides. Completion is recorded on the task branch; verify complete does not merge or fast-forward the target branch, landing is the host's step (wt merge). Do not assume complete from a green unit test, a log line, or your own summary.
 
-If verification fails, fix the cause, log, and verify again. A timeout is not a strike: narrow the check with -run, or set --size medium|large. If the lease expires, atask claim renew with the token, or atask claim ID. To hand work back: atask log --next "..." then atask claim release --note "...".
+If verification fails, fix the cause, log, and verify again. A timeout is not a strike: narrow the check with -run, or set size=medium|large on the check. If the lease expires, atask claim renew with the token, or atask claim ID. To hand work back: atask log --next "..." then atask claim release --note "...".
 `
 
 func agentContractWordCount() int {

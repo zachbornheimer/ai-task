@@ -20,7 +20,7 @@ func init() {
 	register("init", "register the current directory (or --path) as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import; re-run to refresh", runInit)
 	register("projects", "list registered projects", runProjects)
 	register("project", "show or configure the current project (trusted): --target-branch, --attempts", runProject)
-	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" [--size small|medium|large] | atask add -f plan.yaml|plan.json|-", runAdd)
+	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" | atask add -f plan.yaml|plan.json|-", runAdd)
 	register("update", "change a plan item: atask update REF [--requires REF]* [--remove-requires REF]* [--proof ..] [--regression ..] [--archive --reason ..] [--reset-attempts]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
 	register("list", "list non-archived tasks: atask [--project NAME] list [ready|blocked|complete|archived|open]", runList)
@@ -187,7 +187,6 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	outcome := c.fs.String("outcome", "", "the single intended outcome (default: the title)")
 	var constraints, accept, requires, blocks stringList
 	c.fs.Var(&constraints, "constraint", "constraint (repeatable)")
-	size := c.fs.String("size", "", "how long the regression may take: small (60s), medium (5m) or large (15m)")
 	c.fs.Var(&accept, "accept", "acceptance criterion (repeatable)")
 	pfl := c.bindProofFlags()
 	c.fs.Var(&requires, "requires", "hard prerequisite (id or key, repeatable)")
@@ -212,21 +211,21 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	var op plan.Change
 	if *group {
 		if len(requires)+len(blocks)+len(accept)+len(constraints) > 0 || *outcome != "" {
-			return usage("--group takes --key, --parent, --proof and --regression (run on the merge of every child's completed revision once every child is complete) and --size; prerequisites, blockers, outcome and acceptance belong to tasks")
+			return usage("--group takes --key, --parent, --proof and --regression (run on the merge of every child's completed revision once every child is complete); prerequisites, blockers, outcome and acceptance belong to tasks")
 		}
-		g := plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent), Size: *size}
+		g := plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent)}
 		if pfl.proof != "" || pfl.regression != "" {
 			if err := pfl.requireBoth(); err != nil {
 				return err
 			}
-			if g.Proof, g.Regression, err = pfl.parse(*size); err != nil {
+			if g.Proof, g.Regression, err = pfl.parse(); err != nil {
 				return err
 			}
 		}
 		op = g
 	} else {
-		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks), Size: *size}
-		if t.Proof, t.Regression, err = pfl.parse(*size); err != nil {
+		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks)}
+		if t.Proof, t.Regression, err = pfl.parse(); err != nil {
 			return err
 		}
 		if t.OnComplete, err = pfl.parseActions(); err != nil {
@@ -348,7 +347,6 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	parent := c.fs.String("parent", "\x00", "move into a group (id or key); empty string clears")
 	var constraints, accept, requires, remove stringList
 	c.fs.Var(&constraints, "constraint", "replace constraints (repeatable)")
-	size := c.fs.String("size", "", "set the regression size: small, medium or large")
 	c.fs.Var(&accept, "accept", "replace acceptance criteria (repeatable)")
 	pfl := c.bindProofFlags()
 	c.fs.Var(&requires, "requires", "add a hard prerequisite (repeatable)")
@@ -372,7 +370,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
 		}
-		if *outcome != "" || *parent != "\x00" || len(constraints)+len(accept)+len(requires)+len(remove) > 0 || *size != "" || *reset || pfl.proof != "" || pfl.regression != "" || len(pfl.actions) > 0 {
+		if *outcome != "" || *parent != "\x00" || len(constraints)+len(accept)+len(requires)+len(remove) > 0 || *reset || pfl.proof != "" || pfl.regression != "" || len(pfl.actions) > 0 {
 			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
@@ -388,14 +386,11 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if len(constraints) > 0 {
 			u.Constraints = plan.Replace([]string(constraints))
 		}
-		if *size != "" {
-			u.Size = size
-		}
 		if len(accept) > 0 {
 			u.Acceptance = plan.Replace([]string(accept))
 		}
 		if pfl.proof != "" || pfl.regression != "" {
-			if u.Proof, u.Regression, err = pfl.parse(*size); err != nil {
+			if u.Proof, u.Regression, err = pfl.parse(); err != nil {
 				return err
 			}
 		}
