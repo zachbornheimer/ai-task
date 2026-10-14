@@ -547,9 +547,13 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 		t.Verification, changed = pol, true
 	}
-	if c.Proof != nil || c.Regression != nil {
+	regression := c.Regression
+	if regression == nil && c.Size != nil {
+		regression = resizedRegression(t.Verification.RegressionProof, *c.Size)
+	}
+	if c.Proof != nil || regression != nil {
 		pol := t.Verification
-		if err := applyProofs(&pol, c.Proof, c.Regression); err != nil {
+		if err := applyProofs(&pol, c.Proof, regression); err != nil {
 			return err
 		}
 		t.Verification, changed = pol, true

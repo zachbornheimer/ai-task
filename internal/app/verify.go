@@ -672,7 +672,7 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudg
 		parts = append(parts, fmt.Sprintf("task check(s) %s exceeded the %s budget (%s): the verification is built too slow for this task; narrow with -run so it proves only this outcome, or set --size medium|large", strings.Join(taskIDs, ", "), size, taskBudget))
 	}
 	if len(regIDs) > 0 {
-		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the project's gate is too slow; the planner must narrow it (ATASK_CHANGED_FILES lists what this change touched) or raise --regression-budget", strings.Join(regIDs, ", "), regBudget))
+		parts = append(parts, fmt.Sprintf("regression check(s) %s exceeded the regression budget (%s): the regression is too slow for its size; run `atask update ID --size medium|large` (300s/900s) or narrow the command (ATASK_CHANGED_FILES lists what this change touched)", strings.Join(regIDs, ", "), regBudget))
 	}
 	return "task NOT complete: " + strings.Join(parts, "; ") + " (a timeout is never counted against the attempt)"
 }

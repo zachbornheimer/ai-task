@@ -63,7 +63,7 @@ func TestBudgetsTimeOutWithoutAStrike(t *testing.T) {
 	sb := f.claim(string(b))
 	f.commit(sb.Workspace, "b.txt", "b")
 	r, err = f.e.Verify(f.ctx, sb.Token, verification.ModeComplete)
-	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "regression budget") || !strings.Contains(r.Message, "planner") {
+	if fault.CodeOf(err) != fault.CodeCheckFailed || !strings.Contains(r.Message, "regression budget") || !strings.Contains(r.Message, "atask update ID --size medium|large") {
 		t.Fatalf("regression timeout: %v %+v", err, r)
 	}
 	if f.show(string(b)).Failures != 0 {
