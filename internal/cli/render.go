@@ -261,9 +261,6 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 	if v.Key != "" {
 		say(w, "Key: %s\n", v.Key)
 	}
-	if v.Size != "" && v.Kind != task.KindGroup {
-		say(w, "Size: %s\n", v.Size)
-	}
 	if v.Kind == task.KindGroup {
 		if v.Progress != nil {
 			say(w, "Progress: %d/%d complete\n", v.Progress.Complete, v.Progress.Total)
@@ -275,7 +272,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			writeWrapped(w, v.Outcome)
 		}
 		if len(v.Checks) > 0 {
-			say(w, "\nEPIC CHECKS (size %s; run on the target once every member is complete)\n", v.Size)
+			say(w, "\nEPIC CHECKS (run on the target once every member is complete)\n")
 			for _, ch := range v.Checks {
 				say(w, "  • %s: %s\n", ch.ID, app.CheckText(ch))
 			}

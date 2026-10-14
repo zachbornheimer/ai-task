@@ -41,7 +41,6 @@ type AddGroup struct {
 	// it supplies the group's required gate.
 	Proof      *proof.ProofSpec
 	Regression *proof.ProofSpec
-	Size       string
 }
 
 // AddTask creates an executable task.
@@ -61,8 +60,6 @@ type AddTask struct {
 	Regression *proof.ProofSpec
 	// OnComplete are the actions that run after the task completes.
 	OnComplete []proof.ActionSpec
-	// Size: small (default), medium or large; caps the task checks' time.
-	Size string
 }
 
 // UpdateTask patches a task or group. nil means leave unchanged; a pointer
@@ -79,7 +76,6 @@ type UpdateTask struct {
 	Proof          *proof.ProofSpec
 	Regression     *proof.ProofSpec
 	OnComplete     Patch[proof.ActionSpec]
-	Size           *string
 	Requires       Patch[Ref] // replace the whole prerequisite set
 	AddRequires    []Ref
 	RemoveRequires []Ref

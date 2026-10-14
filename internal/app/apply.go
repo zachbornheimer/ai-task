@@ -189,7 +189,7 @@ func (a *applier) addGroup(i int, c plan.AddGroup) error {
 			return fault.New(fault.CodeConflict, "key %q already names %s with a different definition", c.Key, existing.Task.ID)
 		}
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title, Verification: policy, Size: c.Size}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title, Verification: policy}
 	id, err := a.insert(spec)
 	if err != nil {
 		return err
@@ -206,7 +206,7 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Size: spec.Size, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := range 5 {
 		if attempt == 0 {
 			t.ID = a.e.newID()
@@ -240,7 +240,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Verification: verification.Policy{TaskChecks: c.TaskChecks}, Size: c.Size}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Verification: verification.Policy{TaskChecks: c.TaskChecks}}
 	if err := applyProofs(&spec.Verification, c.Proof, c.Regression); err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 // parent, and prerequisite set).
 func (a *applier) sameDefinition(existing sqlite.Record, spec task.Spec, requires []task.ID) (bool, error) {
 	t := existing.Task
-	if t.Archived() || t.Kind != spec.Kind || t.Description != spec.Description || t.Outcome != spec.Outcome || t.ParentID != spec.ParentID || t.Size != spec.Size {
+	if t.Archived() || t.Kind != spec.Kind || t.Description != spec.Description || t.Outcome != spec.Outcome || t.ParentID != spec.ParentID {
 		return false, nil
 	}
 	if err := a.tx.LoadAcceptance(&t); err != nil {
@@ -500,7 +500,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
-	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.TaskChecks.Set || c.Parent != nil || c.Size != nil
+	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.TaskChecks.Set || c.Parent != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
 		return fault.New(fault.CodeConflict, "%s is complete; its contract and prerequisites cannot change without archiving it and planning a new task", t.ID)
@@ -528,9 +528,6 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 		changed = true
 	}
-	if c.Size != nil {
-		t.Size, changed = *c.Size, true
-	}
 	if c.TaskChecks.Set {
 		if t.Kind == task.KindTask {
 			if err := verification.RequireGate(c.TaskChecks.Value, "task checks"); err != nil {
@@ -547,13 +544,9 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 		t.Verification, changed = pol, true
 	}
-	regression := c.Regression
-	if regression == nil && c.Size != nil {
-		regression = resizedRegression(t.Verification.RegressionProof, *c.Size)
-	}
-	if c.Proof != nil || regression != nil {
+	if c.Proof != nil || c.Regression != nil {
 		pol := t.Verification
-		if err := applyProofs(&pol, c.Proof, regression); err != nil {
+		if err := applyProofs(&pol, c.Proof, c.Regression); err != nil {
 			return err
 		}
 		t.Verification, changed = pol, true
@@ -577,20 +570,19 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			return err
 		}
 	}
-	if (c.TaskChecks.Set || c.Size != nil) && t.Kind == task.KindGroup && rec.CompletedAt != nil {
-		// A verified epic whose checks or size change must be verified
+	if c.TaskChecks.Set && t.Kind == task.KindGroup && rec.CompletedAt != nil {
+		// A verified epic whose checks change must be verified
 		// again; renaming it or moving it does not invalidate the proof.
 		if err := a.tx.ClearComplete(t.ID, a.now); err != nil {
 			return err
 		}
 	}
 	if contract {
-		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification, Size: t.Size}
+		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification}
 		if err := spec.Validate(); err != nil {
 			return err
 		}
-		t.Size = spec.Size
-		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Size != nil) {
+		if t.Kind == task.KindTask && c.TaskChecks.Set {
 			if err := vacuityError(spec); err != nil {
 				return err
 			}
@@ -834,10 +826,7 @@ func vacuityError(spec task.Spec) error {
 	if spec.Kind != task.KindTask {
 		return nil
 	}
-	size := proof.Size(spec.Size) // checks given without a proof spec: the task's own size
-	if spec.Verification.Proof != nil {
-		size = checkSize(spec.Verification.Proof)
-	}
+	size := checkSize(spec.Verification.Proof)
 	for _, c := range spec.Verification.TaskChecks {
 		if c.Eval != nil {
 			continue

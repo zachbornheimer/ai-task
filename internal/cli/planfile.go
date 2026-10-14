@@ -31,6 +31,9 @@ type planItem struct {
 	Size        string   `json:"size"`
 }
 
+// sizeOnCheckMessage is why a plan-file size key is refused.
+const sizeOnCheckMessage = "size belongs on the check: add size=... to the proof or regression"
+
 // readPlanItems decodes a plan from JSON or YAML: one item, a list of
 // items, or an object with a `tasks` (or `items`) list. YAML is decoded
 // to generic values and re-encoded as JSON so one set of field names
@@ -114,6 +117,9 @@ func (it planItem) change(i int) (plan.Change, error) {
 	if strings.TrimSpace(it.Title) == "" {
 		return nil, usage("item %d: title is required", i+1)
 	}
+	if it.Size != "" {
+		return nil, usage("item %d (%s): %s", i+1, it.Title, sizeOnCheckMessage)
+	}
 	flags := proofFlags{proof: it.Proof, regression: it.Regression}
 	proof, regression, err := flags.parse()
 	if err != nil {
@@ -121,14 +127,14 @@ func (it planItem) change(i int) (plan.Change, error) {
 	}
 	if it.Kind == "group" {
 		if len(it.Requires)+len(it.Blocks)+len(it.Acceptance)+len(it.Constraints) > 0 || it.Outcome != "" {
-			return nil, usage("item %d (%s): a group takes key, title, parent, proof, regression and size", i+1, it.Title)
+			return nil, usage("item %d (%s): a group takes key, title, parent, proof and regression", i+1, it.Title)
 		}
-		return plan.AddGroup{Key: it.Key, Title: it.Title, Parent: plan.Ref(it.Parent), Size: it.Size, Proof: proof, Regression: regression}, nil
+		return plan.AddGroup{Key: it.Key, Title: it.Title, Parent: plan.Ref(it.Parent), Proof: proof, Regression: regression}, nil
 	}
 	if it.Kind != "" && it.Kind != "task" {
 		return nil, usage("item %d: kind must be task or group", i+1)
 	}
-	return plan.AddTask{Key: it.Key, Title: it.Title, Outcome: it.Outcome, Parent: plan.Ref(it.Parent), Constraints: it.Constraints, Acceptance: it.Acceptance, Requires: refs(it.Requires), Blocks: refs(it.Blocks), Size: it.Size, Proof: proof, Regression: regression}, nil
+	return plan.AddTask{Key: it.Key, Title: it.Title, Outcome: it.Outcome, Parent: plan.Ref(it.Parent), Constraints: it.Constraints, Acceptance: it.Acceptance, Requires: refs(it.Requires), Blocks: refs(it.Blocks), Proof: proof, Regression: regression}, nil
 }
 
 // openPlanFile opens a plan file path, or stdin for "-".

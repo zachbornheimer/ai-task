@@ -111,18 +111,7 @@ type Spec struct {
 	Constraints  []string
 	Acceptance   []AcceptanceCriterion
 	Verification verification.Policy
-	// Size declares how long the task's checks may take: small (the
-	// default), medium or large; the project's budgets give the seconds.
-	Size string
 }
-
-// Sizes name how long a task's checks may take; the project's budgets
-// turn a size into seconds.
-const (
-	SizeSmall  = "small"
-	SizeMedium = "medium"
-	SizeLarge  = "large"
-)
 
 // Task is the stored contract.
 type Task struct {
@@ -136,7 +125,6 @@ type Task struct {
 	Constraints   []string              `json:"constraints,omitempty"`
 	Acceptance    []AcceptanceCriterion `json:"acceptance,omitempty"`
 	Verification  verification.Policy   `json:"verification"`
-	Size          string                `json:"size"`
 	ContractRev   int                   `json:"contract_rev"`
 	ArchivedAt    *time.Time            `json:"archived_at,omitempty"`
 	ArchiveReason string                `json:"archive_reason,omitempty"`
@@ -201,17 +189,6 @@ func (s *Spec) Validate() error {
 		cleaned = append(cleaned, c)
 	}
 	s.Constraints = cleaned
-	s.Size = strings.ToLower(strings.TrimSpace(s.Size))
-	switch s.Size {
-	case "":
-		s.Size = SizeSmall
-		if s.Kind == KindGroup {
-			s.Size = SizeLarge
-		}
-	case SizeSmall, SizeMedium, SizeLarge:
-	default:
-		return fault.New(fault.CodeInvalidInput, "size must be small, medium or large (got %q)", s.Size)
-	}
 	accepted := s.Acceptance[:0]
 	for _, a := range s.Acceptance {
 		a.Description = strings.TrimSpace(a.Description)

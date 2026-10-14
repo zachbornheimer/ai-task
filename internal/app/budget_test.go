@@ -10,6 +10,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -99,7 +100,7 @@ func TestSmallSizeRejectsGoTestWithoutRun(t *testing.T) {
 		t.Fatalf("unbounded go test on small: %v", err)
 	}
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "l", Title: "l", Size: "large", TaskChecks: []verification.CheckSpec{{ID: "all", Command: []string{"go", "test", "./..."}, Required: true}}},
+		plan.AddTask{Key: "l", Title: "l", Proof: &proof.ProofSpec{Preset: "run", Subject: "go test ./...", Options: map[string]string{}, Size: proof.SizeLarge}},
 	}}); err != nil {
 		t.Fatalf("large: %v", err)
 	}

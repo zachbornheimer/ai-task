@@ -6,6 +6,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
+	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -52,15 +53,9 @@ func TestSmallSizeRunFilterAllowsNarrowGoTest(t *testing.T) {
 		t.Fatalf("filtered update: %v", err)
 	}
 
-	large := "large"
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.AddTask{Key: "pkg", Title: "pkg", Size: large, TaskChecks: []verification.CheckSpec{goCheck("d", "go", "test", "./pkg")}},
+		plan.AddTask{Key: "pkg", Title: "pkg", Proof: &proof.ProofSpec{Preset: "run", Subject: "go test ./...", Options: map[string]string{}, Size: proof.SizeLarge}},
 	}}); err != nil {
 		t.Fatalf("large add: %v", err)
 	}
-	small := "small"
-	_, err = f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{
-		plan.UpdateTask{Target: plan.Ref("pkg"), Size: &small},
-	}})
-	wantSmallSizeReject(t, err)
 }

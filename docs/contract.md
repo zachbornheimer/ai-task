@@ -119,6 +119,8 @@ small `go_test` on a whole tree with no `name`, and `run` arguments that embed
 encoded code. A `*_test` that runs zero tests fails at verify; exit 0 alone
 never passes a `*_test` preset.
 
+Size belongs to the check alone: a task or group has no size of its own, `show` and `list` print none, a group's budget is its proof's `size=`, and a plan file's `size` key is `INVALID_INPUT` ("size belongs on the check: add size=... to the proof or regression").
+
 ### Run result
 
 Every proof, regression, and action run must finish inside its budget. A run

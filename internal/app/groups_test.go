@@ -25,7 +25,7 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 		plan.AddTask{Key: "b", Title: "b", Parent: "identity", TaskChecks: []verification.CheckSpec{check("unit-b", "test -f b.txt", true)}},
 	)
 	g, a, b := res.Created["identity"], res.Created["a"], res.Created["b"]
-	if v := f.show(string(g)); len(v.Checks) != 1 || v.Size != task.SizeLarge || v.GroupVerification == nil || v.GroupVerification.Status != "" {
+	if v := f.show(string(g)); len(v.Checks) != 1 || v.GroupVerification == nil || v.GroupVerification.Status != "" {
 		t.Fatalf("group view: %+v", v)
 	}
 	// Members complete one by one; the epic is not complete yet.
@@ -101,7 +101,7 @@ func TestEpicChecksRunWhenMembersComplete(t *testing.T) {
 		t.Fatalf("changed checks must reopen the epic: %+v", v.GroupVerification)
 	}
 	// Timeouts are reported as the epic's construction problem.
-	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), Size: new("small"), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {
+	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(g), TaskChecks: plan.Replace([]verification.CheckSpec{check("slow", "sleep 2", true)})}}}); err != nil {
 		t.Fatal(err)
 	}
 	f.setProofBudget(300 * time.Millisecond)

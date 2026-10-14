@@ -101,7 +101,6 @@ type TaskView struct {
 	Checks      []verification.CheckSpec   `json:"task_checks,omitempty"`
 	Proof       *proof.ProofSpec           `json:"proof,omitempty"`
 	Regression  *proof.ProofSpec           `json:"regression,omitempty"`
-	Size        string                     `json:"size,omitempty"`
 	ContractRev int                        `json:"contract_rev"`
 	Status      task.Status                `json:"status"`
 	// Started reports whether any execution attempt ever existed: the
@@ -155,7 +154,6 @@ type GroupView struct {
 	Complete bool `json:"complete"`
 	// Checks and Verification describe an epic's own verification.
 	Checks       []verification.CheckSpec `json:"checks,omitempty"`
-	Size         string                   `json:"size,omitempty"`
 	Verification *GroupVerification       `json:"verification,omitempty"`
 	LastError    string                   `json:"last_error,omitempty"`
 	// ArchivedAt is set for archived groups (listed by `list archived`).
@@ -330,7 +328,7 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	t := r.Task
 	v := TaskView{
 		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
-		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, Size: t.Size, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
+		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, Creator: t.Creator, CreatedCwd: t.CreatedCwd, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 	}

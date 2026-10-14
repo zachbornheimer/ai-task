@@ -113,7 +113,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					if err != nil {
 						return err
 					}
-					g.Checks, g.Size, g.Verification = r.Task.Verification.TaskChecks, r.Task.Size, &gv
+					g.Checks, g.Verification = r.Task.Verification.TaskChecks, &gv
 					g.Complete = r.CompletedAt != nil
 				}
 				if q.Filter == FilterOpen && g.Complete {

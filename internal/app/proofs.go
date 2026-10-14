@@ -30,17 +30,6 @@ func applyProofs(pol *verification.Policy, proofSpec, regression *proof.ProofSpe
 	return nil
 }
 
-// resizedRegression is the existing regression proof at a new size, so
-// `update --size` alone re-sizes it; nil when the task has no regression.
-func resizedRegression(existing *proof.ProofSpec, size string) *proof.ProofSpec {
-	if existing == nil {
-		return nil
-	}
-	resized := *existing
-	resized.Size = proof.Size(size)
-	return &resized
-}
-
 // applyActions replaces a task's on-complete actions. Every preset must be
 // registered; the vacuity rule for proofs does not apply, since an action
 // does something rather than prove something.

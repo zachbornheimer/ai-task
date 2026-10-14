@@ -565,8 +565,8 @@ func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 	e.fails("INVALID_INPUT", "add", "Old", "--size", "large", "--proof", "run: test -d .", "--regression", "run: true")
 	e.ok("update", "big", "--regression", "run: true size=medium")
 	r := e.runIn(e.cwd, `{"key":"s","title":"S","size":"small","proof":"run: test -d .","regression":"run: test -d ."}`, nil, "add", "-f", "-")
-	if r.code != 0 {
-		t.Fatalf("plan file size: %s", r.stdout)
+	if r.code == 0 || !strings.Contains(r.stdout+r.stderr, "size belongs on the check: add size=... to the proof or regression") {
+		t.Fatalf("plan file size key must be INVALID_INPUT: %s %s", r.stdout, r.stderr)
 	}
 	// A project holds no budgets: the flags are gone, not silently ignored.
 	e.fails("INVALID_INPUT", "project", "--budget-small", "45s")
@@ -579,7 +579,7 @@ func TestEpicChecksFromTheCLI(t *testing.T) {
 	e := gitEnv(t)
 	g := taskID(e.ok("add", "Identity", "--group", "--key", "identity", "--proof", "run: test -f a.txt", "--regression", "run: test -f a.txt"))
 	a := taskID(e.ok("add", "A", "--key", "a", "--parent", "identity", "--proof", "run: test -f a.txt", "--regression", "run: true"))
-	if sh := e.ok("show", "identity"); sh["size"] != "large" || must.As[map[string]any](sh["group_verification"])["status"] != nil {
+	if sh := e.ok("show", "identity"); sh["size"] != nil || must.As[map[string]any](sh["group_verification"])["status"] != nil {
 		t.Fatalf("group: %v", sh)
 	}
 	if r := e.run("verify", "complete", "identity"); r.code == 0 || must.As[map[string]any](r.env["error"])["code"] != "NOT_READY" {
