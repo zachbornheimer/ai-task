@@ -58,6 +58,11 @@ func TestJSONClaimRenewDispatch(t *testing.T) {
 		}
 	}
 
+	// Release the claim made from this directory: with no live claim left,
+	// a tokenless renew has nothing to resolve.
+	if code, out, errOut = run("claim", "release", claimed.Result.Session.Token); code != ExitOK {
+		t.Fatalf("release: %d %s %s", code, out, errOut)
+	}
 	code, out, errOut = run("--json", "claim", "renew")
 	if code == ExitOK {
 		t.Fatalf("claim renew without a token must not claim the task named renew:\n%s", out)

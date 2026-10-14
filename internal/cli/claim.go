@@ -56,13 +56,30 @@ func (c *ctxt) token(ctx context.Context, positional []string) (execution.Token,
 		raw = workspace.LoadToken(ctx, c.env.Cwd)
 	}
 	if strings.TrimSpace(raw) == "" {
-		return "", usage("session token required: run inside the task worktree, pass it as an argument, '-' to read stdin, or set ATASK_SESSION")
+		var err error
+		if raw, err = c.directoryToken(ctx); err != nil {
+			return "", err
+		}
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "", usage("session token required: run inside the task worktree or the directory you claimed from, pass it as an argument, '-' to read stdin, or set ATASK_SESSION")
 	}
 	tok, err := execution.ParseToken(raw)
 	if err != nil {
 		return "", err
 	}
 	return tok, c.guardWorkspace(ctx, tok)
+}
+
+// directoryToken is the token of the live rootless claim made from the
+// working directory ("" when there is none).
+func (c *ctxt) directoryToken(ctx context.Context) (string, error) {
+	e, err := c.engine(ctx)
+	if err != nil {
+		return "", err
+	}
+	tok, err := e.AmbientToken(ctx)
+	return string(tok), err
 }
 
 // guardWorkspace refuses a token that does not own the task whose worktree

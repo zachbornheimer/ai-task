@@ -105,6 +105,11 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	if err := e.reconcile(ctx); err != nil {
 		return Session{}, err
 	}
+	if req.TaskID != nil {
+		if s, ok := e.liveClaimFromCwd(ctx, *req.TaskID); ok {
+			return s, nil
+		}
+	}
 	now := e.now()
 	token := execution.NewToken()
 	var sess Session
@@ -195,6 +200,9 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			}
 			return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
 		}); err != nil {
+			return Session{}, err
+		}
+		if err := e.storeRootlessToken(sess); err != nil {
 			return Session{}, err
 		}
 		sess.Workspace = dir
@@ -463,11 +471,13 @@ func (e *Engine) ReleaseTask(ctx context.Context, q ReleaseRequest) (TaskView, e
 	now := e.now()
 	var v TaskView
 	var note string
+	var released task.ID
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		a, expired, err := e.authorizeRelease(tx, q.Token, now)
 		if err != nil {
 			return err
 		}
+		released = a.TaskID
 		if expired {
 			note = "lease had already expired; the task was already unowned and is released"
 		}
@@ -500,6 +510,7 @@ func (e *Engine) ReleaseTask(ctx context.Context, q ReleaseRequest) (TaskView, e
 		return err
 	})
 	if err == nil {
+		e.sessions().RemoveTask(string(released))
 		e.notify()
 	}
 	return v, err

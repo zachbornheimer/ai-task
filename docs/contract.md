@@ -347,6 +347,7 @@ const (
   action results. When the proof, regression, or on-complete actions of a task that has ever been claimed change, the change is recorded, never refused: `Show` returns `check_history` (time, field, old and new spec, actor, cwd; the actor is `attempt:<id>` for a session token and `planner` otherwise), and `atask show` prints it under CHECK HISTORY. `List` marks such a task with `△` right after its status glyph (a draft is `◌`). `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed outside a registered repo. The list is board-wide by default. A task belongs to one or more projects: the first is its home, which decides its repo, worktree, target branch and base and is fixed after the first claim, and the rest are memberships; `list --project X` includes every task naming X, `--requires` needs one shared project, and a group's children share the group's home.
 - `Claim`: atomic eligibility and exclusive leased assignment; isolated
   worktree for Git tasks. The token is discoverable from the task worktree;
+  a rootless claim's token is also stored under the state dir keyed by the claim directory, so log, verify, renew and release work from that directory;
   elsewhere it is passed explicitly or via `ATASK_SESSION`.
 - `Renew` / `Release` / `Log`: session-fenced. `Release` with `Failed` counts
   an attempt; without it the attempt is not counted.

@@ -22,7 +22,7 @@ var writableUnderHome = []string{
 // Home-relative locations holding credentials: checks may not read them.
 var unreadableUnderHome = []string{
 	".ssh", ".aws", ".gnupg", ".config/op", ".config/gh", "Library/Keychains",
-	".netrc", ".docker", ".local/state/atask/logs",
+	".netrc", ".docker", ".local/state/atask/logs", ".local/state/atask/sessions",
 }
 
 // Home-relative path prefixes of the atask database; it also covers the
