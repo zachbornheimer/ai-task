@@ -860,6 +860,9 @@ func vacuityError(spec task.Spec) error {
 	}
 	size := proof.Size(spec.Size)
 	for _, c := range spec.Verification.TaskChecks {
+		if c.Eval != nil {
+			continue
+		}
 		if err := proof.Vacuity(proof.ProofSpec{Preset: "run", Subject: checkSubject(c.Command), Size: size}); err != nil {
 			return fault.New(fault.CodeInvalidInput, "check %q: %s", c.ID, fault.MessageOf(err))
 		}

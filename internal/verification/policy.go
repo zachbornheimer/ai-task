@@ -47,6 +47,9 @@ type CheckSpec struct {
 	Dir string
 	// Timeout bounds the check; zero means DefaultCheckTimeout.
 	Timeout time.Duration
+	// Eval, when set, is an in-process proof (grep, file_exists, ...): the
+	// check has no argv and runs through the proof Runner's Evaluator path.
+	Eval *proof.ProofSpec
 	// Required checks must pass for the task to be verified. Optional checks
 	// are recorded as evidence but never compensate for a failed required one.
 	Required bool
@@ -56,11 +59,12 @@ type CheckSpec struct {
 // so that the representation is stable across languages and never depends on
 // Go's Duration formatting.
 type checkJSON struct {
-	ID        string   `json:"id"`
-	Version   string   `json:"version,omitempty"`
-	Command   []string `json:"command"`
-	Dir       string   `json:"dir,omitempty"`
-	TimeoutMS int64    `json:"timeout_ms,omitempty"`
+	ID        string           `json:"id"`
+	Version   string           `json:"version,omitempty"`
+	Command   []string         `json:"command"`
+	Dir       string           `json:"dir,omitempty"`
+	Eval      *proof.ProofSpec `json:"eval,omitempty"`
+	TimeoutMS int64            `json:"timeout_ms,omitempty"`
 	// Required is a pointer so that an absent field in hand-written JSON
 	// means "required": a check someone wrote down is a gate unless they
 	// said otherwise. Stored policies always carry it explicitly.
@@ -71,7 +75,7 @@ type checkJSON struct {
 func (c CheckSpec) MarshalJSON() ([]byte, error) {
 	required := c.Required
 	return json.Marshal(checkJSON{
-		ID: c.ID, Version: c.Version, Command: c.Command, Dir: c.Dir,
+		ID: c.ID, Version: c.Version, Command: c.Command, Dir: c.Dir, Eval: c.Eval,
 		TimeoutMS: c.Timeout.Milliseconds(), Required: &required,
 	})
 }
@@ -87,7 +91,7 @@ func (c *CheckSpec) UnmarshalJSON(b []byte) error {
 		required = *w.Required
 	}
 	*c = CheckSpec{
-		ID: w.ID, Version: w.Version, Command: w.Command, Dir: w.Dir,
+		ID: w.ID, Version: w.Version, Command: w.Command, Dir: w.Dir, Eval: w.Eval,
 		Timeout: time.Duration(w.TimeoutMS) * time.Millisecond, Required: required,
 	}
 	return nil
@@ -138,7 +142,7 @@ func (p Policy) Validate() error {
 				return fault.New(fault.CodeInvalidInput, "duplicate check id %q", c.ID)
 			}
 			seen[c.ID] = true
-			if len(c.Command) == 0 || c.Command[0] == "" {
+			if c.Eval == nil && (len(c.Command) == 0 || c.Command[0] == "") {
 				return fault.New(fault.CodeInvalidInput, "check %q has no command", c.ID)
 			}
 			if c.Timeout < 0 || c.Timeout > MaxCheckTimeout {

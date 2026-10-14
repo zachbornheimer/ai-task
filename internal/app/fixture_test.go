@@ -174,7 +174,9 @@ func (f *fixture) stampRegression() {
 				f.t.Fatal(err)
 			}
 		}
-		pol.Regression = f.regression
+		if pol.RegressionProof == nil {
+			pol.Regression = f.regression
+		}
 		out, err := json.Marshal(pol)
 		if err != nil {
 			f.t.Fatal(err)

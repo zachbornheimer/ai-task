@@ -24,6 +24,9 @@ func ProofGate(spec proof.ProofSpec) (CheckSpec, error) {
 	if !ok {
 		return CheckSpec{}, fault.New(fault.CodeInvalidInput, "proof %s: preset is not registered", spec)
 	}
+	if _, inProcess := preset.(proof.Evaluator); inProcess {
+		return CheckSpec{ID: ProofCheckID, Eval: &spec, Required: true}, nil
+	}
 	argv, err := preset.Argv(spec, proof.Env{})
 	if err != nil {
 		return CheckSpec{}, err

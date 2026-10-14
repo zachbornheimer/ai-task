@@ -130,6 +130,9 @@ func (e *Engine) execStep(ctx context.Context, dir string, step verification.Ste
 		ev.Message = "not run: the suite's budget was spent by earlier checks"
 		return ev
 	}
+	if c.Eval != nil {
+		return e.execEvaluator(ctx, dir, step, ev, run)
+	}
 	spec := stepSpec(c, run.size)
 	cmd := proof.Command{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Env: append(checkEnv(dir), run.env...), Cap: shortest(c.Timeout, run.suiteLeft)}
 	logFile, logPath := openCheckLog(run.logDir, c.ID)
@@ -182,4 +185,33 @@ func shortest(a, b time.Duration) time.Duration {
 	default:
 		return min(a, b)
 	}
+}
+
+// execEvaluator runs an in-process proof (grep, file_exists, ...) through the
+// Runner's Evaluator path and records its RunResult: return_code 0 when it
+// held, 1 when it did not, and the reason as the output.
+func (e *Engine) execEvaluator(ctx context.Context, dir string, step verification.Step, ev verification.Evidence, run stepRun) verification.Evidence {
+	spec := *step.Check.Eval
+	if spec.Size == "" {
+		spec.Size = run.size
+	}
+	rr := run.runner.Run(ctx, checkType(step), spec, dir)
+	code := 1
+	if rr.Passed {
+		code = 0
+	}
+	rr.ReturnCode = &code
+	ev.Run = &rr
+	ev.StartedAt = rr.StartedAt
+	ev.FinishedAt = rr.StartedAt.Add(time.Duration(rr.ElapsedMS) * time.Millisecond)
+	ev.ExitCode, ev.Stdout = code, rr.Output
+	switch {
+	case rr.TimedOut:
+		ev.Outcome, ev.Message = verification.OutcomeTimeout, rr.Output
+	case rr.Passed:
+		ev.Outcome = verification.OutcomePassed
+	default:
+		ev.Outcome, ev.Message = verification.OutcomeFailed, rr.Output
+	}
+	return ev
 }
