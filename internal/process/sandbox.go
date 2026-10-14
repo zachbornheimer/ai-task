@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -38,6 +39,10 @@ type Sandbox struct {
 	Home       string
 	Writable   []string
 	Unreadable []string
+	// UnreadablePrefixes denies reads of every path that starts with one of
+	// them (a database file and its -wal and -shm siblings), without
+	// denying the directories around it.
+	UnreadablePrefixes []string
 	// Readable re-allows reads beneath an Unreadable path (the check's own
 	// directory lives inside one).
 	Readable []string
@@ -83,23 +88,42 @@ func (s *Sandbox) sandboxExec() (string, error) {
 	return path, nil
 }
 
-// Profile renders the Seatbelt profile. Later rules win, so the order is
-// allow-all, deny home writes, re-allow the writable paths, deny secret reads,
-// re-allow the reads the run itself needs.
+// Profile renders the Seatbelt profile. Later rules win, so every deny comes
+// before every allow: allow-all, deny home writes, deny secret reads, then
+// re-allow the writable paths and the reads the run itself needs.
 func (s *Sandbox) Profile() string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n")
 	fmt.Fprintf(&b, "(deny file-write* %s)\n", subpaths(s.Home))
-	for _, p := range s.Writable {
-		fmt.Fprintf(&b, "(allow file-write* %s)\n", subpaths(p))
-	}
 	for _, p := range s.Unreadable {
 		fmt.Fprintf(&b, "(deny file-read* %s)\n", subpaths(p))
+	}
+	for _, p := range s.UnreadablePrefixes {
+		fmt.Fprintf(&b, "(deny file-read* %s)\n", prefixRegex(p))
+	}
+	for _, p := range s.Writable {
+		fmt.Fprintf(&b, "(allow file-write* %s)\n", subpaths(p))
 	}
 	for _, p := range s.Readable {
 		fmt.Fprintf(&b, "(allow file-read* %s)\n", subpaths(p))
 	}
 	return b.String()
+}
+
+// prefixRegex matches every path beginning with prefix, and with its
+// resolved form when prefix passes through a symlink.
+func prefixRegex(prefix string) string {
+	forms := []string{prefix}
+	if dir, err := filepath.EvalSymlinks(filepath.Dir(prefix)); err == nil {
+		if resolved := filepath.Join(dir, filepath.Base(prefix)); resolved != prefix {
+			forms = append(forms, resolved)
+		}
+	}
+	quoted := make([]string, len(forms))
+	for i, f := range forms {
+		quoted[i] = regexp.QuoteMeta(f)
+	}
+	return fmt.Sprintf("(regex %q)", "^("+strings.Join(quoted, "|")+")")
 }
 
 // subpaths matches path and, when it is a symlink, its target: Seatbelt

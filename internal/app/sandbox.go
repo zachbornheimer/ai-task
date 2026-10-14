@@ -22,8 +22,13 @@ var writableUnderHome = []string{
 // Home-relative locations holding credentials: checks may not read them.
 var unreadableUnderHome = []string{
 	".ssh", ".aws", ".gnupg", ".config/op", ".config/gh", "Library/Keychains",
-	".netrc", ".docker", ".local/state/atask",
+	".netrc", ".docker", ".local/state/atask/logs",
 }
+
+// Home-relative path prefixes of the atask database; it also covers the
+// -wal and -shm files. The rest of the state tree stays enterable because
+// snapshots and their TMPDIR live beneath it.
+var unreadablePrefixesUnderHome = []string{".local/state/atask/atask.db"}
 
 // systemTempRoot is where macOS keeps per-user temp and cache directories.
 const systemTempRoot = "/private/var/folders"
@@ -54,7 +59,8 @@ func sandboxPolicy(cfg proof.SandboxConfig) proof.SandboxPolicy {
 		return &process.Sandbox{
 			Mode: cfg.Mode, Home: home,
 			Writable: withoutEmpty(writable), Unreadable: underHome(home, unreadableUnderHome),
-			Readable: withoutEmpty([]string{dir, dir + ".tmp"}),
+			UnreadablePrefixes: underHome(home, unreadablePrefixesUnderHome),
+			Readable:           withoutEmpty([]string{dir, dir + ".tmp"}),
 		}
 	}
 }

@@ -139,3 +139,20 @@ func TestProfileDeniesHomeWritesAndSecretReads(t *testing.T) {
 		}
 	}
 }
+
+func TestProfileOrdersDeniesBeforeAllows(t *testing.T) {
+	p := (&Sandbox{
+		Home: "/h", Writable: []string{"/h/w"}, Readable: []string{"/h/s/snap"},
+		Unreadable: []string{"/h/s/logs"}, UnreadablePrefixes: []string{"/h/s/atask.db"},
+	}).Profile()
+	deny := `(deny file-read* (regex "^(/h/s/atask\\.db)"))`
+	if !strings.Contains(p, deny) {
+		t.Fatalf("profile lacks %q:\n%s", deny, p)
+	}
+	lastDeny := strings.LastIndex(p, "(deny ")
+	for _, allow := range []string{`(allow file-write* (subpath "/h/w"))`, `(allow file-read* (subpath "/h/s/snap"))`} {
+		if i := strings.Index(p, allow); i < lastDeny {
+			t.Fatalf("%q precedes a deny:\n%s", allow, p)
+		}
+	}
+}
