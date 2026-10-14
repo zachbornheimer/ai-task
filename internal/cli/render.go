@@ -34,7 +34,7 @@ func stateLabel(s task.Status) string {
 
 // line renders one compact list row.
 func line(v app.TaskView, p painter) string {
-	s := fmt.Sprintf("%s %s  %s", p.glyph(v.Status, v.Started), v.ID, v.Title)
+	s := fmt.Sprintf("%s%s %s  %s", p.glyph(v.Status, v.Started), checkChangeMark(v), v.ID, v.Title)
 	if a := v.Status.Annotation(); a != "" {
 		s += " " + a
 	}
@@ -42,6 +42,15 @@ func line(v app.TaskView, p painter) string {
 		s += p.dim("  [project: " + v.Project + "]")
 	}
 	return s
+}
+
+// checkChangeMark follows the status glyph of a task whose checks changed
+// after it was first claimed.
+func checkChangeMark(v app.TaskView) string {
+	if len(v.CheckHistory) == 0 {
+		return ""
+	}
+	return task.CheckChangedGlyph
 }
 
 func groupGlyph(g app.GroupView) string {
@@ -347,6 +356,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			say(w, "  • %s (%s): %s\n", ch.ID, kind, app.CheckText(ch))
 		}
 	}
+	renderCheckHistory(w, v.CheckHistory)
 	sayln(w, "\nVERIFICATION")
 	say(w, "  Task:        %s\n", runText(v.Verification.Task))
 	say(w, "  Regression:  %s\n", runText(v.Verification.Regression))
@@ -619,6 +629,9 @@ func renderVerify(w io.Writer, res app.VerifyResult) {
 	for _, warn := range res.Warnings {
 		say(w, "Warning:   %s\n", warn)
 	}
+	if res.ChecksChangedAfterClaim {
+		say(w, "Checks:    %d changed since the claim began (see atask show)\n", len(res.CheckChanges))
+	}
 	renderActions(w, res.Actions)
 	renderEvidence(w, res.Evidence, false)
 	if res.LogDir != "" {
@@ -681,4 +694,15 @@ func budgetLabel(d time.Duration) string {
 		return "unlimited"
 	}
 	return d.String()
+}
+
+// renderCheckHistory prints one line per recorded check change.
+func renderCheckHistory(w io.Writer, changes []task.CheckChange) {
+	if len(changes) == 0 {
+		return
+	}
+	sayln(w, "\nCHECK HISTORY")
+	for _, c := range changes {
+		say(w, "  %s %s by %s: %s → %s\n", c.ChangedAt.Format("2006-01-02 15:04"), c.Field, c.Actor, orDash(c.OldSpec), orDash(c.NewSpec))
+	}
 }

@@ -140,6 +140,9 @@ type TaskView struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	History           *History   `json:"history,omitempty"`
+	// CheckHistory is every recorded change to the checks of a task that
+	// had been claimed when it changed.
+	CheckHistory []task.CheckChange `json:"check_history,omitempty"`
 }
 
 // GroupView is a group with derived progress.
@@ -250,6 +253,11 @@ type VerifyResult struct {
 	// LogDir is the run's directory: one <check>.log per executed check
 	// with its complete output, and result.json with this result.
 	LogDir string `json:"log_dir,omitempty"`
+	// ChecksChangedAfterClaim is true when the task's checks changed since
+	// the current attempt began; CheckChanges lists those changes
+	// (complete only).
+	ChecksChangedAfterClaim bool               `json:"checks_changed_after_claim"`
+	CheckChanges            []task.CheckChange `json:"check_changes,omitempty"`
 }
 
 // MarshalJSON adds run_results: the RunResult of every executed check, in
@@ -349,6 +357,15 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		if g, err := tx.GetRecord(t.ParentID); err == nil {
 			gr := rel(g, task.StatusGroup)
 			v.Group = &gr
+		}
+	}
+	if r.Attempt != nil {
+		changes, err := tx.CheckChanges(t.ID, time.Time{})
+		if err != nil {
+			return v, err
+		}
+		if len(changes) > 0 {
+			v.CheckHistory = changes
 		}
 	}
 	if depth == viewList {

@@ -511,6 +511,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			return err
 		}
 	}
+	policyBefore := t.Verification
 	changed := false
 	if c.Title != nil {
 		t.Description, changed = *c.Title, true
@@ -590,6 +591,11 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		t.Description, t.Outcome, t.Constraints, t.Acceptance = spec.Description, spec.Outcome, spec.Constraints, spec.Acceptance
 		if err := a.tx.UpdateTaskContract(t, a.now); err != nil {
 			return err
+		}
+		if rec.Attempt != nil {
+			if err := a.recordCheckChanges(t.ID, policyBefore, t.Verification); err != nil {
+				return err
+			}
 		}
 	}
 	if edges {

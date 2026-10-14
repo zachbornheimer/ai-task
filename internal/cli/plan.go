@@ -23,7 +23,7 @@ func init() {
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" | atask add -f plan.yaml|plan.json|-", runAdd)
 	register("update", "change a plan item: atask update REF [--requires REF]* [--remove-requires REF]* [--proof ..] [--regression ..] [--archive --reason ..] [--reset-attempts]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
-	register("list", "list non-archived tasks: atask [--project NAME] list [ready|blocked|complete|archived|open]", runList)
+	register("list", "list non-archived tasks: atask [--project NAME] list [ready|blocked|complete|archived|open]; ◌ marks a draft, △ a task whose checks changed after it was first claimed", runList)
 	register("status", "board-wide counts, or one project with --project", runStatus)
 	register("prune", "remove worktrees of complete/archived tasks and quarantined directories of idle tasks", runPrune)
 }

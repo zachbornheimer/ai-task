@@ -320,7 +320,7 @@ atask prune remove worktrees of complete/archived tasks and quarantined director
 Glyphs are progress, not liveness: `○` never started (ready or blocked
 work with no attempt yet), `◐` started but not complete (claimed,
 verifying, interrupted,
-failed, cooling, or any task that once had an attempt), `●` complete, `◌` draft (missing proof or regression).
+failed, cooling, or any task that once had an attempt), `●` complete, `◌` draft (missing proof or regression). `△` after a glyph means the task's checks changed after it was first claimed (see `atask show`).
 The bracketed annotation (`[blocked]`, `[failed]`, `[awaiting
 verification]`, …) says why a task is not complete. A group shows
 `(n/m complete)`: `●` only when a nonempty member set is complete, `◐`

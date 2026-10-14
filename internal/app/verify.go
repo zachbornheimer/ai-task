@@ -53,6 +53,9 @@ func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verific
 		if err == nil && res.Completed {
 			err = e.attachActions(ctx, token, &res)
 		}
+		if err == nil {
+			err = e.attachCheckChanges(ctx, token, &res)
+		}
 	} else {
 		res, err = e.verifyDiagnostic(ctx, token, mode)
 	}

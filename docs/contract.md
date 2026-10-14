@@ -319,13 +319,14 @@ const (
   proofs, and `on_complete` configuration. A task filed without both proofs is a draft: listed under its own glyph, never claimable, no attempt budget. Giving it both proofs makes it ready. Vacuity rules apply once proofs are supplied. A task missing any required field is a draft; the required fields are proof and regression (the title is required at add). Adding an open title that already exists
   returns the existing task.
 - `List` / `Show`: task state, hierarchy, history, every `RunResult`, and
-  action results. `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed outside a registered repo. The list is board-wide by default.
+  action results. When the proof, regression, or on-complete actions of a task that has ever been claimed change, the change is recorded, never refused: `Show` returns `check_history` (time, field, old and new spec, actor, cwd; the actor is `attempt:<id>` for a session token and `planner` otherwise), and `atask show` prints it under CHECK HISTORY. `List` marks such a task with `△` right after its status glyph (a draft is `◌`). `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed outside a registered repo. The list is board-wide by default.
 - `Claim`: atomic eligibility and exclusive leased assignment; isolated
   worktree for Git tasks. The token is discoverable from the task worktree;
   elsewhere it is passed explicitly or via `ATASK_SESSION`.
 - `Renew` / `Release` / `Log`: session-fenced. `Release` with `Failed` counts
   an attempt; without it the attempt is not counted.
 - `VerifyProof` / `VerifyRegression`: fresh diagnostic run, no completion.
+- `VerifyComplete` also returns `checks_changed_after_claim` (true when the task's checks changed since the current attempt began) and, when true, those changes as `check_changes`.
 - `VerifyComplete`: fresh proof, fresh regression, then atomically complete the
   task and record its `on_complete` actions as pending. atask then runs each
   action: waited actions record a `RunResult`; detached actions are spawned
