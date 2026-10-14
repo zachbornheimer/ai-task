@@ -29,12 +29,20 @@ func (goTestPreset) Name() string      { return "go_test" }
 func (goTestPreset) Options() []string { return []string{"name"} }
 func (goTestPreset) DefaultSize() Size { return SizeSmall }
 
+func (goTestPreset) Subject() string { return "PKG..." }
+
 func (goTestPreset) Argv(spec ProofSpec, _ Env) ([]string, error) {
-	pkg := strings.TrimSpace(spec.Subject)
-	if pkg == "" {
+	toks, err := splitWords(spec.Subject)
+	if err != nil {
+		return nil, fault.Wrap(err, fault.CodeInvalidInput, "go_test subject %q", spec.Subject)
+	}
+	if len(toks) == 0 {
 		return nil, fault.New(fault.CodeInvalidInput, "go_test needs a package, e.g. go_test: ./internal/proof")
 	}
-	argv := []string{"go", "test", "-count=1", "-json", pkg}
+	argv := []string{"go", "test", "-count=1", "-json"}
+	for _, t := range toks {
+		argv = append(argv, t.text)
+	}
 	if name := spec.Options["name"]; name != "" {
 		argv = append(argv, "-run", name)
 	}

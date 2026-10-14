@@ -86,7 +86,7 @@ proofs verbatim.
 | `ci`                                             | `mise run ci`, else `make ci`, exits 0                                                                                 | large  |
 | `lint`                                           | `mise run lint`, else `make lint`, exits 0                                                                             | medium |
 | `build`                                          | `mise run build`, else `make build`, exits 0                                                                           | medium |
-| `go_test: PKG [name=REGEX]`                      | `go test -count=1 -json PKG` passes and, with `name`, a matching test ran and passed                                   | small  |
+| `go_test: PKG... [name=REGEX]`                   | `go test -count=1 -json PKG...` passes and, with `name`, a matching test ran and passed                                | small  |
 | `py_test: PATH [name=EXPR]`                      | `pytest PATH -k EXPR` passes and collected at least one test                                                           | small  |
 | `js_test: PATH [name=REGEX]`                     | package-manager test runner passes with at least one test run                                                          | small  |
 | `rs_test: CRATE [name=REGEX]`                    | `cargo test` passes with at least one test run                                                                         | medium |
