@@ -7,6 +7,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -28,7 +29,7 @@ func (f *fixture) realClockEngine() *app.Engine {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	f.t.Cleanup(func() { e.Close() })
+	f.t.Cleanup(func() { must.OK(f.t, e.Close()) })
 	return e
 }
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 // TestRunnerDrainsGraphWithFakeModel runs the whole host flow with four
@@ -24,7 +26,7 @@ func TestRunnerDrainsGraphWithFakeModel(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "at-example")
 	t.Setenv("GIT_COMMITTER_EMAIL", "at@example")
 	repo := filepath.Join(t.TempDir(), "repo")
-	os.MkdirAll(repo, 0o755)
+	must.OK(t, os.MkdirAll(repo, 0o755))
 	if err := initRepo(repo); err != nil {
 		t.Fatal(err)
 	}

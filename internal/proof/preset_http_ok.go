@@ -61,7 +61,7 @@ func (p httpOKPreset) Evaluate(spec ProofSpec, _ string) (bool, string, error) {
 	if err != nil {
 		return false, requestFailure(err), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // response fully consumed or abandoned; nothing to recover
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpBodyLimit))
 	statusOK := resp.StatusCode/100 == 2
 	if want != 0 {

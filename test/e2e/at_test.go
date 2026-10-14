@@ -20,6 +20,8 @@ import (
 	// makes Go's test cache key include every source file the binary
 	// depends on, so a change anywhere re-runs these tests.
 	_ "github.com/zachbornheimer/ai-task/internal/cli"
+	"github.com/zachbornheimer/ai-task/internal/discard"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
@@ -37,7 +39,9 @@ func TestMain(m *testing.M) {
 		panic("build: " + err.Error())
 	}
 	code := m.Run()
-	os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		fmt.Fprintln(os.Stderr, "remove test dir:", err)
+	}
 	os.Exit(code)
 }
 
@@ -52,7 +56,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	base := t.TempDir()
 	cwd := filepath.Join(base, "repo")
-	os.MkdirAll(cwd, 0o755)
+	must.OK(t, os.MkdirAll(cwd, 0o755))
 	e := &env{t: t, db: filepath.Join(base, "state", "at.db"), cwd: cwd}
 	e.env = append(os.Environ(), "ATASK_DB="+e.db, "ATASK_OUTPUT=json", "ATASK_PROJECT=", "ATASK_SESSION=")
 	isolated, err := testgit.Overrides(t.TempDir())
@@ -72,7 +76,7 @@ func gitEnv(t *testing.T) *env {
 	}
 	e := newEnv(t)
 	e.git(e.cwd, "init", "-q", "-b", "main")
-	os.WriteFile(filepath.Join(e.cwd, "f.txt"), []byte("one"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "f.txt"), []byte("one"), 0o644))
 	e.git(e.cwd, "add", "f.txt")
 	e.git(e.cwd, "commit", "-q", "-m", "one")
 	e.ok("init", "--name", "g")
@@ -89,7 +93,7 @@ func (e *env) promote() {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	defer db.Close()
+	defer discard.CloseReadOnly(db)
 	if _, err := db.Exec(`UPDATE projects SET integration = 'promote' WHERE root_path IS NOT NULL`); err != nil {
 		e.t.Fatal(err)
 	}
@@ -107,7 +111,7 @@ func (e *env) git(dir string, args ...string) {
 
 func (e *env) commit(dir, file, content string) {
 	e.t.Helper()
-	os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644)
+	must.OK(e.t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644))
 	e.git(dir, "add", file)
 	e.git(dir, "commit", "-q", "-m", content)
 }
@@ -173,9 +177,9 @@ func (e *env) fails(code string, args ...string) result {
 
 func taskID(m map[string]any) string {
 	if t, ok := m["task"].(map[string]any); ok {
-		return t["id"].(string)
+		return must.As[string](t["id"])
 	}
-	return m["id"].(string)
+	return must.As[string](m["id"])
 }
 
 func TestAgentLoopEndToEnd(t *testing.T) {
@@ -187,13 +191,13 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	e.fails("INVALID_INPUT", "verify")
 	e.fails("INVALID_INPUT", "verify", "complete") // no session anywhere -> usage
 	sess := e.ok("claim")
-	tok := sess["token"].(string)
-	ws := sess["workspace"].(string)
+	tok := must.As[string](sess["token"])
+	ws := must.As[string](sess["workspace"])
 	if taskID(sess) != a || !strings.HasPrefix(tok, "sess-") || ws == "" {
 		t.Fatalf("claim: %v", sess)
 	}
 	// The claim says where work lands and which regression checks will run.
-	if sess["target_branch"] != "main" || sess["target_revision"] == "" || len(sess["regression_checks"].([]any)) == 0 {
+	if sess["target_branch"] != "main" || sess["target_revision"] == "" || len(must.As[[]any](sess["regression_checks"])) == 0 {
 		t.Fatalf("claim lacks target or regression checks: %v", sess)
 	}
 	with := []string{"ATASK_SESSION=" + tok}
@@ -209,19 +213,19 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	if r := e.runIn(ws, "", nil, "log", "--note", "worktree token works"); r.code != 0 {
 		t.Fatalf("worktree token: %s %s", r.stdout, r.stderr)
 	}
-	if r := e.runIn(ws, "", nil, "show"); r.code != 0 || taskID(r.env["result"].(map[string]any)) != a {
+	if r := e.runIn(ws, "", nil, "show"); r.code != 0 || taskID(must.As[map[string]any](r.env["result"])) != a {
 		t.Fatalf("show in worktree: %s %s", r.stdout, r.stderr)
 	}
-	if cx := e.ok("context"); !strings.Contains(cx["prompt"].(string), "verifiable objectives") {
+	if cx := e.ok("context"); !strings.Contains(must.As[string](cx["prompt"]), "verifiable objectives") {
 		t.Fatalf("context contract: %v", cx)
 	}
 	if r := e.runIn(ws, "", []string{"ATASK_OUTPUT="}, "context"); r.code != 0 || !strings.Contains(r.stdout, "verify complete") {
 		t.Fatalf("human context: %s %s", r.stdout, r.stderr)
 	}
-	if handoff := e.ok("context", a); !strings.Contains(handoff["prompt"].(string), "# Task "+a) {
+	if handoff := e.ok("context", a); !strings.Contains(must.As[string](handoff["prompt"]), "# Task "+a) {
 		t.Fatalf("context id handoff: %v", handoff)
 	}
-	if !strings.HasSuffix(sess["branch"].(string), "/"+a) || !strings.HasPrefix(sess["branch"].(string), "atask/") {
+	if !strings.HasSuffix(must.As[string](sess["branch"]), "/"+a) || !strings.HasPrefix(must.As[string](sess["branch"]), "atask/") {
 		t.Fatalf("branch %v", sess["branch"])
 	}
 	if _, err := os.Stat(filepath.Join(e.cwd, ".git", "hooks", "post-commit")); err == nil {
@@ -229,11 +233,11 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	}
 	// Provisional checks run and never complete.
 	r := e.runIn(e.cwd, "", with, "verify", "proof")
-	if r.env["ok"] != false || r.env["error"].(map[string]any)["code"] != "CHECK_FAILED" {
+	if r.env["ok"] != false || must.As[map[string]any](r.env["error"])["code"] != "CHECK_FAILED" {
 		t.Fatalf("verify task before work: %s", r.stdout)
 	}
 	e.commit(ws, "parse.txt", "p")
-	if r := e.runIn(e.cwd, "", with, "verify", "proof"); r.code != 0 || r.env["result"].(map[string]any)["completed"] != false {
+	if r := e.runIn(e.cwd, "", with, "verify", "proof"); r.code != 0 || must.As[map[string]any](r.env["result"])["completed"] != false {
 		t.Fatalf("verify task: %s", r.stdout)
 	}
 	if r := e.runIn(e.cwd, "", with, "verify", "regression"); r.code != 0 {
@@ -244,30 +248,30 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 	}
 	// verify complete: completes and ends the claim; the target branch is untouched.
 	r = e.runIn(e.cwd, "", with, "verify", "complete")
-	if r.code != 0 || r.env["result"].(map[string]any)["completed"] != true {
+	if r.code != 0 || must.As[map[string]any](r.env["result"])["completed"] != true {
 		t.Fatalf("verify complete: %s %s", r.stdout, r.stderr)
 	}
 	if _, err := os.Stat(filepath.Join(e.cwd, "parse.txt")); err == nil {
 		t.Fatal("completion moved the target branch")
 	}
-	if r := e.runIn(e.cwd, "", with, "log", "--done", "late"); r.env["error"].(map[string]any)["code"] != "INVALID_SESSION" {
+	if r := e.runIn(e.cwd, "", with, "log", "--done", "late"); must.As[map[string]any](r.env["error"])["code"] != "INVALID_SESSION" {
 		t.Fatalf("%s", r.stdout)
 	}
 	// Dependent is ready; outside a worktree, renew/release need a token.
 	e.fails("INVALID_INPUT", "claim", "renew")
 	sb := e.ok("claim", "reject")
-	e.ok("claim", "renew", sb["token"].(string))
-	if r := e.runIn(sb["workspace"].(string), "", nil, "claim", "renew"); r.code != 0 {
+	e.ok("claim", "renew", must.As[string](sb["token"]))
+	if r := e.runIn(must.As[string](sb["workspace"]), "", nil, "claim", "renew"); r.code != 0 {
 		t.Fatalf("renew inside worktree: %s %s", r.stdout, r.stderr)
 	}
 	// A token used inside another task's worktree is refused before any
 	// write: the confused-deputy case of a mis-exported ATASK_SESSION.
-	if r := e.runIn(sb["workspace"].(string), "", with, "log", "--note", "wrong worktree"); r.env["error"] == nil || r.env["error"].(map[string]any)["code"] != "INVALID_SESSION" {
+	if r := e.runIn(must.As[string](sb["workspace"]), "", with, "log", "--note", "wrong worktree"); r.env["error"] == nil || must.As[map[string]any](r.env["error"])["code"] != "INVALID_SESSION" {
 		t.Fatalf("token for %s accepted in %s's worktree: %s", a, b, r.stdout)
 	}
 	e.fails("INVALID_SESSION", "claim", "renew", "sess-0000000000000000000000000000000a")
 	e.fails("INVALID_SESSION", "claim", "release", tok)
-	rel := e.ok("claim", "release", sb["token"].(string), "--note", "later")
+	rel := e.ok("claim", "release", must.As[string](sb["token"]), "--note", "later")
 	if rel["status"] != "ready" {
 		t.Fatalf("%v", rel)
 	}
@@ -289,7 +293,7 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 		t.Fatalf("show:\n%s", hs.stdout)
 	}
 	st := e.ok("status")
-	if st["done"] != false || st["claimable"].(float64) != 1 {
+	if st["done"] != false || must.As[float64](st["claimable"]) != 1 {
 		t.Fatalf("status: %v", st)
 	}
 }
@@ -301,18 +305,18 @@ func TestPlanningCommands(t *testing.T) {
 	a := taskID(e.ok("--project", "p", "add", "Rotate creds", "--key", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
 	b := taskID(e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
 	e.fails("CONFLICT", "--project", "p", "add", "Token store v2", "--key", "store", "--proof", "run: test -d .", "--regression", "run: true")
-	if d := e.ok("--project", "p", "add", "No proofs", "--key", "noproofs"); d["task"].(map[string]any)["status"] != "draft" {
+	if d := e.ok("--project", "p", "add", "No proofs", "--key", "noproofs"); must.As[map[string]any](d["task"])["status"] != "draft" {
 		t.Fatalf("task without proofs must be a draft: %v", d)
 	}
 	e.ok("--project", "p", "update", "noproofs", "--archive", "--reason", "draft probe")
 	rep := e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: test -d .", "--regression", "run: true")
-	if rep["changed"].(float64) != 0 {
+	if must.As[float64](rep["changed"]) != 0 {
 		t.Fatalf("identical replay changed the plan: %v", rep)
 	}
 	e.fails("INVALID_INPUT", "--project", "p", "update", "rotate", "--archive")                          // reason required
 	e.fails("CONFLICT", "--project", "p", "update", "rotate", "--archive", "--reason", "done elsewhere") // store requires it
 	up := e.ok("--project", "p", "update", "store", "--remove-requires", "rotate", "--accept", "works")
-	if up["changed"].(float64) != 1 {
+	if must.As[float64](up["changed"]) != 1 {
 		t.Fatalf("%v", up)
 	}
 	e.ok("--project", "p", "update", "rotate", "--archive", "--reason", "done elsewhere")
@@ -320,7 +324,7 @@ func TestPlanningCommands(t *testing.T) {
 		t.Fatalf("not archived with reason: %v", sh)
 	}
 	snap := e.ok("--project", "p", "list", "all")
-	if len(snap["groups"].([]any)) != 1 || len(snap["tasks"].([]any)) != 1 {
+	if len(must.As[[]any](snap["groups"])) != 1 || len(must.As[[]any](snap["tasks"])) != 1 {
 		t.Fatalf("%v", snap)
 	}
 	h := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "--project", "p", "list")
@@ -335,7 +339,7 @@ func TestPlanningCommands(t *testing.T) {
 	if r := e.run("nope"); r.code != 2 {
 		t.Fatal("unknown command exit")
 	}
-	if r := e.run("--project", "p", "show", "at-000000"); r.code != 1 || r.env["error"].(map[string]any)["code"] != "NOT_FOUND" {
+	if r := e.run("--project", "p", "show", "at-000000"); r.code != 1 || must.As[map[string]any](r.env["error"])["code"] != "NOT_FOUND" {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -359,8 +363,8 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	none := 0
 	for _, r := range results {
 		if r.code == 0 {
-			seen[taskID(r.env["result"].(map[string]any))]++
-		} else if r.env["error"].(map[string]any)["code"] == "NOT_READY" {
+			seen[taskID(must.As[map[string]any](r.env["result"]))]++
+		} else if must.As[map[string]any](r.env["error"])["code"] == "NOT_READY" {
 			none++
 		} else {
 			t.Errorf("unexpected: %s %s", r.stdout, r.stderr)
@@ -385,15 +389,15 @@ func TestChecksRunWithoutHoldingTheDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(scriptFile.Name()) })
+	t.Cleanup(func() { must.OK(t, os.Remove(scriptFile.Name())) })
 	if _, err := scriptFile.WriteString(script + "\n"); err != nil {
 		t.Fatal(err)
 	}
-	scriptFile.Close()
+	must.OK(t, scriptFile.Close())
 	a := taskID(e.ok("add", "reentrant", "--proof", "run: sh "+scriptFile.Name(), "--regression", "run: true"))
 	s := e.ok("claim", a)
-	e.commit(s["workspace"].(string), "r.txt", "r")
-	r := e.runIn(e.cwd, "", []string{"ATASK_SESSION=" + s["token"].(string)}, "verify", "complete")
+	e.commit(must.As[string](s["workspace"]), "r.txt", "r")
+	r := e.runIn(e.cwd, "", []string{"ATASK_SESSION=" + must.As[string](s["token"])}, "verify", "complete")
 	if r.code != 0 {
 		t.Fatalf("%s %s", r.stdout, r.stderr)
 	}
@@ -410,8 +414,8 @@ func TestVacuousProofsRejectedByCLI(t *testing.T) {
 	e.fails("INVALID_INPUT", "add", "noop proof", "--proof", "run: true", "--regression", "run: true")
 	x := taskID(e.ok("add", "real gates", "--proof", "run: test -d .", "--regression", "run: test -d ."))
 	s := e.ok("claim", x)
-	e.commit(s["workspace"].(string), "x.txt", "x")
-	if r := e.runIn(e.cwd, "", []string{"ATASK_SESSION=" + s["token"].(string)}, "verify", "complete"); r.code != 0 || r.env["result"].(map[string]any)["completed"] != true {
+	e.commit(must.As[string](s["workspace"]), "x.txt", "x")
+	if r := e.runIn(e.cwd, "", []string{"ATASK_SESSION=" + must.As[string](s["token"])}, "verify", "complete"); r.code != 0 || must.As[map[string]any](r.env["result"])["completed"] != true {
 		t.Fatalf("real gates should complete: %s %s", r.stdout, r.stderr)
 	}
 }
@@ -423,7 +427,7 @@ func TestDiscoveredBlockerFromWorktree(t *testing.T) {
 	e := gitEnv(t)
 	a := taskID(e.ok("add", "main work", "--key", "main", "--proof", "run: test -d .", "--regression", "run: true"))
 	s := e.ok("claim", a)
-	ws := s["workspace"].(string)
+	ws := must.As[string](s["workspace"])
 	if r := e.runIn(ws, "", nil, "add", "prereq", "--blocks", "main"); r.code != 0 || !strings.Contains(r.stdout, `"status":"draft"`) {
 		t.Fatalf("blocker without proofs must be filed as a draft: %s %s", r.stdout, r.stderr)
 	}
@@ -434,7 +438,7 @@ func TestDiscoveredBlockerFromWorktree(t *testing.T) {
 	if r := e.runIn(ws, "", nil, "log", "--next", "wait for pre"); r.code != 0 {
 		t.Fatalf("log: %s", r.stdout)
 	}
-	if r := e.runIn(ws, "", nil, "claim", "release"); r.code != 0 || r.env["result"].(map[string]any)["status"] != "blocked" {
+	if r := e.runIn(ws, "", nil, "claim", "release"); r.code != 0 || must.As[map[string]any](r.env["result"])["status"] != "blocked" {
 		t.Fatalf("release: %s %s", r.stdout, r.stderr)
 	}
 }
@@ -446,15 +450,15 @@ func TestCLICorners(t *testing.T) {
 	e := gitEnv(t)
 	x := taskID(e.ok("add", "x", "--key", "x", "--proof", "run: test -d .", "--regression", "run: true"))
 	s := e.ok("claim", x)
-	if r := e.run("claim", "--json", "renew", s["token"].(string)); r.code != 0 || r.env["result"].(map[string]any)["lease_until"] == nil {
+	if r := e.run("claim", "--json", "renew", must.As[string](s["token"])); r.code != 0 || must.As[map[string]any](r.env["result"])["lease_until"] == nil {
 		t.Fatalf("claim --json renew: %s %s", r.stdout, r.stderr)
 	}
-	if r := e.run("help"); r.code != 0 || r.env["result"].(map[string]any)["commands"] == nil {
+	if r := e.run("help"); r.code != 0 || must.As[map[string]any](r.env["result"])["commands"] == nil {
 		t.Fatalf("help envelope: %s", r.stdout)
 	}
 	if r := e.run(); r.code != 0 || r.env == nil {
 		t.Fatalf("bare at envelope: code=%d %s", r.code, r.stdout)
-	} else if _, ok := r.env["result"].(map[string]any)["tasks"]; !ok {
+	} else if _, ok := must.As[map[string]any](r.env["result"])["tasks"]; !ok {
 		t.Fatalf("bare atask should list the board: %s", r.stdout)
 	}
 	if r := e.run("add", "G", "--group", "--requires", "x"); r.code != 2 {
@@ -464,12 +468,12 @@ func TestCLICorners(t *testing.T) {
 		t.Fatalf("--archive with edits accepted: %s", r.stdout)
 	}
 	e.ok("update", "x", "--reset-attempts")
-	e.commit(s["workspace"].(string), "x.txt", "x")
-	if r := e.runIn(s["workspace"].(string), "", nil, "verify", "complete"); r.code != 0 {
+	e.commit(must.As[string](s["workspace"]), "x.txt", "x")
+	if r := e.runIn(must.As[string](s["workspace"]), "", nil, "verify", "complete"); r.code != 0 {
 		t.Fatalf("%s %s", r.stdout, r.stderr)
 	}
 	pr := e.ok("prune")
-	if removed := pr["removed"].([]any); len(removed) != 1 || removed[0].(string) != s["workspace"].(string) {
+	if removed := must.As[[]any](pr["removed"]); len(removed) != 1 || must.As[string](removed[0]) != must.As[string](s["workspace"]) {
 		t.Fatalf("prune: %v", pr)
 	}
 }
@@ -486,7 +490,7 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
 		t.Fatalf("doctor: %v", rep)
 	}
 	yamlPlan := filepath.Join(t.TempDir(), "plan.yaml")
-	os.WriteFile(yamlPlan, []byte(`tasks:
+	must.OK(t, os.WriteFile(yamlPlan, []byte(`tasks:
   - kind: group
     key: core
     title: Core
@@ -503,13 +507,13 @@ func TestPlanFilesClaimAndDoctor(t *testing.T) {
     requires: [parse]
     proof: "run: test -f reject.txt"
     regression: "run: true"
-`), 0o644)
+`), 0o644))
 	res := e.ok("add", "-f", yamlPlan)
-	if res["changed"].(float64) != 3 || len(res["created"].(map[string]any)) != 3 {
+	if must.As[float64](res["changed"]) != 3 || len(must.As[map[string]any](res["created"])) != 3 {
 		t.Fatalf("yaml plan: %v", res)
 	}
 	parse := e.ok("show", "parse")
-	if len(parse["task_checks"].([]any)) != 1 || parse["group"].(map[string]any)["title"] != "Core" || len(parse["constraints"].([]any)) != 1 {
+	if len(must.As[[]any](parse["task_checks"])) != 1 || must.As[map[string]any](parse["group"])["title"] != "Core" || len(must.As[[]any](parse["constraints"])) != 1 {
 		t.Fatalf("parse: %v", parse)
 	}
 	// Atomic: a bad item means nothing is added.
@@ -543,7 +547,7 @@ func TestInitInstallsInstructions(t *testing.T) {
 		t.Fatalf("CLAUDE.md: %q", c)
 	}
 	// The repository's own text survives a refresh; init is idempotent.
-	os.WriteFile(agents, []byte(string(b)+"\n# Ours\n\nkeep me\n"), 0o644)
+	must.OK(t, os.WriteFile(agents, []byte(string(b)+"\n# Ours\n\nkeep me\n"), 0o644))
 	again := e.ok("init")
 	if again["existing"] != true {
 		t.Fatalf("re-init: %v", again)
@@ -565,7 +569,7 @@ func TestInitInstallsInstructions(t *testing.T) {
 func TestSizesBudgetsAndDoctorTiming(t *testing.T) {
 	e := gitEnv(t)
 	big := e.ok("add", "Big", "--key", "big", "--size", "large", "--proof", "run: test -d .", "--regression", "run: true")
-	if big["task"].(map[string]any)["size"] != "large" {
+	if must.As[map[string]any](big["task"])["size"] != "large" {
 		t.Fatalf("size: %v", big)
 	}
 	e.fails("INVALID_INPUT", "add", "Odd", "--size", "huge", "--proof", "run: test -d .", "--regression", "run: true")
@@ -588,15 +592,15 @@ func TestEpicChecksFromTheCLI(t *testing.T) {
 	e := gitEnv(t)
 	g := taskID(e.ok("add", "Identity", "--group", "--key", "identity", "--proof", "run: test -f a.txt", "--regression", "run: test -f a.txt"))
 	a := taskID(e.ok("add", "A", "--key", "a", "--parent", "identity", "--proof", "run: test -f a.txt", "--regression", "run: true"))
-	if sh := e.ok("show", "identity"); sh["size"] != "large" || sh["group_verification"].(map[string]any)["status"] != nil {
+	if sh := e.ok("show", "identity"); sh["size"] != "large" || must.As[map[string]any](sh["group_verification"])["status"] != nil {
 		t.Fatalf("group: %v", sh)
 	}
-	if r := e.run("verify", "complete", "identity"); r.code == 0 || r.env["error"].(map[string]any)["code"] != "NOT_READY" {
+	if r := e.run("verify", "complete", "identity"); r.code == 0 || must.As[map[string]any](r.env["error"])["code"] != "NOT_READY" {
 		t.Fatalf("children incomplete must be NOT_READY: %s %s", r.stdout, r.stderr)
 	}
 	s := e.ok("claim", a)
-	e.commit(s["workspace"].(string), "a.txt", "a")
-	if r := e.runIn(s["workspace"].(string), "", nil, "verify", "complete"); r.code != 0 {
+	e.commit(must.As[string](s["workspace"]), "a.txt", "a")
+	if r := e.runIn(must.As[string](s["workspace"]), "", nil, "verify", "complete"); r.code != 0 {
 		t.Fatalf("complete: %s %s", r.stdout, r.stderr)
 	}
 	if vg := e.ok("verify", "complete", "identity"); vg["completed"] != true {

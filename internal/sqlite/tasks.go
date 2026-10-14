@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -430,7 +431,7 @@ func (t *Tx) LoadAcceptance(tk *task.Task) error {
 	if err != nil {
 		return wrapInternal(err, "load acceptance criteria")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	tk.Acceptance = nil
 	for rows.Next() {
 		var a task.AcceptanceCriterion
@@ -467,7 +468,7 @@ func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time, maxAtte
 	if err != nil {
 		return nil, wrapInternal(err, "list tasks")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []Record
 	for rows.Next() {
 		r, err := scanRecord(rows)
@@ -565,7 +566,7 @@ func (t *Tx) Children(id task.ID) ([]Record, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list children")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []Record
 	for rows.Next() {
 		r, err := scanRecord(rows)
@@ -612,7 +613,7 @@ func (t *Tx) TaskCheckIDs(pid project.ID) (map[string]task.ID, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "task check ids")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	out := map[string]task.ID{}
 	for rows.Next() {
 		var id task.ID

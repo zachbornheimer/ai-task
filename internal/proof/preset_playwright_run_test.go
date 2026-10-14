@@ -3,6 +3,8 @@ package proof
 import (
 	"reflect"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 func TestPresetPlaywrightRun(t *testing.T) {
@@ -33,7 +35,7 @@ func TestPresetPlaywrightRun(t *testing.T) {
 		t.Error("empty subject accepted")
 	}
 
-	j := p.(Judger)
+	j := must.As[Judger](p)
 	for _, c := range []struct {
 		name, out string
 		pass      bool

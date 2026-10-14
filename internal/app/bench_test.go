@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -19,7 +20,7 @@ func benchEngine(b *testing.B) (*app.Engine, project.Project) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { e.Close() })
+	b.Cleanup(func() { must.OK(b, e.Close()) })
 	repo := filepath.Join(b.TempDir(), "repo")
 	if _, err := exec.LookPath("git"); err != nil {
 		b.Skip("git not installed")

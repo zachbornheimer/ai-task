@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -73,7 +74,7 @@ func TestRunResultRecordedAndBudgeted(t *testing.T) {
 	}
 	for i, want := range []string{"proof", "regression"} {
 		r := rr[i]
-		if r["budget_ms"] == float64(200) || r["check_type"] != want || r["passed"] != true || r["timed_out"] == true || r["elapsed_ms"].(float64) <= 0 || r["output"] == "" || r["return_code"] != float64(0) {
+		if r["budget_ms"] == float64(200) || r["check_type"] != want || r["passed"] != true || r["timed_out"] == true || must.As[float64](r["elapsed_ms"]) <= 0 || r["output"] == "" || r["return_code"] != float64(0) {
 			t.Fatalf("%s RunResult wrong: %v", want, r)
 		}
 	}

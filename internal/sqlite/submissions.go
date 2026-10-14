@@ -3,6 +3,7 @@ package sqlite
 import (
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -141,7 +142,7 @@ func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list submissions")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []Submission
 	for rows.Next() {
 		var s Submission
@@ -167,7 +168,7 @@ func (t *Tx) RunsForTask(id task.ID) ([]Run, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list runs")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []Run
 	for rows.Next() {
 		r, err := scanRun(rows)
@@ -222,7 +223,7 @@ func (t *Tx) EvidenceForRun(runID int64) ([]verification.Evidence, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list evidence")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []verification.Evidence
 	for rows.Next() {
 		e, err := scanEvidence(rows)
@@ -234,7 +235,7 @@ func (t *Tx) EvidenceForRun(runID int64) ([]verification.Evidence, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows.Close()
+	discard.CloseReadOnly(rows)
 	return out, t.attachRunResults(runID, out)
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 func TestGeneralProjectValidates(t *testing.T) {
@@ -72,7 +73,7 @@ func TestLocateRootMainAndLinkedWorktree(t *testing.T) {
 		}
 	}
 	plain := filepath.Join(base, "plain")
-	os.MkdirAll(plain, 0o755)
+	must.OK(t, os.MkdirAll(plain, 0o755))
 	got, err := LocateRoot(plain)
 	if err != nil || got != "" {
 		t.Fatalf("non-git dir: %q %v", got, err)

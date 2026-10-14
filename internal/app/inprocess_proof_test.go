@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -69,7 +70,7 @@ func TestInProcessPresetProofAccepted(t *testing.T) {
 		t.Fatal("failing grep must fail verification")
 	}
 	rr = f.runResults(bad)
-	if len(rr) != 1 || rr[0]["passed"] != false || rr[0]["return_code"] != float64(1) || !strings.Contains(rr[0]["output"].(string), "nomatch") {
+	if len(rr) != 1 || rr[0]["passed"] != false || rr[0]["return_code"] != float64(1) || !strings.Contains(must.As[string](rr[0]["output"]), "nomatch") {
 		t.Fatalf("failing RunResult wrong: %v", rr)
 	}
 

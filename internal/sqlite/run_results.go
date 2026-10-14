@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -53,7 +54,7 @@ func (t *Tx) RunResultsForTask(id string) ([]proof.RunResult, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list run results")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	out := []proof.RunResult{}
 	for rows.Next() {
 		r, err := scanRunResult(rows)
@@ -71,7 +72,7 @@ func (t *Tx) attachRunResults(runID int64, ev []verification.Evidence) error {
 	if err != nil {
 		return wrapInternal(err, "list run results for run")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	byEvidence := map[int64]proof.RunResult{}
 	for rows.Next() {
 		var eid int64

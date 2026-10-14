@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 // isolateGitIdentity hides the global and system Git configuration from
@@ -14,13 +15,13 @@ import (
 func isolateGitIdentity(t *testing.T) {
 	t.Helper()
 	empty := filepath.Join(t.TempDir(), "gitconfig")
-	os.WriteFile(empty, nil, 0o644)
+	must.OK(t, os.WriteFile(empty, nil, 0o644))
 	t.Setenv("GIT_CONFIG_GLOBAL", empty)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
 		if _, ok := os.LookupEnv(k); ok {
 			t.Setenv(k, "")
-			os.Unsetenv(k)
+			must.OK(t, os.Unsetenv(k))
 		}
 	}
 }

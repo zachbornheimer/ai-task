@@ -12,6 +12,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -59,7 +60,7 @@ func TestHeartbeatRecoversFromTransientAndAbortsOnTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer e.Close()
+	defer func() { must.OK(t, e.Close()) }()
 
 	// Transient: the first renewals fail with a busy-style internal error;
 	// the run continues and completes once the check finishes.
@@ -83,7 +84,7 @@ func TestHeartbeatRecoversFromTransientAndAbortsOnTerminal(t *testing.T) {
 	for calls.Load() < 4 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	os.WriteFile(flag, []byte("1"), 0o644)
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
 	if err := <-done; err != nil {
 		t.Fatalf("transient renewal errors must not abort the run: %v", err)
 	}

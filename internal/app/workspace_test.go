@@ -11,6 +11,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 )
@@ -61,7 +62,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID, Wait: true})
 	wantCode(t, err, fault.CodeStalled)
 	var fe *fault.Error
-	if !errors.As(err, &fe) || !strings.Contains(strings.Join(fe.Details.(app.Summary).Reasons, " "), "unusable workspace") {
+	if !errors.As(err, &fe) || !strings.Contains(strings.Join(must.As[app.Summary](fe.Details).Reasons, " "), "unusable workspace") {
 		t.Fatalf("stall reasons: %v", err)
 	}
 	// An explicit claim retries; it fails again while the worktree is still
@@ -85,7 +86,7 @@ func TestUnusableWorktreeDoesNotBlockTheQueue(t *testing.T) {
 	// A planner reset also clears the mark (the alternative repair path).
 	z := f.add("z")
 	sz := f.claim(string(z))
-	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sz.Token})
+	f.release(app.ReleaseRequest{Token: sz.Token})
 	f.git(sz.Workspace, "checkout", "-q", "--detach")
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{ProjectID: f.proj.ID})
 	wantCode(t, err, fault.CodeNotReady)

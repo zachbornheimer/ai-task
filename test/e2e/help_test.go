@@ -3,6 +3,8 @@ package e2e
 import (
 	"strings"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 // TestSubcommandHelpListsFlags: `atask <command> --help` (and -h) is a request
@@ -40,7 +42,7 @@ func TestSubcommandHelpListsFlags(t *testing.T) {
 		}
 		found := map[string]string{}
 		for _, f := range flags {
-			m := f.(map[string]any)
+			m := must.As[map[string]any](f)
 			found[m["name"].(string)], _ = m["usage"].(string)
 		}
 		for _, want := range tc.flags {

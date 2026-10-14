@@ -3,6 +3,8 @@ package proof
 import (
 	"slices"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 func TestPresetPRMerged(t *testing.T) {
@@ -38,7 +40,7 @@ func TestPresetPRMerged(t *testing.T) {
 		{"garbage", "", []byte("nope"), 0, false},
 	}
 	for _, c := range cases {
-		j := p.ForEnv(Env{TargetBranch: c.target}).(Judger)
+		j := must.As[Judger](p.ForEnv(Env{TargetBranch: c.target}))
 		pass, reason := j.Judge(ProofSpec{}, c.out, c.code)
 		if pass != c.pass || (!pass && reason == "") {
 			t.Errorf("%s: pass=%v reason=%q", c.name, pass, reason)

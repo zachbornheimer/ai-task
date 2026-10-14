@@ -6,6 +6,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -32,7 +33,7 @@ func TestPlannerAuthorityIsNoToken(t *testing.T) {
 		t.Fatalf("other task's token: %v", err)
 	}
 
-	f.e.Release(f.ctx, app.ReleaseRequest{Token: sb.Token})
+	must.OK(t, f.e.Release(f.ctx, app.ReleaseRequest{Token: sb.Token}))
 	c := f.add("c")
 	s := f.claim(string(c))
 	f.c.Advance(5 * time.Hour)

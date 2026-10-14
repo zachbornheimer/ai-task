@@ -3,6 +3,8 @@ package proof
 import (
 	"reflect"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 func TestPresetPyTest(t *testing.T) {
@@ -21,7 +23,7 @@ func TestPresetPyTest(t *testing.T) {
 	if want := []string{"pytest", "t.py", "-q", "-k", "foo and bar"}; !reflect.DeepEqual(argv, want) {
 		t.Errorf("argv = %v, want %v", argv, want)
 	}
-	j := p.(Judger)
+	j := must.As[Judger](p)
 	for _, c := range []struct {
 		code   int
 		pass   bool

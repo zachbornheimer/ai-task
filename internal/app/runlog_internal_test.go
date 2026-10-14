@@ -5,19 +5,22 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/discard"
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 func TestVerifyWritesRunLogsPrunesOldRuns(t *testing.T) {
 	proj := filepath.Join(t.TempDir(), "proj")
 	for i := 1; i <= keepRunLogs+5; i++ {
-		os.MkdirAll(filepath.Join(proj, fmt.Sprintf("run-%d", i)), 0o755)
+		must.OK(t, os.MkdirAll(filepath.Join(proj, fmt.Sprintf("run-%d", i)), 0o755))
 	}
-	os.MkdirAll(filepath.Join(proj, "unrelated"), 0o755)
+	must.OK(t, os.MkdirAll(filepath.Join(proj, "unrelated"), 0o755))
 	f, path := openCheckLog(filepath.Join(proj, fmt.Sprintf("run-%d", keepRunLogs+6)), "go test/./...")
 	if f == nil {
 		t.Fatal("no log file")
 	}
-	f.Close()
+	discard.CloseReadOnly(f)
 	if filepath.Base(path) != "go_test_._....log" {
 		t.Fatalf("log name %q", filepath.Base(path))
 	}
@@ -37,5 +40,5 @@ func TestVerifyWritesRunLogsPrunesOldRuns(t *testing.T) {
 	if f2 == nil || second == path {
 		t.Fatalf("second log %q", second)
 	}
-	f2.Close()
+	discard.CloseReadOnly(f2)
 }

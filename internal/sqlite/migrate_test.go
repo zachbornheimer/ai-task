@@ -4,6 +4,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
 // TestGroupsBeforeSizesBecomeLarge: groups planned before migration 0011
@@ -43,7 +45,7 @@ func TestGroupsBeforeSizesBecomeLarge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { must.OK(t, s.Close()) }()
 
 	want := map[string]string{
 		"old-group":      "large",
@@ -87,7 +89,7 @@ func TestBlankProjectBecomesGeneral(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { must.OK(t, s.Close()) }()
 	var id, name, taskProject string
 	if err := s.db.QueryRowContext(ctx, `SELECT id, name FROM projects`).Scan(&id, &name); err != nil {
 		t.Fatalf("exactly one project expected: %v", err)

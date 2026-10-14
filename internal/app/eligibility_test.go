@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
@@ -97,7 +99,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer discard.CloseReadOnly(db)
 	// ready
 	f.add("ready")
 	// blocked
@@ -114,12 +116,12 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	if _, err := f.e.Verify(f.ctx, sf.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeCheckFailed {
 		t.Fatal(err)
 	}
-	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sf.Token})
+	f.release(app.ReleaseRequest{Token: sf.Token})
 	// exhausted (max attempts 2)
 	exhausted := f.add("exhausted")
 	for range 2 {
 		s := f.claim(string(exhausted))
-		f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Failed: true})
+		f.release(app.ReleaseRequest{Token: s.Token, Failed: true})
 		f.c.Advance(time.Hour + time.Minute)
 	}
 	// complete
@@ -146,7 +148,7 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	// is still running when the table is read
 	cooling := f.add("cooling")
 	sc := f.claim(string(cooling))
-	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sc.Token, Failed: true})
+	f.release(app.ReleaseRequest{Token: sc.Token, Failed: true})
 	// failed proof whose cooldown is still running: the case where the
 	// derived status and the SQL prefilter used to disagree
 	fc := f.addWith("failedcooling", "false")
@@ -155,13 +157,13 @@ func TestClaimablePrefilterMatchesDerivedStatus(t *testing.T) {
 	if _, err := f.e.Verify(f.ctx, sfc.Token, verification.ModeComplete); fault.CodeOf(err) != fault.CodeCheckFailed {
 		t.Fatal(err)
 	}
-	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sfc.Token})
+	f.release(app.ReleaseRequest{Token: sfc.Token})
 
 	store, err := sqlite.Open(f.ctx, f.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { must.OK(t, store.Close()) }()
 	proj, _ := f.e.Project(f.ctx, f.proj.ID)
 	now := f.c.Now()
 	err = store.Read(f.ctx, func(tx *sqlite.Tx) error {

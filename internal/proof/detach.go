@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/zachbornheimer/ai-task/internal/discard"
 )
 
 // Start spawns spec in workdir and does not wait for it: the process gets
@@ -22,7 +24,7 @@ func (r *Runner) Start(ct CheckType, spec ProofSpec, workdir string) RunResult {
 	cmd.Dir = workdir
 	cmd.SysProcAttr = detachedProcAttr()
 	if devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0); err == nil {
-		defer devnull.Close()
+		defer discard.CloseReadOnly(devnull)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, devnull
 	}
 	res.StartedAt = time.Now().UTC()

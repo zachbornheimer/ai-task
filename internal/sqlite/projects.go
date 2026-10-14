@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
 )
@@ -64,7 +65,7 @@ func (t *Tx) GetProjectByName(name string) (project.Project, bool, error) {
 	if err != nil {
 		return project.Project{}, false, wrapInternal(err, "get project by name")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var found []project.Project
 	for rows.Next() {
 		p, err := scanProject(rows)
@@ -88,7 +89,7 @@ func (t *Tx) ListProjects() ([]project.Project, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list projects")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []project.Project
 	for rows.Next() {
 		p, err := scanProject(rows)
@@ -106,7 +107,7 @@ func (t *Tx) ProjectRoots() (map[string]project.ID, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list project roots")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	out := map[string]project.ID{}
 	for rows.Next() {
 		var root string

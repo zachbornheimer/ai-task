@@ -9,6 +9,7 @@ import (
 
 	"lukechampine.com/blake3"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
@@ -43,7 +44,7 @@ func (fileBlake3Preset) Evaluate(spec ProofSpec, workdir string) (bool, string, 
 	if err != nil {
 		return false, "", fault.Wrap(err, fault.CodeInvalidInput, "file_blake3 open %q", spec.Subject)
 	}
-	defer f.Close()
+	defer discard.CloseReadOnly(f)
 	h := blake3.New(32, nil)
 	if _, err := io.Copy(h, f); err != nil {
 		return false, "", fault.Wrap(err, fault.CodeInvalidInput, "file_blake3 read %q", spec.Subject)

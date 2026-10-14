@@ -3,6 +3,7 @@ package sqlite
 import (
 	"encoding/json"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -42,7 +43,7 @@ func (t *Tx) Actions(id task.ID) ([]proof.ActionResult, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list actions")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	out := []proof.ActionResult{}
 	for rows.Next() {
 		var a proof.ActionResult

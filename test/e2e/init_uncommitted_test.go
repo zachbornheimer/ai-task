@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
@@ -31,7 +32,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n"), 0o644))
 
 	res := e.ok("init", "--name", "u")
 	if res["created_repo"] != true {
@@ -51,12 +52,12 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	}
 	// The human form says it too.
 	h := newEnv(t)
-	os.WriteFile(filepath.Join(h.cwd, "lib.go"), []byte("package lib\n"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(h.cwd, "lib.go"), []byte("package lib\n"), 0o644))
 	if r := h.runIn(h.cwd, "", []string{"ATASK_OUTPUT=text"}, "init"); !strings.Contains(r.stdout, "untracked") || !strings.Contains(r.stdout, "lib.go") {
 		t.Fatalf("human init output: %s", r.stdout)
 	}
 	// An empty directory has nothing to warn about.
-	if r := newEnv(t).run("init"); r.env["result"].(map[string]any)["warning"] != nil {
+	if r := newEnv(t).run("init"); must.As[map[string]any](r.env["result"])["warning"] != nil {
 		t.Fatalf("init warned about nothing: %s", r.stdout)
 	}
 
@@ -65,7 +66,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	e.git(e.cwd, "config", "user.email", "t@t")
 	rep := e.ok("doctor")
 	ch := doctorCheck(rep, "uncommitted_files")
-	if ch == nil || ch["ok"] != false || ch["severity"] != "warning" || !strings.Contains(ch["message"].(string), "main.go") {
+	if ch == nil || ch["ok"] != false || ch["severity"] != "warning" || !strings.Contains(must.As[string](ch["message"]), "main.go") {
 		t.Fatalf("doctor on untracked files: %v", ch)
 	}
 	if rep["healthy"] != true {
@@ -76,8 +77,8 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != true {
 		t.Fatalf("doctor on a clean checkout: %v", ch)
 	}
-	os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n// edited\n"), 0o644)
-	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != false || !strings.Contains(ch["message"].(string), "main.go") {
+	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n// edited\n"), 0o644))
+	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != false || !strings.Contains(must.As[string](ch["message"]), "main.go") {
 		t.Fatalf("doctor on a modified file: %v", ch)
 	}
 }

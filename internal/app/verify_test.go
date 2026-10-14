@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
@@ -59,7 +61,7 @@ func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
 	a := f.addWith("a", "echo x >> "+counter)
 	s := f.claim(string(a))
 	// Uncommitted edits are fine for diagnostics.
-	os.WriteFile(filepath.Join(s.Workspace, "wip.txt"), []byte("wip"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(s.Workspace, "wip.txt"), []byte("wip"), 0o644))
 	for i := 1; i <= 3; i++ {
 		res, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 		if err != nil || !res.Passed || res.Completed || runs() != i {
@@ -121,11 +123,11 @@ func TestNoEvidenceReuseAndSameSnapshot(t *testing.T) {
 	c := f.apply(plan.AddTask{Key: "c", Title: "c", TaskChecks: []verification.CheckSpec{check("unit-c", "test \"$(cat f.txt)\" = committed-c", true)}}).Created["c"]
 	sc := f.claim(string(c))
 	f.commit(sc.Workspace, "f.txt", "committed-c")
-	os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("edited after commit"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("edited after commit"), 0o644))
 	// Dirty tree: refused outright.
 	_, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeNotReady)
-	os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("committed-c"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("committed-c"), 0o644))
 	f.complete(sc)
 }
 
@@ -212,7 +214,7 @@ func TestLateBlockerPreventsCompletion(t *testing.T) {
 		t.Fatal("claim lost")
 	}
 	// Release, complete the prerequisite, resume and complete.
-	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "waiting on pre"})
+	f.release(app.ReleaseRequest{Token: s.Token, Note: "waiting on pre"})
 	if f.status(string(a)) != task.StatusBlocked {
 		t.Fatal("not blocked")
 	}
@@ -266,7 +268,7 @@ func TestContractChangeDuringVerificationFailsClosed(t *testing.T) {
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Acceptance: plan.Replace([]string{"stricter"})}}}); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(flag, []byte("1"), 0o644)
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
 	err := <-done
 	wantCode(t, err, fault.CodeConflict)
 	if f.status(string(a)) == task.StatusComplete {
@@ -291,7 +293,7 @@ func TestVerifierCrashRecovery(t *testing.T) {
 	if st := f.status(string(a)); st != task.StatusVerifying {
 		t.Fatalf("run should still be recorded running right after the crash: %s", st)
 	}
-	os.WriteFile(flag, []byte("1"), 0o644)
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
 	f.c.Advance(time.Hour)
 	// Reconcile: no phantom "verifying"; another worker resumes.
 	if st := f.status(string(a)); st == task.StatusVerifying {
@@ -344,7 +346,7 @@ func TestVacuousPoliciesFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer discard.CloseReadOnly(db)
 	setPolicy := func(id task.ID, body string) {
 		t.Helper()
 		if _, err := db.Exec(`UPDATE tasks SET policy_json = ? WHERE id = ?`, body, id); err != nil {
@@ -431,7 +433,7 @@ func TestOrphanedDiagnosticRunsAreReconciled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer discard.CloseReadOnly(db)
 	var attemptID int64
 	if err := db.QueryRow(`SELECT id FROM execution_attempts WHERE task_id = ? ORDER BY seq DESC LIMIT 1`, a).Scan(&attemptID); err != nil {
 		t.Fatal(err)
@@ -442,7 +444,7 @@ func TestOrphanedDiagnosticRunsAreReconciled(t *testing.T) {
 	if v, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true); v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunRunning {
 		t.Fatal("setup: diagnostic run not visible as running")
 	}
-	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token})
+	f.release(app.ReleaseRequest{Token: s.Token})
 	v, _ := f.e.Show(f.ctx, f.proj.ID, string(a), true)
 	if v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunError || v.Failures != 0 {
 		t.Fatalf("orphaned diagnostic run: %+v failures=%d", v.Verification.Task, v.Failures)

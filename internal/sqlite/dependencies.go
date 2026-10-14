@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/dependency"
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 )
@@ -67,7 +68,7 @@ func (t *Tx) RequirementIDs(id task.ID) ([]task.ID, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list requirements")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []task.ID
 	for rows.Next() {
 		var n task.ID
@@ -98,12 +99,12 @@ func (t *Tx) neighbors(q string, id task.ID) ([]Record, error) {
 	for rows.Next() {
 		var n task.ID
 		if err := rows.Scan(&n); err != nil {
-			rows.Close()
+			discard.CloseReadOnly(rows)
 			return nil, wrapInternal(err, "scan neighbor")
 		}
 		ids = append(ids, n)
 	}
-	rows.Close()
+	discard.CloseReadOnly(rows)
 	out := make([]Record, 0, len(ids))
 	for _, n := range ids {
 		r, err := t.GetRecord(n)
@@ -121,7 +122,7 @@ func (t *Tx) ProjectEdges(pid project.ID) ([]dependency.Edge, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list edges")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []dependency.Edge
 	for rows.Next() {
 		var e dependency.Edge

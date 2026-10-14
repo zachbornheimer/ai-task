@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
@@ -117,7 +118,7 @@ func (t *Tx) RecentJobs(pid project.ID, name string, limit int) ([]Job, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list jobs")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []Job
 	for rows.Next() {
 		j, err := scanJob(rows)
@@ -135,7 +136,7 @@ func (t *Tx) JobsForProject(pid project.ID, limit int) ([]Job, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list jobs")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []Job
 	for rows.Next() {
 		j, err := scanJob(rows)

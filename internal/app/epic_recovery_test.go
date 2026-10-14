@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -42,7 +43,7 @@ func TestEpicRunReconciledAfterVerifierDies(t *testing.T) {
 	cancel()
 	<-done
 
-	os.WriteFile(flag, []byte("1"), 0o644)
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
 	f.c.Advance(2 * time.Hour) // the verifier's lease expires
 	if _, err := f.e.Summary(f.ctx, f.proj.ID); err != nil {
 		t.Fatal(err)

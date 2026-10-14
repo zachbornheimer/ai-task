@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -113,8 +114,8 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 	} else if f, err := os.CreateTemp(root, ".doctor-*"); err != nil {
 		add("workspace_root", false, "error", fmt.Sprintf("workspace root %s is not writable: %v", root, err), "fix the permissions on the directory")
 	} else {
-		f.Close()
-		os.Remove(f.Name())
+		discard.CloseReadOnly(f) // probe file is empty; nothing was written
+		_ = os.Remove(f.Name())  // best-effort cleanup of the probe file
 		add("workspace_root", true, "info", fmt.Sprintf("worktrees under %s", root), "")
 	}
 

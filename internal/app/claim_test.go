@@ -15,6 +15,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -101,7 +102,8 @@ func TestTokenFencingAcrossExpiryAndSupersession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.e.Log(f.ctx, s1.Token, execution.LogEntry{Done: "half", Next: "other half", Learned: "x is y"})
+	_, err = f.e.Log(f.ctx, s1.Token, execution.LogEntry{Done: "half", Next: "other half", Learned: "x is y"})
+	must.OK(t, err)
 	f.c.Advance(31 * time.Minute)
 	if f.status(string(a)) != task.StatusInterrupted {
 		t.Fatalf("%s", f.status(string(a)))
@@ -203,12 +205,12 @@ func TestWaitingClaimDoneAndStalled(t *testing.T) {
 	x := f.addWith("x", "exit 1")
 	p, _ := f.e.Project(f.ctx, f.proj.ID)
 	p.MaxAttempts = 1
-	f.e.UpdateProject(f.ctx, p)
+	must.OK(t, f.e.UpdateProject(f.ctx, p))
 	sx := f.claim(string(x))
 	f.commit(sx.Workspace, "x.txt", "x")
 	_, err = f.e.Verify(f.ctx, sx.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeCheckFailed)
-	f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: sx.Token})
+	f.release(app.ReleaseRequest{Token: sx.Token})
 	if f.status(string(x)) != task.StatusNeedsAttention {
 		v := f.show(string(x))
 		pp, _ := f.e.Project(f.ctx, f.proj.ID)
@@ -247,7 +249,7 @@ func TestReleaseAndCooldown(t *testing.T) {
 	f := newFixture(t)
 	p, _ := f.e.Project(f.ctx, f.proj.ID)
 	p.RetryCooldown = 10 * time.Minute
-	f.e.UpdateProject(f.ctx, p)
+	must.OK(t, f.e.UpdateProject(f.ctx, p))
 	a := f.add("a")
 	s := f.claim(string(a))
 	v, err := f.e.ReleaseTask(f.ctx, app.ReleaseRequest{Token: s.Token, Note: "giving up for now", Failed: true})
@@ -322,7 +324,7 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	a := f.add("a")
 	sA := f.claim(string(a))
 	f.commit(sA.Workspace, "a.txt", "from A")
-	os.WriteFile(filepath.Join(sA.Workspace, "wip.txt"), []byte("uncommitted by A"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(sA.Workspace, "wip.txt"), []byte("uncommitted by A"), 0o644))
 	// A freezes; its lease runs out; B takes over. A's worktree is
 	// quarantined; B gets a fresh one at the task path on the same branch.
 	f.c.Advance(execution.DefaultLease + time.Minute)
@@ -345,14 +347,14 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 		t.Fatal("token discovery crossed the quarantine")
 	}
 	staleGitdir := strings.TrimSpace(f.git(stale, "rev-parse", "--absolute-git-dir"))
-	filepath.WalkDir(staleGitdir, func(path string, d fs.DirEntry, err error) error {
+	must.OK(t, filepath.WalkDir(staleGitdir, func(path string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
 			if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), string(sB.Token)) {
 				t.Fatalf("successor token reachable from the quarantine at %s", path)
 			}
 		}
 		return nil
-	})
+	}))
 	// A keeps working, oblivious: its commits land on a detached HEAD and
 	// never reach the task branch or B's files.
 	tip := strings.TrimSpace(f.git(sB.Workspace, "rev-parse", "HEAD"))

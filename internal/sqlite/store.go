@@ -20,6 +20,7 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver; see docs/decisions/0002-sqlite.md
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
@@ -58,8 +59,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	s := &Store{db: db, path: path}
 	if err := s.migrate(ctx); err != nil {
-		db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
 }
@@ -172,12 +172,12 @@ func (s *Store) migrate(ctx context.Context) error {
 		for rows.Next() {
 			var v int64
 			if err := rows.Scan(&v); err != nil {
-				rows.Close()
+				discard.CloseReadOnly(rows)
 				return err
 			}
 			applied[v] = true
 		}
-		rows.Close()
+		discard.CloseReadOnly(rows)
 		for _, name := range names {
 			version, err := strconv.ParseInt(strings.SplitN(name, "_", 2)[0], 10, 64)
 			if err != nil {

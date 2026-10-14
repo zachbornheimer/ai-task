@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 )
 
@@ -22,7 +23,7 @@ func TestWriteCancelledByContextIsNotInternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { must.OK(t, s.Close()) }()
 	for _, tc := range []struct {
 		name string
 		make func() (context.Context, context.CancelFunc)

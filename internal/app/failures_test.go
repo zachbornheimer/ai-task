@@ -9,6 +9,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -64,7 +65,7 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	f.waitStatus(string(c), task.StatusVerifying)
 	_, err = f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeConflict)
-	os.WriteFile(flag, []byte("1"), 0o644)
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}

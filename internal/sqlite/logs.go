@@ -3,6 +3,7 @@ package sqlite
 import (
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/task"
 )
@@ -46,7 +47,7 @@ func (t *Tx) Logs(id task.ID, limit, offset int) ([]execution.RecordedLog, error
 	if err != nil {
 		return nil, wrapInternal(err, "list logs")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	return scanLogs(rows)
 }
 
@@ -63,7 +64,7 @@ func (t *Tx) Learnings(id task.ID, limit int) ([]string, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "learnings")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []string
 	for rows.Next() {
 		var s string
@@ -106,7 +107,7 @@ func (t *Tx) Handoff(id task.ID) (execution.Handoff, error) {
 	if err != nil {
 		return h, wrapInternal(err, "learnings")
 	}
-	defer lrows.Close()
+	defer discard.CloseReadOnly(lrows)
 	for lrows.Next() {
 		var s string
 		if err := lrows.Scan(&s); err != nil {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
@@ -65,7 +66,7 @@ func TestOrphanedVerificationRunIsReaped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer discard.CloseReadOnly(db)
 	if err := db.QueryRow(`SELECT status, summary FROM verification_runs ORDER BY id DESC LIMIT 1`).Scan(&status, &summary); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +131,7 @@ func TestRunPulseStopsWithRun(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer db.Close()
+		defer discard.CloseReadOnly(db)
 		var at int64
 		if err := db.QueryRow(`SELECT heartbeat_at FROM verification_runs ORDER BY id DESC LIMIT 1`).Scan(&at); err != nil {
 			t.Fatal(err)

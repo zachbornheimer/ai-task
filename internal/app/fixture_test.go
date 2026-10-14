@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
@@ -73,7 +75,7 @@ func newGitFixture(t *testing.T) *fixture {
 	}
 	f := &fixture{t: t, ctx: context.Background(), c: newClock(), path: filepath.Join(t.TempDir(), "at.db"), repo: filepath.Join(t.TempDir(), "repo")}
 	f.e = f.open()
-	os.MkdirAll(f.repo, 0o755)
+	must.OK(t, os.MkdirAll(f.repo, 0o755))
 	f.git(f.repo, "init", "-q", "-b", "main")
 	f.git(f.repo, "config", "user.name", "t")
 	f.git(f.repo, "config", "user.email", "t@t")
@@ -94,7 +96,7 @@ func (f *fixture) open() *app.Engine {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	f.t.Cleanup(func() { e.Close() })
+	f.t.Cleanup(func() { must.OK(f.t, e.Close()) })
 	return e
 }
 
@@ -106,7 +108,7 @@ func (f *fixture) git(dir string, args ...string) string {
 // commit writes a file and commits in dir, returning the new HEAD.
 func (f *fixture) commit(dir, file, content string) string {
 	f.t.Helper()
-	os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644)
+	must.OK(f.t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644))
 	f.git(dir, "add", file)
 	f.git(dir, "commit", "-q", "-m", content)
 	return f.git(dir, "rev-parse", "HEAD")
@@ -124,7 +126,7 @@ func (f *fixture) sql(query string, args ...any) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	defer db.Close()
+	defer discard.CloseReadOnly(db)
 	if _, err := db.Exec(query, args...); err != nil {
 		f.t.Fatal(err)
 	}
@@ -145,7 +147,7 @@ func (f *fixture) stampRegression() {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	defer db.Close()
+	defer discard.CloseReadOnly(db)
 	rows, err := db.Query(`SELECT id, policy_json FROM tasks WHERE project_id = ? AND kind = 'task'`, f.proj.ID)
 	if err != nil {
 		f.t.Fatal(err)
@@ -158,7 +160,7 @@ func (f *fixture) stampRegression() {
 		}
 		bodies[id] = body
 	}
-	rows.Close()
+	discard.CloseReadOnly(rows)
 	for id, body := range bodies {
 		var pol verification.Policy
 		if body != "" {
@@ -302,4 +304,11 @@ func (f *fixture) waitStatus(ref string, want task.Status) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	f.t.Fatalf("%s never reached %s (now %s)", ref, want, f.status(ref))
+}
+
+// release releases the claim behind the request and fails the test on error.
+func (f *fixture) release(req app.ReleaseRequest) {
+	f.t.Helper()
+	_, err := f.e.ReleaseTask(f.ctx, req)
+	must.OK(f.t, err)
 }

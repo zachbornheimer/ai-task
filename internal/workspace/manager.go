@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
@@ -215,7 +216,10 @@ func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cl
 	if err != nil {
 		return "", nil, fault.Wrap(err, fault.CodeNotReady, "create snapshot dir")
 	}
-	os.Remove(path) // git worktree add wants to create it
+	// git worktree add wants to create the path itself.
+	if err := os.Remove(path); err != nil {
+		return "", nil, fault.Wrap(err, fault.CodeNotReady, "clear snapshot dir %s", path)
+	}
 	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", "--detach", path, revision); err != nil {
 		return "", nil, fault.Wrap(err, fault.CodeNotReady, "snapshot %s", revision)
 	}
@@ -405,16 +409,17 @@ func (m Manager) repoLock(ctx context.Context, file, what string) (func(), error
 	for {
 		locked, err := tryLockFile(f)
 		if err != nil {
-			f.Close()
+			discard.CloseReadOnly(f)
 			return nil, fault.Wrap(err, fault.CodeNotReady, "take %s lock", what)
 		}
 		if locked {
-			fmt.Fprintf(f, "%d\n", os.Getpid())
-			return func() { unlockFile(f); f.Close() }, nil
+			// The pid is informational only; a failed write must not lose the lock.
+			discard.Writef(f, "%d\n", os.Getpid())
+			return func() { unlockFile(f); discard.CloseReadOnly(f) }, nil
 		}
 		select {
 		case <-ctx.Done():
-			f.Close()
+			discard.CloseReadOnly(f)
 			return nil, fault.Wrap(ctx.Err(), fault.CodeBaseConflict, "waiting for the %s lock %s", what, path)
 		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
 		}

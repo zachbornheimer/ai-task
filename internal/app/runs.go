@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
@@ -137,12 +138,12 @@ func (e *Engine) execStep(ctx context.Context, dir string, step verification.Ste
 	cmd := proof.Command{Argv: c.Command, Dir: filepath.Join(dir, c.Dir), Env: append(checkEnv(dir), run.env...), Cap: shortest(c.Timeout, run.suiteLeft)}
 	logFile, logPath := openCheckLog(run.logDir, c.ID)
 	if logFile != nil {
-		defer logFile.Close()
+		defer func() { _ = logFile.Close() }() // advisory log: the check result is authoritative
 		where := c.Dir
 		if where == "" {
 			where = "."
 		}
-		fmt.Fprintf(logFile, "$ %s\n# check %s in %s at %s\n\n", shellJoin(c.Command), c.ID, where, revision)
+		discard.Writef(logFile, "$ %s\n# check %s in %s at %s\n\n", shellJoin(c.Command), c.ID, where, revision)
 		cmd.Log, ev.Log = logFile, logPath
 	}
 	rr, res := run.runner.RunCommand(ctx, checkType(step), spec, cmd)
@@ -166,11 +167,11 @@ func (e *Engine) execStep(ctx context.Context, dir string, step verification.Ste
 		}
 	}
 	if logFile != nil {
-		fmt.Fprintf(logFile, "\n# %s: exit=%d after %s", ev.Outcome, ev.ExitCode, ev.FinishedAt.Sub(ev.StartedAt).Round(time.Millisecond))
+		discard.Writef(logFile, "\n# %s: exit=%d after %s", ev.Outcome, ev.ExitCode, ev.FinishedAt.Sub(ev.StartedAt).Round(time.Millisecond))
 		if ev.Message != "" {
-			fmt.Fprintf(logFile, " (%s)", ev.Message)
+			discard.Writef(logFile, " (%s)", ev.Message)
 		}
-		fmt.Fprintln(logFile)
+		discard.Writeln(logFile)
 	}
 	return ev
 }

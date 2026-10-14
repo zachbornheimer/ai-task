@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/task"
@@ -123,7 +124,7 @@ func (t *Tx) Attempts(id task.ID) ([]execution.Attempt, error) {
 	if err != nil {
 		return nil, wrapInternal(err, "list attempts")
 	}
-	defer rows.Close()
+	defer discard.CloseReadOnly(rows)
 	var out []execution.Attempt
 	for rows.Next() {
 		var a execution.Attempt

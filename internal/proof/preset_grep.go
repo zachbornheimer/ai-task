@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
@@ -93,7 +94,7 @@ func matchLine(path string, re *regexp.Regexp) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer discard.CloseReadOnly(f)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(nil, 1<<20)
 	for n := 1; sc.Scan(); n++ {

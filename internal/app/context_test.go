@@ -9,6 +9,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/must"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -37,10 +38,10 @@ func TestContextCarriesEverythingAnAgentAskedFor(t *testing.T) {
 	s2 := f.claim(string(a))
 	// Leave an uncommitted edit: the context lists the path, not Git's
 	// status code.
-	os.WriteFile(filepath.Join(s2.Workspace, "store.go"), []byte("package store // wip\n"), 0o644)
+	must.OK(t, os.WriteFile(filepath.Join(s2.Workspace, "store.go"), []byte("package store // wip\n"), 0o644))
 	// Worktrunk present: the prompt names its steps; absent: plain git.
 	bin := t.TempDir()
-	os.WriteFile(filepath.Join(bin, "wt"), []byte("#!/bin/sh\n"), 0o755)
+	must.OK(t, os.WriteFile(filepath.Join(bin, "wt"), []byte("#!/bin/sh\n"), 0o755))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cx, err := f.e.Context(f.ctx, f.proj.ID, "", s2.Token, false)
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -39,7 +40,7 @@ func main() {
 }
 
 // Run is the whole host flow; it is also exercised by the package test.
-func run(ctx context.Context, repo, db string, workers int, out *os.File) error {
+func run(ctx context.Context, repo, db string, workers int, out *os.File) (err error) {
 	if repo == "" {
 		var err error
 		if repo, err = os.MkdirTemp("", "at-example-repo-"); err != nil {
@@ -60,7 +61,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	if err != nil {
 		return err
 	}
-	defer eng.Close()
+	defer func() { err = errors.Join(err, eng.Close()) }()
 	proj, err := eng.InitProject(ctx, "example", repo)
 	if err != nil {
 		return err
@@ -102,7 +103,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	if !stable {
 		return errors.New("review did not converge")
 	}
-	fmt.Fprintln(out, "plan ready:")
+	sayln(out, "plan ready:")
 	printPlan(ctx, eng, proj.ID, out)
 
 	// Step C: N workers drain the graph continuously. No batch barriers.
@@ -122,7 +123,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) error 
 	for err := range errs {
 		return err
 	}
-	fmt.Fprintln(out, "finished:")
+	sayln(out, "finished:")
 	printPlan(ctx, eng, proj.ID, out)
 	sum, err := eng.Summary(ctx, proj.ID)
 	if err != nil {
@@ -145,7 +146,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 			var fe *at.Error
 			if errors.As(err, &fe) {
 				if sum, ok := fe.Details.(at.Summary); ok {
-					fmt.Fprintf(out, "worker %d: stalled: %v\n", n, sum.Reasons)
+					say(out, "worker %d: stalled: %v\n", n, sum.Reasons)
 				}
 			}
 			printPlan(ctx, eng, project, out)
@@ -158,7 +159,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 			// engine backs off, and keep draining other work. A failed
 			// Verify(complete) already ended nothing; the claim is still
 			// ours, so release it for the next attempt.
-			fmt.Fprintf(out, "worker %d: %s agent error: %v\n", n, session.Task.ID, err)
+			say(out, "worker %d: %s agent error: %v\n", n, session.Task.ID, err)
 			_ = eng.Log(ctx, session.Token, at.LogEntry{Note: "agent error: " + err.Error()})
 			_ = eng.Release(ctx, at.ReleaseRequest{Token: session.Token, Note: "released after agent error", Failed: true})
 		}
@@ -171,7 +172,7 @@ func worker(ctx context.Context, eng *at.Store, project at.ProjectID, n int, out
 func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *os.File) error {
 	stop := heartbeat(ctx, eng, s.Token)
 	defer stop()
-	fmt.Fprintf(out, "worker %d: claimed %s (%s)\n", n, s.Task.ID, s.Task.Title)
+	say(out, "worker %d: claimed %s (%s)\n", n, s.Task.ID, s.Task.Title)
 	if err := eng.Log(ctx, s.Token, at.LogEntry{Done: "read the contract", Next: "implement " + s.Task.Title}); err != nil {
 		return err
 	}
@@ -203,7 +204,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	}
 	switch {
 	case res.Completed:
-		fmt.Fprintf(out, "worker %d: %s complete\n", n, s.Task.ID)
+		say(out, "worker %d: %s complete\n", n, s.Task.ID)
 	}
 	return nil
 }
@@ -270,18 +271,18 @@ func fakeReviewer(current at.PlanSnapshot) []at.Change {
 func printPlan(ctx context.Context, eng *at.Store, project at.ProjectID, out *os.File) {
 	snap, err := eng.List(ctx, at.ListQuery{ProjectID: project, Filter: at.FilterAll})
 	if err != nil {
-		fmt.Fprintln(out, err)
+		sayln(out, err)
 		return
 	}
 	for _, g := range snap.Groups {
-		fmt.Fprintf(out, "  group %s %s (%d/%d)\n", g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
+		say(out, "  group %s %s (%d/%d)\n", g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
 	}
 	for _, t := range snap.Tasks {
-		fmt.Fprintf(out, "  %s %s  %s [%s]", at.Glyph(t.Status, t.Started), t.ID, t.Title, t.Status)
+		say(out, "  %s %s  %s [%s]", at.Glyph(t.Status, t.Started), t.ID, t.Title, t.Status)
 		if r := t.Verification.Complete; r != nil && r.Summary != "" {
-			fmt.Fprintf(out, " — %s: %s", r.Status, r.Summary)
+			say(out, " — %s: %s", r.Status, r.Summary)
 		}
-		fmt.Fprintln(out)
+		sayln(out)
 	}
 }
 
@@ -312,3 +313,9 @@ func git(dir string, args ...string) error {
 	}
 	return nil
 }
+
+// say and sayln print progress to out. A failed progress write is not worth
+// aborting the demo for, so the error is dropped on purpose.
+func say(out io.Writer, format string, a ...any) { _, _ = fmt.Fprintf(out, format, a...) }
+
+func sayln(out io.Writer, a ...any) { _, _ = fmt.Fprintln(out, a...) }

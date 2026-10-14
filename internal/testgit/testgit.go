@@ -54,7 +54,7 @@ func IsolateMain(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "testgit:", err)
 		return 1
 	}
-	defer os.RemoveAll(home)
+	defer func() { _ = os.RemoveAll(home) }() // temp dir; the OS reaps leftovers
 	env, err := Overrides(home)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "testgit:", err)
@@ -62,7 +62,10 @@ func IsolateMain(m *testing.M) int {
 	}
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
-		os.Setenv(k, v)
+		if err := os.Setenv(k, v); err != nil {
+			fmt.Fprintln(os.Stderr, "testgit:", err)
+			return 1
+		}
 	}
 	return m.Run()
 }
