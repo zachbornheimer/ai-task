@@ -35,7 +35,7 @@ func TestWriteCancelledByContextIsNotInternal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			wctx, cancel := tc.make()
 			defer cancel()
-			err := s.Write(wctx, func(tx *sqlite.Tx) error {
+			err := s.Write(wctx, func(_ *sqlite.Tx) error {
 				if tc.name == "cancel" {
 					cancel()
 				}

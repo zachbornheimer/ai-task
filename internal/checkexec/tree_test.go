@@ -38,7 +38,7 @@ func TestTimeoutKillsChildProcesses(t *testing.T) {
 	if !r.TimedOut || r.Err == nil || !strings.Contains(r.Err.Error(), "timed out") {
 		t.Fatalf("not reported as timed out: %+v", r)
 	}
-	b, err := os.ReadFile(pidfile)
+	b, err := os.ReadFile(filepath.Clean(pidfile))
 	if err != nil {
 		t.Fatalf("the check never recorded its child: %v", err)
 	}

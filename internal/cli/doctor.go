@@ -32,7 +32,7 @@ func runDoctor(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	rep.Checks = append(rep.Checks, worktrunkChecks(ctx, rep.Root)...)
+	rep.Checks = append(rep.Checks, worktrunkChecks(rep.Root)...)
 	if !rep.Healthy {
 		return &fault.Error{Code: fault.CodeNotReady, Message: "the project is not ready to be worked; see the report", Details: rep}
 	}
@@ -53,7 +53,8 @@ func renderDoctor(w io.Writer, rep app.DoctorReport) {
 		if !ch.OK && ch.Remedy != "" {
 			say(w, "    fix: %s\n", ch.Remedy)
 		}
-		for _, ev := range ch.Evidence {
+		for i := range ch.Evidence {
+			ev := &ch.Evidence[i]
 			say(w, "    %s %s exit=%d\n", ev.CheckID, ev.Outcome, ev.ExitCode)
 			if t := strings.TrimSpace(ev.Stderr); t != "" {
 				say(w, "      %s\n", strings.ReplaceAll(tail(t, 400), "\n", "\n      "))
@@ -78,13 +79,13 @@ func tail(s string, n int) string {
 // commit-message generation (else `wt step commit` writes a fallback
 // message) and project hooks that need a one-time approval before a
 // headless agent can run them.
-func worktrunkChecks(ctx context.Context, root string) []app.DoctorCheck {
+func worktrunkChecks(root string) []app.DoctorCheck {
 	if _, err := exec.LookPath("wt"); err != nil {
 		return nil
 	}
 	var out []app.DoctorCheck
 	home, _ := os.UserHomeDir()
-	cfg, _ := os.ReadFile(filepath.Join(home, ".config", "worktrunk", "config.toml"))
+	cfg, _ := os.ReadFile(filepath.Clean(filepath.Join(home, ".config", "worktrunk", "config.toml")))
 	if strings.Contains(string(cfg), "[commit.generation]") {
 		out = append(out, app.DoctorCheck{ID: "worktrunk_commits", OK: true, Severity: "info", Message: "wt step commit generates commit messages"})
 	} else {

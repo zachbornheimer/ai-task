@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	streamAllPass = `{"Action":"run","Test":"TestA"}
+	streamAllGreen = `{"Action":"run","Test":"TestA"}
 {"Action":"pass","Test":"TestA"}
 {"Action":"pass","Package":"p"}
 `
@@ -54,10 +54,10 @@ func TestPresetGoTest(t *testing.T) {
 			pass            bool
 			reason          string
 		}{
-			{"all pass", streamAllPass, "", 0, true, ""},
+			{"all pass", streamAllGreen, "", 0, true, ""},
 			{"one fail", streamOneFail, "", 1, false, "fail"},
 			{"named test did not run", streamNoTests, "TestA", 0, false, "named test did not run"},
-			{"name matches", streamAllPass, "^TestA$", 0, true, ""},
+			{"name matches", streamAllGreen, "^TestA$", 0, true, ""},
 			{"name matches only a failing test", streamOneFail, "TestB", 1, false, "fail"},
 		}
 		for _, c := range cases {
@@ -90,7 +90,7 @@ func TestPresetGoTest(t *testing.T) {
 			"x_test.go": "package tmp\n\nimport \"testing\"\n\nfunc TestGood(t *testing.T) {}\nfunc TestBad(t *testing.T) { t.Fatal(\"no\") }\n",
 		}
 		for n, c := range files {
-			if err := os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, n), []byte(c), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -90,7 +90,7 @@ func firstMatch(workdir, root string, re *regexp.Regexp) (string, error) {
 }
 
 func matchLine(path string, re *regexp.Regexp) (int, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return 0, err
 	}

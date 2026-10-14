@@ -35,7 +35,8 @@ func (e *Engine) PruneWorkspaces(ctx context.Context, pid project.ID) (PruneResu
 		return res, err
 	}
 	mgr := e.manager(proj)
-	for _, r := range records {
+	for i := range records {
+		r := &records[i]
 		if r.Task.Kind != task.KindTask {
 			continue
 		}

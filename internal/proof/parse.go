@@ -60,7 +60,7 @@ func (r *Registry) Parse(s string) (ProofSpec, error) {
 func takeOptions(toks []token, declared []string, dst map[string]string) []token {
 	for len(toks) > 0 {
 		m := optionPair.FindStringSubmatch(toks[len(toks)-1].text)
-		if m == nil || !contains(declared, m[1]) {
+		if len(m) < 3 || !contains(declared, m[1]) {
 			break
 		}
 		dst[m[1]] = m[2]

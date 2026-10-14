@@ -68,7 +68,7 @@ func unknownVerbDocumented(doc, verb string) bool {
 func readAgentContractDoc(t *testing.T) string {
 	t.Helper()
 	p := filepath.Join("..", "..", "docs", "agent-contract.md")
-	b, err := os.ReadFile(p)
+	b, err := os.ReadFile(filepath.Clean(p))
 	if err != nil {
 		t.Fatalf("read %s: %v", p, err)
 	}

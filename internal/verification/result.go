@@ -25,8 +25,9 @@ func Judge(p Policy, evidence []Evidence) Verdict {
 		return Verdict{Passed: false, Summary: "no required checks: nothing can be proven (optional checks are informational)"}
 	}
 	byID := map[string]Evidence{}
-	for _, e := range evidence {
-		byID[e.CheckID] = e
+	for i := range evidence {
+		e := &evidence[i]
+		byID[e.CheckID] = *e
 	}
 	var failed, missing, optionalFailed, timedOut []string
 	passed := 0

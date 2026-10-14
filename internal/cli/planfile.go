@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -54,8 +55,7 @@ func readPlanItems(name string, r io.Reader) ([]planItem, error) {
 		}
 		generic = yamlToJSON(y)
 	}
-	switch v := generic.(type) {
-	case map[string]any:
+	if v, ok := generic.(map[string]any); ok {
 		for _, k := range []string{"tasks", "items"} {
 			if list, ok := v[k].([]any); ok {
 				generic = list
@@ -136,7 +136,7 @@ func openPlanFile(path string, stdin io.Reader) (string, io.ReadCloser, error) {
 	if path == "-" {
 		return "stdin", io.NopCloser(stdin), nil
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return "", nil, usage("%v", err)
 	}

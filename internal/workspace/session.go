@@ -56,7 +56,7 @@ func LoadToken(ctx context.Context, dir string) string {
 	if err != nil {
 		return ""
 	}
-	b, err := os.ReadFile(filepath.Join(g, tokenFile))
+	b, err := os.ReadFile(filepath.Clean(filepath.Join(g, tokenFile)))
 	if err != nil {
 		return ""
 	}

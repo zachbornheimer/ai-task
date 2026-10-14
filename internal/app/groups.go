@@ -54,6 +54,14 @@ type targetHead struct {
 	known bool
 }
 
+// unresolvedReason says why the target branch could not be resolved.
+func (h targetHead) unresolvedReason() (string, bool) {
+	if h.err == nil {
+		return "", false
+	}
+	return fault.MessageOf(h.err), true
+}
+
 // resolveTargetHead reads the project and resolves its target branch
 // outside any transaction. A project that cannot be read yields the zero
 // value; the caller's own read reports that error.
@@ -79,11 +87,12 @@ func (e *Engine) projectHeads(ctx context.Context) (map[project.ID]targetHead, e
 		return nil, err
 	}
 	out := make(map[project.ID]targetHead, len(ps))
-	for _, p := range ps {
+	for i := range ps {
+		p := &ps[i]
 		if p.IsGeneral() || p.RootPath == "" {
 			continue
 		}
-		out[p.ID] = e.targetHeadOf(ctx, p)
+		out[p.ID] = e.targetHeadOf(ctx, *p)
 	}
 	return out, nil
 }
@@ -115,7 +124,8 @@ func hasUnverifiedEpic(tx *sqlite.Tx, id task.ID) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, c := range children {
+	for i := range children {
+		c := &children[i]
 		if c.Task.Kind != task.KindGroup {
 			continue
 		}
@@ -135,9 +145,10 @@ func latestGroupRun(tx *sqlite.Tx, id task.ID) (*sqlite.Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range slices.Backward(runs) {
+	for i := len(runs) - 1; i >= 0; i-- {
+		r := &runs[i]
 		if r.Mode == verification.ModeGroup {
-			return &r, nil
+			return r, nil
 		}
 	}
 	return nil, nil
@@ -177,11 +188,11 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 	if !head.known {
 		return gv, fault.NewInternal("group %s: the target head was not resolved for this view", rec.Task.ID)
 	}
-	if head.err != nil {
+	if reason, unresolved := head.unresolvedReason(); unresolved {
 		// Without the target the epic can neither run nor be judged
 		// current: say so rather than reading as waiting for a verifier.
 		gv.Status = "error"
-		gv.Summary = fmt.Sprintf("cannot resolve target branch %s: %s", proj.TargetBranch, fault.MessageOf(head.err))
+		gv.Summary = fmt.Sprintf("cannot resolve target branch %s: %s", proj.TargetBranch, reason)
 		return gv, nil
 	}
 	gv.Status = "pending"
@@ -196,7 +207,7 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 			return gv, nil
 		}
 	}
-	if next, _, err := jobBackoff(tx, proj.ID, groupJobName(rec.Task.ID)); err != nil {
+	if next, err := jobBackoff(tx, proj.ID, groupJobName(rec.Task.ID)); err != nil {
 		return gv, err
 	} else if next.After(now) {
 		gv.NextRetry = &next
@@ -236,7 +247,8 @@ func groupRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, erro
 		return nil, err
 	}
 	var out []workspace.Requirement
-	for _, c := range children {
+	for i := range children {
+		c := &children[i]
 		switch {
 		case c.Task.Archived():
 		case c.Task.Kind == task.KindGroup:
@@ -358,11 +370,12 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 		if err != nil {
 			return err
 		}
-		for _, r := range records {
+		for i := range records {
+			r := &records[i]
 			if r.Task.Kind != task.KindGroup || r.CompletedAt != nil || (only != "" && r.Task.ID != only) {
 				continue
 			}
-			ready, err := e.groupReady(tx, r, proj, now)
+			ready, err := e.groupReady(tx, *r, proj, now)
 			if err != nil || !ready {
 				if err != nil {
 					return err
@@ -389,7 +402,7 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			if last != nil && last.Status == sqlite.RunFailed && last.Revision == input && last.PolicyDigest == effectivePolicy(r.Task, proj).Digest() && only == "" {
 				continue
 			}
-			if next, _, err := jobBackoff(tx, pid, name); err != nil {
+			if next, err := jobBackoff(tx, pid, name); err != nil {
 				return err
 			} else if next.After(now) && only == "" {
 				continue
@@ -403,7 +416,7 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 			if err != nil {
 				return err
 			}
-			job = groupJob{id: jobID, owner: owner, proj: proj, rec: r, runID: runID, head: head.rev, requirements: requirements}
+			job = groupJob{id: jobID, owner: owner, proj: proj, rec: *r, runID: runID, head: head.rev, requirements: requirements}
 			found = true
 			return nil
 		}

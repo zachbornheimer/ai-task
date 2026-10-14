@@ -40,7 +40,7 @@ func TestIDs(t *testing.T) {
 			t.Errorf("ParseID(%q) = %v, want INVALID_INPUT", bad, err)
 		}
 	}
-	if NewID() == NewID() {
+	if first, second := NewID(), NewID(); first == second {
 		t.Fatal("ids must be random")
 	}
 }
@@ -49,18 +49,18 @@ func TestLocateRootMainAndLinkedWorktree(t *testing.T) {
 	base := t.TempDir()
 	base, _ = CanonicalRoot(base)
 	main := filepath.Join(base, "repo")
-	if err := os.MkdirAll(filepath.Join(main, ".git", "worktrees", "feat"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(main, ".git", "worktrees", "feat"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(main, "sub", "deeper"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(main, "sub", "deeper"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	linked := filepath.Join(base, "repo.feat")
-	if err := os.MkdirAll(filepath.Join(linked, "pkg"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(linked, "pkg"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	gitFile := "gitdir: " + filepath.Join(main, ".git", "worktrees", "feat") + "\n"
-	if err := os.WriteFile(filepath.Join(linked, ".git"), []byte(gitFile), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(linked, ".git"), []byte(gitFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, dir := range []string{main, filepath.Join(main, "sub", "deeper"), linked, filepath.Join(linked, "pkg")} {
@@ -73,7 +73,7 @@ func TestLocateRootMainAndLinkedWorktree(t *testing.T) {
 		}
 	}
 	plain := filepath.Join(base, "plain")
-	must.OK(t, os.MkdirAll(plain, 0o755))
+	must.OK(t, os.MkdirAll(plain, 0o750))
 	got, err := LocateRoot(plain)
 	if err != nil || got != "" {
 		t.Fatalf("non-git dir: %q %v", got, err)

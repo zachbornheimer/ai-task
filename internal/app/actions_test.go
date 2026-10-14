@@ -78,7 +78,7 @@ func TestVerifyCompleteRunsActions(t *testing.T) {
 	if acts[0].Status != proof.ActionSucceeded || acts[1].Status != proof.ActionFailed {
 		t.Fatalf("want succeeded+failed, got %s+%s", acts[0].Status, acts[1].Status)
 	}
-	if err := os.WriteFile(filepath.Join(s2.Workspace, "marker.txt"), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(s2.Workspace, "marker.txt"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	again, err := f.e.Verify(f.ctx, s2.Token, verification.ModeComplete)

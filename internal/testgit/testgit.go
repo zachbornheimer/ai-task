@@ -74,18 +74,19 @@ func IsolateMain(m *testing.M) int {
 // or ambient identity. Callers may append to cmd.Env.
 func Command(t testing.TB, dir string, args ...string) *exec.Cmd {
 	t.Helper()
-	return CommandContext(t, context.Background(), dir, args...)
+	return CommandContext(context.Background(), t, dir, args...)
 }
 
 // CommandContext is Command bound to ctx.
-func CommandContext(t testing.TB, ctx context.Context, dir string, args ...string) *exec.Cmd {
+func CommandContext(ctx context.Context, t testing.TB, dir string, args ...string) *exec.Cmd {
 	t.Helper()
 	env, err := Overrides(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	full := append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd := exec.CommandContext(ctx, "git")
+	cmd.Args = append(cmd.Args, full...)
 	cmd.Env = append(os.Environ(), env...)
 	return cmd
 }
@@ -98,4 +99,23 @@ func Run(t testing.TB, dir string, args ...string) string {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// WriteExecutable writes an executable script at path for tests that put a
+// fake tool on PATH.
+func WriteExecutable(t testing.TB, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Chmod(0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 }

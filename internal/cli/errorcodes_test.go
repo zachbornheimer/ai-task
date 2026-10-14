@@ -63,22 +63,21 @@ func faultCodeValues(t *testing.T) []string {
 
 // atask runs the CLI in-process against one database and working directory,
 // failing the test if the call does not return in time.
-func atask(t *testing.T, db, cwd string, args ...string) (int, testEnvelope) {
+func atask(t *testing.T, db, cwd string, args ...string) testEnvelope {
 	t.Helper()
 	type outcome struct {
-		code int
-		out  string
+		out string
 	}
 	done := make(chan outcome, 1)
 	go func() {
 		var out, errb bytes.Buffer
-		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: func(k string) string {
+		Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: func(k string) string {
 			if k == "ATASK_DB" {
 				return db
 			}
 			return ""
 		}})
-		done <- outcome{code, out.String()}
+		done <- outcome{out.String()}
 	}()
 	select {
 	case o := <-done:
@@ -86,10 +85,10 @@ func atask(t *testing.T, db, cwd string, args ...string) (int, testEnvelope) {
 		if err := json.Unmarshal([]byte(o.out), &env); err != nil {
 			t.Fatalf("atask %v: stdout is not a JSON envelope: %v\n%s", args, err, o.out)
 		}
-		return o.code, env
+		return env
 	case <-time.After(cliCallBudget):
 		t.Fatalf("atask %v did not return within %s", args, cliCallBudget)
-		return 0, testEnvelope{}
+		return testEnvelope{}
 	}
 }
 
@@ -119,13 +118,13 @@ func TestErrorCodesMatchContract(t *testing.T) {
 	t.Run("claim wait on an empty board is DONE", func(t *testing.T) {
 		db, cwd := filepath.Join(t.TempDir(), "at.db"), t.TempDir()
 		args := []string{"--json", "claim", "--wait"}
-		_, env := atask(t, db, cwd, args...)
+		env := atask(t, db, cwd, args...)
 		wantErrorCode(t, env, "DONE", args...)
 	})
 
 	t.Run("claim wait with only blocked tasks is STALLED", func(t *testing.T) {
 		db, cwd := filepath.Join(t.TempDir(), "at.db"), t.TempDir()
-		_, added := atask(t, db, cwd, "--json", "add", "first", "--proof", "run: false", "--regression", "run: true")
+		added := atask(t, db, cwd, "--json", "add", "first", "--proof", "run: false", "--regression", "run: true")
 		var first struct {
 			Task struct {
 				ID string `json:"id"`
@@ -136,7 +135,7 @@ func TestErrorCodesMatchContract(t *testing.T) {
 		}
 		atask(t, db, cwd, "--json", "add", "second", "--requires", first.Task.ID, "--proof", "run: true", "--regression", "run: true")
 		for range project.DefaultMaxAttempts {
-			_, claimed := atask(t, db, cwd, "--json", "claim", first.Task.ID)
+			claimed := atask(t, db, cwd, "--json", "claim", first.Task.ID)
 			var session struct {
 				Token string `json:"token"`
 			}
@@ -144,18 +143,18 @@ func TestErrorCodesMatchContract(t *testing.T) {
 				t.Fatalf("claim first: %v %+v", err, claimed.Error)
 			}
 			atask(t, db, cwd, "--json", "verify", "complete", session.Token)
-			if _, released := atask(t, db, cwd, "--json", "claim", "release", session.Token); !released.OK {
+			if released := atask(t, db, cwd, "--json", "claim", "release", session.Token); !released.OK {
 				t.Fatalf("release: %+v", released.Error)
 			}
 		}
 		args := []string{"--json", "claim", "--wait"}
-		_, env := atask(t, db, cwd, args...)
+		env := atask(t, db, cwd, args...)
 		wantErrorCode(t, env, "STALLED", args...)
 	})
 
 	t.Run("failed verify is CHECK_FAILED", func(t *testing.T) {
 		db, cwd := filepath.Join(t.TempDir(), "at.db"), t.TempDir()
-		_, add := atask(t, db, cwd, "--json", "add", "doomed", "--proof", "run: false", "--regression", "run: true")
+		add := atask(t, db, cwd, "--json", "add", "doomed", "--proof", "run: false", "--regression", "run: true")
 		var added struct {
 			Task struct {
 				ID string `json:"id"`
@@ -164,7 +163,7 @@ func TestErrorCodesMatchContract(t *testing.T) {
 		if err := json.Unmarshal(add.Result, &added); err != nil || added.Task.ID == "" {
 			t.Fatalf("add: %v %+v", err, add)
 		}
-		_, claim := atask(t, db, cwd, "--json", "claim", added.Task.ID)
+		claim := atask(t, db, cwd, "--json", "claim", added.Task.ID)
 		var res struct {
 			Session struct {
 				Token string `json:"token"`
@@ -174,13 +173,13 @@ func TestErrorCodesMatchContract(t *testing.T) {
 			t.Fatalf("claim: %v %+v", err, claim)
 		}
 		args := []string{"--json", "verify", "complete", res.Session.Token}
-		_, env := atask(t, db, cwd, args...)
+		env := atask(t, db, cwd, args...)
 		wantErrorCode(t, env, "CHECK_FAILED", args...)
 	})
 
 	for _, args := range [][]string{{"--json", "help"}, {"--json"}, {"--json", "version"}} {
 		t.Run("envelope for "+strings.Join(args, " "), func(t *testing.T) {
-			_, env := atask(t, filepath.Join(t.TempDir(), "at.db"), t.TempDir(), args...)
+			env := atask(t, filepath.Join(t.TempDir(), "at.db"), t.TempDir(), args...)
 			if !env.OK || len(env.Result) == 0 {
 				t.Fatalf("atask %v: want {ok:true,result}, got %+v", args, env)
 			}

@@ -121,8 +121,7 @@ func Authorize(a Attempt, currentSeq int, now time.Time) error {
 		return fault.New(fault.CodeInvalidSession, "session for %s was superseded by attempt %d; run `atask claim %s` to start a new attempt", a.TaskID, currentSeq, a.TaskID)
 	}
 	if a.EndedAt != nil {
-		switch a.EndReason {
-		case EndFinished:
+		if a.EndReason == EndFinished {
 			return fault.New(fault.CodeInvalidSession, "session for %s already finished; claim the task again to continue", a.TaskID)
 		}
 		return fault.New(fault.CodeInvalidSession, "session for %s has ended", a.TaskID)

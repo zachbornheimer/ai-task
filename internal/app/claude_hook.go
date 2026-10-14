@@ -73,7 +73,7 @@ func mkdirUnder(root, name string) error {
 		return err
 	}
 	defer func() { _ = dir.Close() }()
-	if err := dir.Mkdir(name, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+	if err := dir.Mkdir(name, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	return nil

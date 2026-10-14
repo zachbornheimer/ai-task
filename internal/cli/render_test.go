@@ -20,11 +20,11 @@ func golden(t *testing.T, name string, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name)
 	if *update {
-		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(got), 0o600); err != nil {
 			t.Fatalf("write golden %s: %v", path, err)
 		}
 	}
-	want, err := os.ReadFile(path)
+	want, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		t.Fatalf("missing golden %s (run with -update): %v\n--- got ---\n%s", path, err, got)
 	}

@@ -84,7 +84,7 @@ func TestHeartbeatRecoversFromTransientAndAbortsOnTerminal(t *testing.T) {
 	for calls.Load() < 4 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o600))
 	if err := <-done; err != nil {
 		t.Fatalf("transient renewal errors must not abort the run: %v", err)
 	}

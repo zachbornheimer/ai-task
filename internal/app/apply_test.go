@@ -10,9 +10,9 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
-func count(f *fixture, filter app.Filter) int {
+func count(f *fixture) int {
 	f.t.Helper()
-	snap, err := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: filter})
+	snap, err := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterAll})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 		plan.AddTask{Key: "c", Title: "c", Requires: []plan.Ref{"nope"}, TaskChecks: okChecks()},
 	}})
 	wantCode(t, err, fault.CodeNotFound)
-	if count(f, app.FilterAll) != 1 {
+	if count(f) != 1 {
 		t.Fatal("partial insert")
 	}
 	// Cycle inside the set: nothing changes.
@@ -38,7 +38,7 @@ func TestAtomicProposalInsertsNothingOnInvalidEdge(t *testing.T) {
 		plan.UpdateTask{Target: plan.Ref(a), AddRequires: []plan.Ref{"x"}},
 	}})
 	wantCode(t, err, fault.CodeInvalidInput)
-	if count(f, app.FilterAll) != 1 {
+	if count(f) != 1 {
 		t.Fatal("partial insert after cycle")
 	}
 	v := f.show(string(a))
@@ -72,7 +72,7 @@ func TestStableKeysAndIdempotency(t *testing.T) {
 	}
 	// Same key, identical definition, new idempotency key: no duplicate.
 	r3, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{op}})
-	if err != nil || r3.Changed != 0 || count(f, app.FilterAll) != 1 {
+	if err != nil || r3.Changed != 0 || count(f) != 1 {
 		t.Fatalf("%+v %v", r3, err)
 	}
 	// Same key, conflicting definition: conflict, no overwrite.

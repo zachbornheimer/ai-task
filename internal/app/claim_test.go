@@ -324,7 +324,7 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	a := f.add("a")
 	sA := f.claim(string(a))
 	f.commit(sA.Workspace, "a.txt", "from A")
-	must.OK(t, os.WriteFile(filepath.Join(sA.Workspace, "wip.txt"), []byte("uncommitted by A"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(sA.Workspace, "wip.txt"), []byte("uncommitted by A"), 0o600))
 	// A freezes; its lease runs out; B takes over. A's worktree is
 	// quarantined; B gets a fresh one at the task path on the same branch.
 	f.c.Advance(execution.DefaultLease + time.Minute)
@@ -339,7 +339,7 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(sB.Workspace, "wip.txt")); err == nil {
 		t.Fatal("uncommitted edits leaked into the new worktree")
 	}
-	if b, _ := os.ReadFile(filepath.Join(stale, "wip.txt")); string(b) != "uncommitted by A" {
+	if b, _ := os.ReadFile(filepath.Clean(filepath.Join(stale, "wip.txt"))); string(b) != "uncommitted by A" {
 		t.Fatal("quarantine lost A's uncommitted edits")
 	}
 	// The worktree token A can see is its own; B's lives in B's git dir.
@@ -347,9 +347,10 @@ func TestTakeoverLeavesStaleTokenPowerless(t *testing.T) {
 		t.Fatal("token discovery crossed the quarantine")
 	}
 	staleGitdir := strings.TrimSpace(f.git(stale, "rev-parse", "--absolute-git-dir"))
-	must.OK(t, filepath.WalkDir(staleGitdir, func(path string, d fs.DirEntry, err error) error {
+	gitdirFS := os.DirFS(staleGitdir)
+	must.OK(t, fs.WalkDir(gitdirFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
-			if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), string(sB.Token)) {
+			if b, err := fs.ReadFile(gitdirFS, path); err == nil && strings.Contains(string(b), string(sB.Token)) {
 				t.Fatalf("successor token reachable from the quarantine at %s", path)
 			}
 		}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
 // fakeMiseOnPath installs a `mise` that echoes its argv, so the spawned
@@ -14,19 +16,17 @@ func fakeMiseOnPath(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
 	script := "#!/bin/sh\necho \"MISE-ARGV: $*\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "mise"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testgit.WriteExecutable(t, filepath.Join(bin, "mise"), script)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func writeMiseConfig(t *testing.T, dir, rel string) {
 	t.Helper()
 	path := filepath.Join(dir, rel)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("[tools]\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("[tools]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

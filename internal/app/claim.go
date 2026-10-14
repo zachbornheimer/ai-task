@@ -274,7 +274,8 @@ func completedRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, 
 		return nil, err
 	}
 	var out []workspace.Requirement
-	for _, r := range recs {
+	for i := range recs {
+		r := &recs[i]
 		if r.CompletedRevision != "" {
 			out = append(out, workspace.Requirement{Task: string(r.Task.ID), Revision: r.CompletedRevision})
 		}
@@ -314,7 +315,8 @@ func (e *Engine) inheritContext(tx *sqlite.Tx, r sqlite.Record, h *execution.Han
 			return err
 		}
 		f := &execution.Failure{RunID: s.Run.ID, Mode: string(s.Run.Mode), Summary: s.Run.Summary}
-		for _, row := range ev {
+		for i := range ev {
+			row := &ev[i]
 			if row.Outcome == verification.OutcomePassed || row.Outcome == verification.OutcomeSkipped {
 				continue
 			}
@@ -354,8 +356,7 @@ func notClaimable(r sqlite.Record, proj project.Project, now time.Time, retryWor
 	case task.StatusComplete:
 		return fault.New(fault.CodeConflict, "%s is complete", id)
 	case task.StatusNeedsAttention:
-		switch {
-		case facts.Exhausted:
+		if facts.Exhausted {
 			return fault.New(fault.CodeStalled, "%s exhausted its attempts (%d failures); a planner must `atask update %s --reset-attempts`", id, r.Failures, id)
 		}
 		return fault.New(fault.CodeStalled, "%s: workspace unusable (%s); fix the worktree and `atask claim %s`, or `atask update %s --reset-attempts`", id, r.WorkspaceError, id, id)
@@ -599,9 +600,5 @@ func (e *Engine) renewalInterval(lease time.Duration) time.Duration {
 
 // terminalAuthority reports errors no retry can fix.
 func terminalAuthority(err error) bool {
-	switch fault.CodeOf(err) {
-	case fault.CodeInvalidSession:
-		return true
-	}
-	return false
+	return fault.CodeOf(err) == fault.CodeInvalidSession
 }

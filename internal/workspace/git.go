@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +42,12 @@ func CurrentBranch(ctx context.Context, dir string) string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// InsideWorkTree reports whether dir is inside a Git work tree.
+func InsideWorkTree(ctx context.Context, dir string) bool {
+	out, err := git(ctx, dir, "rev-parse", "--is-inside-work-tree")
+	return err == nil && strings.TrimSpace(out) == "true"
 }
 
 func IsGitRepo(dir string) bool {
@@ -106,23 +111,22 @@ func RequireClean(ctx context.Context, dir string) (GitState, error) {
 // Git's lock files: many `atask` processes claiming at once each add a
 // worktree to the same repository, and `git worktree add` takes
 // repository-wide locks for a few milliseconds.
-func gitRetry(ctx context.Context, dir string, args ...string) (string, error) {
-	var out string
+func gitRetry(ctx context.Context, dir string, args ...string) error {
 	var err error
 	delay := 20 * time.Millisecond
 	for range 8 {
-		out, err = git(ctx, dir, args...)
+		_, err = git(ctx, dir, args...)
 		if err == nil || !isLockContention(err) {
-			return out, err
+			return err
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
+			return ctx.Err()
+		case <-time.After(backoffWait(delay)):
 		}
 		delay *= 2
 	}
-	return out, err
+	return err
 }
 
 func isLockContention(err error) bool {
@@ -138,7 +142,9 @@ func isLockContention(err error) bool {
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git")
+	cmd.Args = append(cmd.Args, "-C", dir)
+	cmd.Args = append(cmd.Args, args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {

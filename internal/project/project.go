@@ -104,11 +104,11 @@ func CanonicalRoot(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	real, err := filepath.EvalSymlinks(abs)
+	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Clean(real), nil
+	return filepath.Clean(resolved), nil
 }
 
 // LocateRoot finds the directory a working directory belongs to for the
@@ -154,7 +154,7 @@ func LocateRoot(dir string) (string, error) {
 }
 
 func rootFromGitFile(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}

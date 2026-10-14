@@ -56,9 +56,10 @@ func (e *Engine) recheckForCompletion(tx *sqlite.Tx, s completionSpec, final str
 		return r, err
 	}
 	var onFinal []verification.Evidence
-	for _, ev := range stored {
+	for i := range stored {
+		ev := &stored[i]
 		if ev.Revision == final {
-			onFinal = append(onFinal, ev)
+			onFinal = append(onFinal, *ev)
 		}
 	}
 	if v := verification.Judge(s.policy, onFinal); !v.Passed {

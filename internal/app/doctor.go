@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/project"
@@ -54,21 +53,20 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 		return DoctorReport{}, err
 	}
 	rep := DoctorReport{Project: p.ID, Root: p.RootPath, Target: p.TargetBranch, Healthy: true}
-	add := func(id string, ok bool, severity, msg, remedy string) *DoctorCheck {
+	add := func(id string, ok bool, severity, msg, remedy string) {
 		rep.Checks = append(rep.Checks, DoctorCheck{ID: id, OK: ok, Severity: severity, Message: msg, Remedy: remedy})
 		if !ok && severity == "error" {
 			rep.Healthy = false
 		}
-		return &rep.Checks[len(rep.Checks)-1]
 	}
 	mgr := e.manager(p)
 
 	// Repository.
-	if st, err := os.Stat(p.RootPath); err != nil || !st.IsDir() {
+	if !isDirectory(p.RootPath) {
 		add("repository", false, "error", fmt.Sprintf("project root %s is not a directory", p.RootPath), "restore the checkout or re-register the project with `atask init --path`")
 		return rep, nil
 	}
-	if out, err := exec.CommandContext(ctx, "git", "-C", p.RootPath, "rev-parse", "--is-inside-work-tree").CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "true" {
+	if !workspace.InsideWorkTree(ctx, p.RootPath) {
 		add("repository", false, "error", fmt.Sprintf("%s is not a Git work tree", p.RootPath), "run `git init` there or point the project at the repository")
 		return rep, nil
 	}
@@ -109,7 +107,7 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 
 	// Workspace root writable.
 	root := mgr.Root
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o750); err != nil {
 		add("workspace_root", false, "error", fmt.Sprintf("cannot create workspace root %s: %v", root, err), "make the directory writable or set the project's workspace root")
 	} else if f, err := os.CreateTemp(root, ".doctor-*"); err != nil {
 		add("workspace_root", false, "error", fmt.Sprintf("workspace root %s is not writable: %v", root, err), "fix the permissions on the directory")
@@ -138,7 +136,8 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 			return rep, err
 		}
 		var ids []string
-		for _, t := range snap.Tasks {
+		for i := range snap.Tasks {
+			t := &snap.Tasks[i]
 			if t.Status == task.StatusNeedsAttention {
 				ids = append(ids, fmt.Sprintf("%s (%s)", t.ID, t.AttentionReason))
 			}
@@ -158,17 +157,16 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 	return rep, nil
 }
 
-// listFiles joins up to max names and counts the rest.
-func listFiles(files []string, max int) string {
-	if len(files) <= max {
+// listFiles joins up to limit names and counts the rest.
+func listFiles(files []string, limit int) string {
+	if len(files) <= limit {
 		return strings.Join(files, ", ")
 	}
-	return fmt.Sprintf("%s and %d more", strings.Join(files[:max], ", "), len(files)-max)
+	return fmt.Sprintf("%s and %d more", strings.Join(files[:limit], ", "), len(files)-limit)
 }
 
-func budgetLabel(d time.Duration) string {
-	if d <= 0 {
-		return "unlimited"
-	}
-	return d.String()
+// isDirectory reports whether path exists and is a directory.
+func isDirectory(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }

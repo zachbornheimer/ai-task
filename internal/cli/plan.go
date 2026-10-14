@@ -312,8 +312,8 @@ func (c *ctxt) addFromPlan(ctx context.Context, file string) error {
 		return err
 	}
 	ops := make([]plan.Change, 0, len(items))
-	for i, it := range items {
-		op, err := it.change(i)
+	for i := range items {
+		op, err := items[i].change(i)
 		if err != nil {
 			return err
 		}

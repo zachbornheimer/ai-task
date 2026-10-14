@@ -75,7 +75,7 @@ func newGitFixture(t *testing.T) *fixture {
 	}
 	f := &fixture{t: t, ctx: context.Background(), c: newClock(), path: filepath.Join(t.TempDir(), "at.db"), repo: filepath.Join(t.TempDir(), "repo")}
 	f.e = f.open()
-	must.OK(t, os.MkdirAll(f.repo, 0o755))
+	must.OK(t, os.MkdirAll(f.repo, 0o750))
 	f.git(f.repo, "init", "-q", "-b", "main")
 	f.git(f.repo, "config", "user.name", "t")
 	f.git(f.repo, "config", "user.email", "t@t")
@@ -108,7 +108,7 @@ func (f *fixture) git(dir string, args ...string) string {
 // commit writes a file and commits in dir, returning the new HEAD.
 func (f *fixture) commit(dir, file, content string) string {
 	f.t.Helper()
-	must.OK(f.t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644))
+	must.OK(f.t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600))
 	f.git(dir, "add", file)
 	f.git(dir, "commit", "-q", "-m", content)
 	return f.git(dir, "rev-parse", "HEAD")
@@ -206,9 +206,9 @@ func (f *fixture) add(key string, requires ...plan.Ref) task.ID {
 }
 
 // addWith creates a task with the given check script.
-func (f *fixture) addWith(key, script string, requires ...plan.Ref) task.ID {
+func (f *fixture) addWith(key, script string) task.ID {
 	f.t.Helper()
-	res := f.apply(plan.AddTask{Key: key, Title: key, Requires: requires, TaskChecks: []verification.CheckSpec{check("unit-"+key, script, true)}})
+	res := f.apply(plan.AddTask{Key: key, Title: key, TaskChecks: []verification.CheckSpec{check("unit-"+key, script, true)}})
 	return res.Created[key]
 }
 
@@ -269,7 +269,7 @@ type addSwitcher struct {
 }
 
 func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create bool) (string, error) {
-	if err := os.MkdirAll(a.root, 0o755); err != nil {
+	if err := os.MkdirAll(a.root, 0o750); err != nil {
 		return "", err
 	}
 	root := a.root
@@ -278,7 +278,7 @@ func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 	}
 	path := filepath.Join(root, strings.ReplaceAll(branch, "/", "-"))
 	if create {
-		cmd := testgit.CommandContext(a.t, ctx, a.repo, "branch", branch, base)
+		cmd := testgit.CommandContext(ctx, a.t, a.repo, "branch", branch, base)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("branch: %w\n%s", err, out)
 		}
@@ -286,7 +286,7 @@ func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 		return path, nil
 	}
-	cmd := testgit.CommandContext(a.t, ctx, a.repo, "worktree", "add", path, branch)
+	cmd := testgit.CommandContext(ctx, a.t, a.repo, "worktree", "add", path, branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("worktree add: %w\n%s", err, out)
 	}

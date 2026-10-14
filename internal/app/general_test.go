@@ -66,7 +66,7 @@ func TestAddSameOpenTitleReusesTask(t *testing.T) {
 	if second.Created["#0"] != id {
 		t.Fatalf("second add must return %s, got %s", id, second.Created["#0"])
 	}
-	if n := count(f, app.FilterAll); n != 1 {
+	if n := count(f); n != 1 {
 		t.Fatalf("got %d tasks, want 1", n)
 	}
 }

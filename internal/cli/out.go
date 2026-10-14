@@ -13,12 +13,12 @@ type errWriter struct {
 }
 
 func (e *errWriter) Write(p []byte) (int, error) {
-	if e.err != nil {
-		return len(p), nil
+	if e.err == nil {
+		n, err := e.w.Write(p)
+		e.err = err
+		return n, err
 	}
-	n, err := e.w.Write(p)
-	e.err = err
-	return n, err
+	return len(p), nil
 }
 
 // say formats to w. Errors are latched by the errWriter that emit wraps

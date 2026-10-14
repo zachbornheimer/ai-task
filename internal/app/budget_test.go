@@ -87,7 +87,7 @@ func TestChangedFilesReachChecks(t *testing.T) {
 	f := newGitFixture(t)
 	a := f.addWith("tia", `echo target=$ATASK_TARGET_BRANCH; cat "$ATASK_CHANGED_FILES"; test "$ATASK_TARGET_BRANCH" = main && grep -qx store/x.go "$ATASK_CHANGED_FILES" && grep -qx README.md "$ATASK_CHANGED_FILES" && ! grep -qx f.txt "$ATASK_CHANGED_FILES"`)
 	s := f.claim(string(a))
-	must.OK(t, os.MkdirAll(filepath.Join(s.Workspace, "store"), 0o755))
+	must.OK(t, os.MkdirAll(filepath.Join(s.Workspace, "store"), 0o750))
 	f.commit(s.Workspace, "store/x.go", "package store\n")
 	f.commit(s.Workspace, "README.md", "r")
 	if r, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof); err != nil || !r.Passed {

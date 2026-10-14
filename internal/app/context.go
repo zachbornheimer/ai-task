@@ -104,11 +104,12 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 		if err != nil {
 			return err
 		}
-		for _, o := range recs {
+		for i := range recs {
+			o := &recs[i]
 			if o.Task.ID == r.Task.ID || o.Task.Kind == task.KindGroup {
 				continue
 			}
-			sibs = append(sibs, rel(o, o.Status(now, proj.MaxAttempts)))
+			sibs = append(sibs, rel(*o, o.Status(now, proj.MaxAttempts)))
 		}
 		return nil
 	})
@@ -167,7 +168,8 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 		return Context{}, err
 	}
 	c := Context{Project: proj.ID, TargetBranch: proj.TargetBranch, Regression: []verification.CheckSpec{}, Summary: &sum}
-	for _, t := range snap.Tasks {
+	for i := range snap.Tasks {
+		t := &snap.Tasks[i]
 		c.Claimable = append(c.Claimable, Rel{ID: t.ID, Key: t.Key, Title: t.Title, Status: t.Status})
 	}
 	_, wtErr := exec.LookPath("wt")

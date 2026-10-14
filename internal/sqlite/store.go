@@ -45,7 +45,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	memory := path == ":memory:"
 	if !memory {
 		path = filepath.Clean(path)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return nil, fault.WrapInternal(err, "create state directory")
 		}
 	}
@@ -219,7 +219,6 @@ func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
 
 type (
 	nullInt = sql.NullInt64
-	nullStr = sql.NullString
 )
 
 func wrapInternal(err error, what string) error {

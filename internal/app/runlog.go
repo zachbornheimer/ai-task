@@ -38,7 +38,7 @@ func openCheckLog(dir, checkID string) (*os.File, string) {
 		return nil, ""
 	}
 	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, ""
 		}
 		pruneRunLogs(filepath.Dir(dir), keepRunLogs)
@@ -55,7 +55,7 @@ func openCheckLog(dir, checkID string) (*os.File, string) {
 			file = fmt.Sprintf("%s.%d.log", name, i)
 		}
 		path := filepath.Join(dir, file)
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
 			return f, path
 		}
@@ -115,8 +115,8 @@ func writeRunResult(res VerifyResult, err error) {
 	if merr != nil {
 		return
 	}
-	if os.MkdirAll(res.LogDir, 0o755) != nil {
+	if os.MkdirAll(res.LogDir, 0o750) != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(res.LogDir, "result.json"), append(b, '\n'), 0o644)
+	_ = os.WriteFile(filepath.Join(res.LogDir, "result.json"), append(b, '\n'), 0o600)
 }

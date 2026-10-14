@@ -29,7 +29,7 @@ func TestDocsNameOnlyContractSurface(t *testing.T) {
 		case "migration.md", "contract.md":
 			continue
 		}
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}

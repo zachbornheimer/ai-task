@@ -13,7 +13,7 @@ import (
 func TestTestGitNeverSigns(t *testing.T) {
 	home := t.TempDir()
 	global := filepath.Join(home, "gitconfig")
-	if err := os.WriteFile(global, []byte("[commit]\n\tgpgsign = true\n[user]\n\tsigningkey = NOPE\n"), 0o644); err != nil {
+	if err := os.WriteFile(global, []byte("[commit]\n\tgpgsign = true\n[user]\n\tsigningkey = NOPE\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
@@ -22,7 +22,7 @@ func TestTestGitNeverSigns(t *testing.T) {
 	start := time.Now()
 	dir := t.TempDir()
 	testgit.Run(t, dir, "init", "-q")
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	testgit.Run(t, dir, "add", "a.txt")

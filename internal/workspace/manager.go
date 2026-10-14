@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,7 +91,7 @@ func TaskBranch(taskID string) string { return "atask/" + taskID }
 // can no longer reach the branch or the new attempt's files.
 func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, quarantineSeq int) (Info, error) {
 	info := Info{Branch: TaskBranch(taskID)}
-	if err := os.MkdirAll(m.Root, 0o755); err != nil {
+	if err := os.MkdirAll(m.Root, 0o750); err != nil {
 		return info, fault.Wrap(err, fault.CodeNotReady, "create workspace root")
 	}
 	// `git worktree add` writes a worktree's metadata non-atomically, so a
@@ -116,7 +115,7 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 			return info, nil
 		}
 		stale := fmt.Sprintf("%s.stale-%d", info.Path, quarantineSeq)
-		if _, err := gitRetry(ctx, m.Repo, "worktree", "move", info.Path, stale); err != nil {
+		if err := gitRetry(ctx, m.Repo, "worktree", "move", info.Path, stale); err != nil {
 			return info, fault.Wrap(err, fault.CodeNotReady, "quarantine worktree of attempt %d", quarantineSeq)
 		}
 		if _, err := git(ctx, stale, "checkout", "-q", "--detach"); err != nil {
@@ -209,7 +208,7 @@ func (m Manager) Revision(ctx context.Context, ref string) (string, error) {
 // Snapshot checks out revision into a detached, disposable worktree so
 // checks run against immutable inputs. The caller must call cleanup.
 func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cleanup func(), err error) {
-	if err := os.MkdirAll(filepath.Join(m.Root, "snapshots"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(m.Root, "snapshots"), 0o750); err != nil {
 		return "", nil, fault.Wrap(err, fault.CodeNotReady, "create snapshot root")
 	}
 	path, err = os.MkdirTemp(filepath.Join(m.Root, "snapshots"), "snap-")
@@ -220,7 +219,7 @@ func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cl
 	if err := os.Remove(path); err != nil {
 		return "", nil, fault.Wrap(err, fault.CodeNotReady, "clear snapshot dir %s", path)
 	}
-	if _, err := gitRetry(ctx, m.Repo, "worktree", "add", "--detach", path, revision); err != nil {
+	if err := gitRetry(ctx, m.Repo, "worktree", "add", "--detach", path, revision); err != nil {
 		return "", nil, fault.Wrap(err, fault.CodeNotReady, "snapshot %s", revision)
 	}
 	cleanup = func() {
@@ -401,7 +400,7 @@ func (m Manager) repoLock(ctx context.Context, file, what string) (func(), error
 		return nil, fault.Wrap(err, fault.CodeNotReady, "locate git directory")
 	}
 	path := filepath.Join(strings.TrimSpace(common), file)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	f, err := os.OpenFile(filepath.Clean(path), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, fault.Wrap(err, fault.CodeNotReady, "open %s lock", what)
 	}
@@ -421,7 +420,7 @@ func (m Manager) repoLock(ctx context.Context, file, what string) (func(), error
 		case <-ctx.Done():
 			discard.CloseReadOnly(f)
 			return nil, fault.Wrap(ctx.Err(), fault.CodeBaseConflict, "waiting for the %s lock %s", what, path)
-		case <-time.After(delay + time.Duration(rand.Int63n(int64(delay)))):
+		case <-time.After(backoffWait(delay)):
 		}
 		if delay < 200*time.Millisecond {
 			delay *= 2

@@ -16,7 +16,7 @@ import (
 func TestInstallInstructionsIsIdempotent(t *testing.T) {
 	read := func(path string) string {
 		t.Helper()
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +35,7 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 	}
 	// A read-only file makes a stray write fail for ordinary users; the
 	// byte comparison below catches it for everyone.
-	if err := os.Chmod(first.AgentsMD, 0o444); err != nil {
+	if err := os.Chmod(first.AgentsMD, 0o400); err != nil {
 		t.Fatal(err)
 	}
 	second, err := app.InstallInstructions(root)
@@ -45,14 +45,14 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 	if after := read(first.AgentsMD); after != before {
 		t.Fatalf("second run changed AGENTS.md:\n--- before\n%s\n--- after\n%s", before, after)
 	}
-	if err := os.Chmod(first.AgentsMD, 0o644); err != nil {
+	if err := os.Chmod(first.AgentsMD, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	// An out-of-date block is replaced, the surrounding text kept, and the
 	// result is then stable.
 	stale := "intro\n\n" + app.InstructionsBegin() + "\nold\n" + app.InstructionsEnd + "\n\n# Mine\n"
-	if err := os.WriteFile(first.AgentsMD, []byte(stale), 0o644); err != nil {
+	if err := os.WriteFile(first.AgentsMD, []byte(stale), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if r, err := app.InstallInstructions(root); err != nil || !r.Updated {
@@ -69,7 +69,7 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 	// An end marker with no begin marker: one block, not two, and stable.
 	orphan := t.TempDir()
 	path := filepath.Join(orphan, "AGENTS.md")
-	if err := os.WriteFile(path, []byte("# Notes\n\n"+app.InstructionsEnd+"\n\n# Mine\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("# Notes\n\n"+app.InstructionsEnd+"\n\n# Mine\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if r, err := app.InstallInstructions(orphan); err != nil || !r.Updated {

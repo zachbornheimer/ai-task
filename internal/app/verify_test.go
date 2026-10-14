@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,11 +56,11 @@ func TestEmptyChecksFailClosed(t *testing.T) {
 func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
 	f := newGitFixture(t)
 	counter := filepath.Join(t.TempDir(), "count")
-	runs := func() int { b, _ := os.ReadFile(counter); return strings.Count(string(b), "x") }
+	runs := func() int { b, _ := os.ReadFile(filepath.Clean(counter)); return strings.Count(string(b), "x") }
 	a := f.addWith("a", "echo x >> "+counter)
 	s := f.claim(string(a))
 	// Uncommitted edits are fine for diagnostics.
-	must.OK(t, os.WriteFile(filepath.Join(s.Workspace, "wip.txt"), []byte("wip"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(s.Workspace, "wip.txt"), []byte("wip"), 0o600))
 	for i := 1; i <= 3; i++ {
 		res, err := f.e.Verify(f.ctx, s.Token, verification.ModeProof)
 		if err != nil || !res.Passed || res.Completed || runs() != i {
@@ -94,7 +93,7 @@ func TestProvisionalChecksRunFreshAndNeverComplete(t *testing.T) {
 func TestNoEvidenceReuseAndSameSnapshot(t *testing.T) {
 	f := newGitFixture(t)
 	counter := filepath.Join(t.TempDir(), "count")
-	runs := func() int { b, _ := os.ReadFile(counter); return strings.Count(string(b), "x") }
+	runs := func() int { b, _ := os.ReadFile(filepath.Clean(counter)); return strings.Count(string(b), "x") }
 	// The check reads the snapshot's file; the agent keeps editing its
 	// worktree during verification. Evidence must describe the commit.
 	a := f.apply(plan.AddTask{Key: "a", Title: "a", TaskChecks: []verification.CheckSpec{check("unit-a", "echo x >> "+counter+"; test \"$(cat f.txt)\" = committed", true)}}).Created["a"]
@@ -123,11 +122,11 @@ func TestNoEvidenceReuseAndSameSnapshot(t *testing.T) {
 	c := f.apply(plan.AddTask{Key: "c", Title: "c", TaskChecks: []verification.CheckSpec{check("unit-c", "test \"$(cat f.txt)\" = committed-c", true)}}).Created["c"]
 	sc := f.claim(string(c))
 	f.commit(sc.Workspace, "f.txt", "committed-c")
-	must.OK(t, os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("edited after commit"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("edited after commit"), 0o600))
 	// Dirty tree: refused outright.
 	_, err := f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeNotReady)
-	must.OK(t, os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("committed-c"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(sc.Workspace, "f.txt"), []byte("committed-c"), 0o600))
 	f.complete(sc)
 }
 
@@ -268,7 +267,7 @@ func TestContractChangeDuringVerificationFailsClosed(t *testing.T) {
 	if _, err := f.e.Apply(f.ctx, plan.ChangeSet{ProjectID: f.proj.ID, Operations: []plan.Change{plan.UpdateTask{Target: plan.Ref(a), Acceptance: plan.Replace([]string{"stricter"})}}}); err != nil {
 		t.Fatal(err)
 	}
-	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o600))
 	err := <-done
 	wantCode(t, err, fault.CodeConflict)
 	if f.status(string(a)) == task.StatusComplete {
@@ -293,7 +292,7 @@ func TestVerifierCrashRecovery(t *testing.T) {
 	if st := f.status(string(a)); st != task.StatusVerifying {
 		t.Fatalf("run should still be recorded running right after the crash: %s", st)
 	}
-	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o600))
 	f.c.Advance(time.Hour)
 	// Reconcile: no phantom "verifying"; another worker resumes.
 	if st := f.status(string(a)); st == task.StatusVerifying {
@@ -449,15 +448,4 @@ func TestOrphanedDiagnosticRunsAreReconciled(t *testing.T) {
 	if v.Verification.Task == nil || v.Verification.Task.Status != sqlite.RunError || v.Failures != 0 {
 		t.Fatalf("orphaned diagnostic run: %+v failures=%d", v.Verification.Task, v.Failures)
 	}
-}
-
-// gitOnlyPath is a PATH holding git's directory and nothing else, so a
-// test can be sure `wt` is absent whatever the developer has installed.
-func gitOnlyPath(t *testing.T) string {
-	t.Helper()
-	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git not installed")
-	}
-	return filepath.Dir(git)
 }

@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zachbornheimer/ai-task/internal/app"
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
 var contractVerbs = []string{"add", "claim", "context", "list", "log", "show", "update", "verify"}
@@ -20,9 +20,7 @@ var contractVerbs = []string{"add", "claim", "context", "list", "log", "show", "
 // writes or ships references the removed hook surface.
 func TestHostHooksNeverCallHookVerb(t *testing.T) {
 	root := t.TempDir()
-	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, out)
-	}
+	testgit.Run(t, root, "init", "-q")
 	if _, err := app.InstallInstructions(root); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +98,7 @@ func TestHostHooksNeverCallHookVerb(t *testing.T) {
 
 func mustRead(t *testing.T, p string) string {
 	t.Helper()
-	b, err := os.ReadFile(p)
+	b, err := os.ReadFile(filepath.Clean(p))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +107,7 @@ func mustRead(t *testing.T, p string) string {
 
 func mustWrite(t *testing.T, p, s string) {
 	t.Helper()
-	if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -366,7 +366,8 @@ func (a *applier) sameDefinition(existing sqlite.Record, spec task.Spec, require
 		return false, err
 	}
 	have := map[task.ID]bool{}
-	for _, r := range reqs {
+	for i := range reqs {
+		r := &reqs[i]
 		have[r.Task.ID] = true
 	}
 	if len(have) != len(requires) {
@@ -391,7 +392,8 @@ func (a *applier) sameBlocks(existing task.ID, blocks []plan.Ref) (bool, error) 
 		return false, err
 	}
 	have := map[task.ID]bool{}
-	for _, d := range deps {
+	for i := range deps {
+		d := &deps[i]
 		have[d.Task.ID] = true
 	}
 	for _, b := range blocks {
@@ -603,7 +605,8 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			return err
 		}
 		have := map[task.ID]bool{}
-		for _, r := range current {
+		for i := range current {
+			r := &current[i]
 			have[r.Task.ID] = true
 		}
 		want := map[task.ID]bool{}
@@ -713,7 +716,8 @@ func (a *applier) checkArchives() error {
 		if err != nil {
 			return err
 		}
-		for _, d := range deps {
+		for i := range deps {
+			d := &deps[i]
 			if !d.Task.Archived() {
 				return fault.New(fault.CodeConflict, "archiving %s would leave %s with a dangling prerequisite; remove that edge or archive %s in the same change set", id, d.Task.ID, d.Task.ID)
 			}
@@ -725,7 +729,8 @@ func (a *applier) checkArchives() error {
 		// Completed members keep their history attached to the archived
 		// group; only live, unfinished members would be orphaned.
 		live := 0
-		for _, c := range children {
+		for i := range children {
+			c := &children[i]
 			if c.CompletedAt == nil {
 				live++
 			}

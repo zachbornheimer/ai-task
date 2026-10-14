@@ -43,7 +43,7 @@ func TestEpicRunReconciledAfterVerifierDies(t *testing.T) {
 	cancel()
 	<-done
 
-	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o600))
 	f.c.Advance(2 * time.Hour) // the verifier's lease expires
 	if _, err := f.e.Summary(f.ctx, f.proj.ID); err != nil {
 		t.Fatal(err)

@@ -72,49 +72,55 @@ func branch(p painter, s string) string { return p.dim(s) }
 // renderList prints the hierarchy (list) or a flat filtered list.
 func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter, p painter) {
 	if filter == app.FilterReady || filter == app.FilterBlocked || filter == app.FilterDraft || filter == app.FilterArchived || filter == app.FilterComplete {
-		for _, t := range snap.Tasks {
-			sayln(w, line(t, p))
+		for i := range snap.Tasks {
+			t := &snap.Tasks[i]
+			sayln(w, line(*t, p))
 			if filter == app.FilterBlocked {
-				say(w, "    requires: %s\n", requiresText(t, true))
+				say(w, "    requires: %s\n", requiresText(*t, true))
 			}
 		}
 		return
 	}
 	known := map[task.ID]bool{}
-	for _, g := range snap.Groups {
+	for i := range snap.Groups {
+		g := &snap.Groups[i]
 		known[g.ID] = true
 	}
 	byGroup := map[task.ID][]app.TaskView{}
 	var top []app.TaskView
-	for _, t := range snap.Tasks {
+	for i := range snap.Tasks {
+		t := &snap.Tasks[i]
 		// A member whose group is not in this listing (archived group,
 		// filtered-out group) is shown at the top level, never hidden.
 		if t.Group != nil && known[t.Group.ID] {
-			byGroup[t.Group.ID] = append(byGroup[t.Group.ID], t)
+			byGroup[t.Group.ID] = append(byGroup[t.Group.ID], *t)
 		} else {
-			top = append(top, t)
+			top = append(top, *t)
 		}
 	}
 	children := map[task.ID][]app.GroupView{}
 	var roots []app.GroupView
-	for _, g := range snap.Groups {
+	for i := range snap.Groups {
+		g := &snap.Groups[i]
 		if g.ParentID != "" {
-			children[g.ParentID] = append(children[g.ParentID], g)
+			children[g.ParentID] = append(children[g.ParentID], *g)
 		} else {
-			roots = append(roots, g)
+			roots = append(roots, *g)
 		}
 	}
-	for _, t := range top {
-		sayln(w, line(t, p))
+	for i := range top {
+		t := &top[i]
+		sayln(w, line(*t, p))
 		if t.Status == task.StatusBlocked {
-			say(w, "    requires: %s\n", requiresText(t, false))
+			say(w, "    requires: %s\n", requiresText(*t, false))
 		}
 	}
-	for i, g := range roots {
+	for i := range roots {
+		g := &roots[i]
 		if i > 0 {
 			sayln(w)
 		}
-		renderGroup(w, g, byGroup, children, "", "", p)
+		renderGroup(w, *g, byGroup, children, "", "", p)
 	}
 }
 
@@ -127,10 +133,11 @@ func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskVie
 		extra string
 	}
 	var rows []row
-	for _, t := range byGroup[g.ID] {
-		r := row{text: line(t, p)}
+	for i := range byGroup[g.ID] {
+		t := &byGroup[g.ID][i]
+		r := row{text: line(*t, p)}
 		if t.Status == task.StatusBlocked {
-			r.extra = "requires: " + requiresText(t, false)
+			r.extra = "requires: " + requiresText(*t, false)
 		}
 		rows = append(rows, r)
 	}
@@ -146,12 +153,13 @@ func renderGroup(w io.Writer, g app.GroupView, byGroup map[task.ID][]app.TaskVie
 			sayln(w, indent+"        "+r.extra)
 		}
 	}
-	for i, sg := range subs {
+	for i := range subs {
+		sg := &subs[i]
 		b, next := "├── ", "│   "
 		if len(rows)+i == total-1 {
 			b, next = "└── ", "    "
 		}
-		renderGroup(w, sg, byGroup, children, indent+branch(p, b), indent+branch(p, next), p)
+		renderGroup(w, *sg, byGroup, children, indent+branch(p, b), indent+branch(p, next), p)
 	}
 }
 
@@ -397,7 +405,8 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			}
 			say(w, "  %s — Attempt #%d started (%s).\n", a.StartedAt.Format("15:04"), a.Seq, end)
 		}
-		for _, r := range v.History.Runs {
+		for i := range v.History.Runs {
+			r := &v.History.Runs[i]
 			say(w, "  run %d %s %s %s\n", r.ID, r.Mode, r.Status, r.Summary)
 			renderEvidence(w, r.Evidence, true)
 		}
@@ -413,9 +422,10 @@ func renderRunResults(w io.Writer, results []proof.RunResult) {
 		return
 	}
 	sayln(w, "  run results")
-	for _, r := range results {
+	for i := range results {
+		r := &results[i]
 		say(w, "    %s %s %s/%s %s\n", r.CheckType, r.Preset,
-			(time.Duration(r.ElapsedMS) * time.Millisecond).String(), (time.Duration(r.BudgetMS) * time.Millisecond).String(), runOutcome(r))
+			(time.Duration(r.ElapsedMS) * time.Millisecond).String(), (time.Duration(r.BudgetMS) * time.Millisecond).String(), runOutcome(*r))
 	}
 }
 
@@ -485,13 +495,6 @@ func orDash(s string) string {
 	return s
 }
 
-func short(rev string) string {
-	if len(rev) > 12 {
-		return rev[:12]
-	}
-	return rev
-}
-
 func renderHandoff(w io.Writer, h execution.Handoff) {
 	if h.Empty() {
 		return
@@ -504,7 +507,7 @@ func renderHandoff(w io.Writer, h execution.Handoff) {
 		say(w, "Learned:  %s\n", l)
 	}
 	for _, l := range h.Inherited {
-		ref := string(l.TaskID)
+		ref := l.TaskID
 		if l.Key != "" {
 			ref = l.Key
 		}
@@ -549,23 +552,16 @@ func renderWarnings(w io.Writer, warnings map[string][]string) {
 	}
 }
 
-func renderLog(w io.Writer, l execution.RecordedLog) {
-	say(w, "  #%d attempt %d %s\n", l.Seq, l.AttemptSeq, l.At.Format(time.RFC3339))
-	for _, kv := range []struct{ k, v string }{{"done", l.Done}, {"next", l.Next}, {"learned", l.Learned}, {"note", l.Note}} {
-		if kv.v != "" {
-			say(w, "    %-8s %s\n", kv.k+":", kv.v)
-		}
-	}
-}
-
 func renderEvidence(w io.Writer, evidence []verification.Evidence, full bool) {
 	// A run that verified the submitted revision and then the merge with
 	// the target lists each check twice: label the rows with their revision.
 	revs := map[string]bool{}
-	for _, ev := range evidence {
+	for i := range evidence {
+		ev := &evidence[i]
 		revs[ev.Revision] = true
 	}
-	for _, ev := range evidence {
+	for i := range evidence {
+		ev := &evidence[i]
 		kind := "required"
 		if !ev.Required {
 			kind = "optional"

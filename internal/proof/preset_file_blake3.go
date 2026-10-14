@@ -40,7 +40,7 @@ func (fileBlake3Preset) Evaluate(spec ProofSpec, workdir string) (bool, string, 
 	if err != nil {
 		return false, "", err
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return false, "", fault.Wrap(err, fault.CodeInvalidInput, "file_blake3 open %q", spec.Subject)
 	}

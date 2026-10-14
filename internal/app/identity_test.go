@@ -15,7 +15,7 @@ import (
 func isolateGitIdentity(t *testing.T) {
 	t.Helper()
 	empty := filepath.Join(t.TempDir(), "gitconfig")
-	must.OK(t, os.WriteFile(empty, nil, 0o644))
+	must.OK(t, os.WriteFile(empty, nil, 0o600))
 	t.Setenv("GIT_CONFIG_GLOBAL", empty)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {

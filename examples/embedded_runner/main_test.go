@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/must"
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
 // TestRunnerDrainsGraphWithFakeModel runs the whole host flow with four
@@ -26,7 +27,7 @@ func TestRunnerDrainsGraphWithFakeModel(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "at-example")
 	t.Setenv("GIT_COMMITTER_EMAIL", "at@example")
 	repo := filepath.Join(t.TempDir(), "repo")
-	must.OK(t, os.MkdirAll(repo, 0o755))
+	must.OK(t, os.MkdirAll(repo, 0o750))
 	if err := initRepo(repo); err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +39,8 @@ func TestRunnerDrainsGraphWithFakeModel(t *testing.T) {
 	// Every task's file was committed on its task branch; completion leaves
 	// the target branch alone.
 	for _, f := range []string{"compat.txt", "store.txt", "scopes.txt", "e2e.txt", "rotate.txt", "api.txt", "ui.txt"} {
-		out, err := exec.Command("git", "-C", repo, "log", "--all", "--oneline", "--", f).Output()
-		if err != nil || len(out) == 0 {
-			t.Fatalf("%s was not committed on any task branch: %v", f, err)
+		if out := testgit.Run(t, repo, "log", "--all", "--oneline", "--", f); out == "" {
+			t.Fatalf("%s was not committed on any task branch", f)
 		}
 	}
 }

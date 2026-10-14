@@ -4,6 +4,7 @@ package contract
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -44,7 +45,7 @@ type Surface struct {
 
 // Parse reads the contract document at path into a Surface.
 func Parse(path string) (Surface, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return Surface{}, fmt.Errorf("read contract %q: %w", path, err)
 	}
@@ -276,7 +277,7 @@ var errorCode = regexp.MustCompile("`([A-Z][A-Z_]+)`")
 // ErrorCodes reads the error codes named in the contract's "Output and
 // errors" paragraph at path.
 func ErrorCodes(path string) ([]string, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read contract %s: %w", path, err)
 	}

@@ -41,11 +41,10 @@ func (fileAbsentPreset) Evaluate(spec ProofSpec, workdir string) (bool, string, 
 	segs := strings.Split(filepath.ToSlash(pattern), "/")
 	found := ""
 	_ = filepath.WalkDir(workdir, func(p string, d fs.DirEntry, werr error) error {
-		rel, rerr := filepath.Rel(workdir, p)
-		if werr != nil || rerr != nil || rel == "." {
+		rel, ok := relativeEntry(workdir, p, werr)
+		if !ok {
 			return nil
 		}
-		rel = filepath.ToSlash(rel)
 		if matchSegments(segs, strings.Split(rel, "/")) {
 			found = rel
 			return fs.SkipAll
@@ -78,4 +77,18 @@ func matchSegments(pat, name []string) bool {
 	}
 	ok, err := path.Match(pat[0], name[0])
 	return err == nil && ok && matchSegments(pat[1:], name[1:])
+}
+
+// relativeEntry is the slash-separated path of a walked entry below workdir.
+// It is false for the root itself and for entries the walk could not read,
+// which cannot match a pattern.
+func relativeEntry(workdir, path string, walkErr error) (string, bool) {
+	if walkErr != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(workdir, path)
+	if err != nil || rel == "." {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }

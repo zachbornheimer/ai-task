@@ -18,28 +18,29 @@ const (
 	jobBackoffCap  = 30 * time.Minute
 )
 
-// jobBackoff returns when the named job may be retried and how many
-// consecutive environment errors precede it (zero when none).
-func jobBackoff(tx *sqlite.Tx, pid project.ID, name string) (time.Time, int, error) {
+// jobBackoff returns when the named job may be retried and after
+// consecutive environment errors (the zero time when there are none).
+func jobBackoff(tx *sqlite.Tx, pid project.ID, name string) (time.Time, error) {
 	jobs, err := tx.RecentJobs(pid, name, 16)
 	if err != nil {
-		return time.Time{}, 0, err
+		return time.Time{}, err
 	}
 	n := 0
-	for _, j := range jobs {
+	for i := range jobs {
+		j := &jobs[i]
 		if j.Status != "error" || j.FinishedAt == nil {
 			break
 		}
 		n++
 	}
 	if n == 0 {
-		return time.Time{}, 0, nil
+		return time.Time{}, nil
 	}
 	d := jobBackoffBase << uint(n-1)
 	if n > 12 || d > jobBackoffCap {
 		d = jobBackoffCap
 	}
-	return jobs[0].FinishedAt.Add(d), n, nil
+	return jobs[0].FinishedAt.Add(d), nil
 }
 
 // jobLease identifies the durable job whose lease a verifier renews.

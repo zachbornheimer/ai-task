@@ -39,7 +39,8 @@ func stepSpec(c verification.CheckSpec, size proof.Size) proof.ProofSpec {
 // runResultsOf lists the RunResult of each evidence row that has one.
 func runResultsOf(evidence []verification.Evidence) []proof.RunResult {
 	out := []proof.RunResult{}
-	for _, ev := range evidence {
+	for i := range evidence {
+		ev := &evidence[i]
 		if ev.Run != nil {
 			out = append(out, *ev.Run)
 		}

@@ -238,20 +238,6 @@ func assertExact(t *testing.T, label string, want, got []string) {
 	t.Errorf("%s: missing %v extra %v\n  want %v\n  got  %v", label, missing, extra, sorted(want), sorted(got))
 }
 
-func assertContains(t *testing.T, label string, want, got []string) {
-	t.Helper()
-	g := setOf(got)
-	var missing []string
-	for _, k := range want {
-		if !g[k] {
-			missing = append(missing, k)
-		}
-	}
-	if len(missing) > 0 {
-		t.Errorf("%s: missing %v (got %v)", label, missing, sorted(got))
-	}
-}
-
 func setOf(v []string) map[string]bool {
 	m := map[string]bool{}
 	for _, s := range v {

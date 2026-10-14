@@ -32,7 +32,7 @@ func newRepo(t *testing.T) *repo {
 	t.Setenv("HK", "0")
 	base := t.TempDir()
 	dir := filepath.Join(base, "repo")
-	must.OK(t, os.MkdirAll(dir, 0o755))
+	must.OK(t, os.MkdirAll(dir, 0o750))
 	r := &repo{t: t, dir: dir, ctx: context.Background()}
 	r.git(dir, "init", "-q", "-b", "main")
 	r.commit(dir, "f.txt", "one")
@@ -56,7 +56,7 @@ func (g gitSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 		path = filepath.Join(resolved, filepath.Base(path))
 	}
 	if create {
-		cmd := testgit.CommandContext(g.t, ctx, g.repo, "branch", branch, base)
+		cmd := testgit.CommandContext(ctx, g.t, g.repo, "branch", branch, base)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("branch: %w\n%s", err, out)
 		}
@@ -64,7 +64,7 @@ func (g gitSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 		return path, nil
 	}
-	cmd := testgit.CommandContext(g.t, ctx, g.repo, "worktree", "add", path, branch)
+	cmd := testgit.CommandContext(ctx, g.t, g.repo, "worktree", "add", path, branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("worktree add: %w\n%s", err, out)
 	}
@@ -78,7 +78,7 @@ func (r *repo) git(dir string, args ...string) string {
 
 func (r *repo) commit(dir, file, content string) string {
 	r.t.Helper()
-	must.OK(r.t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644))
+	must.OK(r.t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600))
 	r.git(dir, "add", file)
 	r.next++
 	r.git(dir, "commit", "-q", "-m", content)
@@ -98,7 +98,7 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	if again, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0); err != nil || again != w1 {
 		t.Fatalf("%+v %v", again, err)
 	}
-	must.OK(t, os.WriteFile(filepath.Join(w1.Path, "wip.txt"), []byte("wip"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(w1.Path, "wip.txt"), []byte("wip"), 0o600))
 	if again, _ := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0); !again.Dirty {
 		t.Fatal("dirty worktree not reported")
 	}
@@ -125,7 +125,7 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	}
 	// Quarantine: the old tree moves aside detached with its edits and its
 	// token; the task path gets a fresh tree on the branch.
-	must.OK(t, os.WriteFile(filepath.Join(w2.Path, "wip.txt"), []byte("wip"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(w2.Path, "wip.txt"), []byte("wip"), 0o600))
 	w3, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 1)
 	if err != nil || w3.Path != w2.Path || w3.Quarantined != w2.Path+".stale-1" || !w3.Dirty {
 		t.Fatalf("quarantine: %+v %v", w3, err)
@@ -144,12 +144,12 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(snap, "g.txt")); string(b) != "work" {
+	if b, _ := os.ReadFile(filepath.Clean(filepath.Join(snap, "g.txt"))); string(b) != "work" {
 		t.Fatal("snapshot content")
 	}
 	// Editing the attempt worktree does not affect the snapshot.
-	must.OK(t, os.WriteFile(filepath.Join(w1.Path, "g.txt"), []byte("changed"), 0o644))
-	if b, _ := os.ReadFile(filepath.Join(snap, "g.txt")); string(b) != "work" {
+	must.OK(t, os.WriteFile(filepath.Join(w1.Path, "g.txt"), []byte("changed"), 0o600))
+	if b, _ := os.ReadFile(filepath.Clean(filepath.Join(snap, "g.txt"))); string(b) != "work" {
 		t.Fatal("snapshot must be isolated")
 	}
 	cleanup()
@@ -229,7 +229,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	w5, _ := r.mgr.EnsureTask(r.ctx, "at-ffffff", "main", 0)
 	rev5 := r.commit(w5.Path, "f5.txt", "f5")
 	cand5, _ := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
-	must.OK(t, os.WriteFile(filepath.Join(r.dir, "f5.txt"), []byte("x"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(r.dir, "f5.txt"), []byte("x"), 0o600))
 	err = r.mgr.Promote(r.ctx, "main", cand5)
 	cand5.Cleanup()
 	if !fault.Is(err, fault.CodeBaseConflict) {
@@ -267,7 +267,7 @@ func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer cands[i].Cleanup()
+		t.Cleanup(cands[i].Cleanup)
 	}
 	errs := make([]error, n)
 	var wg sync.WaitGroup
@@ -310,20 +310,20 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 	r := newRepo(t)
 	r.git(r.dir, "config", "user.name", "t")
 	r.git(r.dir, "config", "user.email", "t@t")
-	promote := func(id, file string) (Candidate, error) {
+	promote := func(id, file string) error {
 		w, _ := r.mgr.EnsureTask(r.ctx, id, "main", 0)
 		rev := r.commit(w.Path, file, "from "+id)
 		cand, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev}, "x")
 		if err != nil {
 			t.Fatal(err)
 		}
-		return cand, r.mgr.Promote(r.ctx, "main", cand)
+		return r.mgr.Promote(r.ctx, "main", cand)
 	}
 	// Unrelated untracked file and unrelated tracked edit: promotion proceeds
 	// and both survive.
-	must.OK(t, os.WriteFile(filepath.Join(r.dir, "notes.txt"), []byte("scratch"), 0o644))
-	must.OK(t, os.WriteFile(filepath.Join(r.dir, "g.txt"), []byte("local edit"), 0o644)) // g.txt is tracked
-	if _, err := promote("at-dirty1", "new1.txt"); err != nil {
+	must.OK(t, os.WriteFile(filepath.Join(r.dir, "notes.txt"), []byte("scratch"), 0o600))
+	must.OK(t, os.WriteFile(filepath.Join(r.dir, "g.txt"), []byte("local edit"), 0o600)) // g.txt is tracked
+	if err := promote("at-dirty1", "new1.txt"); err != nil {
 		t.Fatalf("safe promotion refused: %v", err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(r.dir, "notes.txt")); string(b) != "scratch" {
@@ -336,16 +336,16 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 		t.Fatal("promotion did not land")
 	}
 	// Untracked file at a path the promotion creates: refused, untouched.
-	must.OK(t, os.WriteFile(filepath.Join(r.dir, "new2.txt"), []byte("my draft"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(r.dir, "new2.txt"), []byte("my draft"), 0o600))
 	before := r.git(r.dir, "rev-parse", "main")
-	if _, err := promote("at-dirty2", "new2.txt"); err == nil || !strings.Contains(err.Error(), "new2.txt") {
+	if err := promote("at-dirty2", "new2.txt"); err == nil || !strings.Contains(err.Error(), "new2.txt") {
 		t.Fatalf("clashing untracked file not refused: %v", err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(r.dir, "new2.txt")); string(b) != "my draft" || r.git(r.dir, "rev-parse", "main") != before {
 		t.Fatal("refusal was not clean")
 	}
 	// Tracked file with local edits that the promotion modifies: refused.
-	if _, err := promote("at-dirty3", "g.txt"); err == nil || !strings.Contains(err.Error(), "g.txt") {
+	if err := promote("at-dirty3", "g.txt"); err == nil || !strings.Contains(err.Error(), "g.txt") {
 		t.Fatalf("clashing local edit not refused: %v", err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(r.dir, "g.txt")); string(b) != "local edit" {
@@ -359,7 +359,7 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 
 func TestPrepareMergeWithoutIdentity(t *testing.T) {
 	empty := filepath.Join(t.TempDir(), "gitconfig")
-	must.OK(t, os.WriteFile(empty, nil, 0o644))
+	must.OK(t, os.WriteFile(empty, nil, 0o600))
 	t.Setenv("GIT_CONFIG_GLOBAL", empty)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {

@@ -13,7 +13,7 @@ const emptyBlake3 = "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41
 
 func TestPresetFileBlake3(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "empty"), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "empty"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	run := func(in string) RunResult {

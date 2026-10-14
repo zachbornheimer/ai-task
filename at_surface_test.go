@@ -206,7 +206,7 @@ func TestPublicSurfaceMatchesContract(t *testing.T) {
 	}
 	assertExactNames(t, "Engine methods", want.EngineMethods, methods)
 
-	raw, err := os.ReadFile(filepath.Join(root, "docs", "contract.md"))
+	raw, err := os.ReadFile(filepath.Clean(filepath.Join(root, "docs", "contract.md")))
 	if err != nil {
 		t.Fatal(err)
 	}

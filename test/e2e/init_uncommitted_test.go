@@ -32,7 +32,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n"), 0o600))
 
 	res := e.ok("init", "--name", "u")
 	if res["created_repo"] != true {
@@ -52,7 +52,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	}
 	// The human form says it too.
 	h := newEnv(t)
-	must.OK(t, os.WriteFile(filepath.Join(h.cwd, "lib.go"), []byte("package lib\n"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(h.cwd, "lib.go"), []byte("package lib\n"), 0o600))
 	if r := h.runIn(h.cwd, "", []string{"ATASK_OUTPUT=text"}, "init"); !strings.Contains(r.stdout, "untracked") || !strings.Contains(r.stdout, "lib.go") {
 		t.Fatalf("human init output: %s", r.stdout)
 	}
@@ -77,7 +77,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != true {
 		t.Fatalf("doctor on a clean checkout: %v", ch)
 	}
-	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n// edited\n"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n// edited\n"), 0o600))
 	if ch := doctorCheck(e.ok("doctor"), "uncommitted_files"); ch == nil || ch["ok"] != false || !strings.Contains(must.As[string](ch["message"]), "main.go") {
 		t.Fatalf("doctor on a modified file: %v", ch)
 	}

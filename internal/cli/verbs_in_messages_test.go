@@ -20,7 +20,7 @@ func TestMessagesNameRegisteredVerbs(t *testing.T) {
 			if filepath.Ext(f) == ".go" && len(f) > 8 && f[len(f)-8:] == "_test.go" {
 				continue
 			}
-			src, err := os.ReadFile(f)
+			src, err := os.ReadFile(filepath.Clean(f))
 			if err != nil {
 				t.Fatal(err)
 			}

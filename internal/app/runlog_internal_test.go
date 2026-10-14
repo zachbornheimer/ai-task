@@ -13,9 +13,9 @@ import (
 func TestVerifyWritesRunLogsPrunesOldRuns(t *testing.T) {
 	proj := filepath.Join(t.TempDir(), "proj")
 	for i := 1; i <= keepRunLogs+5; i++ {
-		must.OK(t, os.MkdirAll(filepath.Join(proj, fmt.Sprintf("run-%d", i)), 0o755))
+		must.OK(t, os.MkdirAll(filepath.Join(proj, fmt.Sprintf("run-%d", i)), 0o750))
 	}
-	must.OK(t, os.MkdirAll(filepath.Join(proj, "unrelated"), 0o755))
+	must.OK(t, os.MkdirAll(filepath.Join(proj, "unrelated"), 0o750))
 	f, path := openCheckLog(filepath.Join(proj, fmt.Sprintf("run-%d", keepRunLogs+6)), "go test/./...")
 	if f == nil {
 		t.Fatal("no log file")

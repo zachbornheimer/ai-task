@@ -10,6 +10,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
@@ -75,11 +76,8 @@ func (c *ctxt) guardWorkspace(ctx context.Context, tok execution.Token) error {
 	if err != nil {
 		return err
 	}
-	v, err := e.Whoami(ctx, tok)
-	if err != nil {
-		return nil
-	}
-	if string(v.ID) != here {
+	// A token that resolves to nothing is left for the command to report.
+	if v, err := e.Whoami(ctx, tok); err == nil && string(v.ID) != here {
 		return fault.New(fault.CodeInvalidSession, "session token belongs to %s but the working directory is the worktree of %s; run in %s's worktree or use its token", v.ID, here, v.ID)
 	}
 	return nil
@@ -311,16 +309,8 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 // every child's completed revision. handled is false when ref is not a
 // group, so the caller treats it as a session token.
 func (c *ctxt) verifyGroup(ctx context.Context, ref string) (handled bool, err error) {
-	pid, err := c.resolveProject(ctx)
-	if err != nil {
-		return false, nil
-	}
-	e, err := c.engine(ctx)
-	if err != nil {
-		return false, nil
-	}
-	v, err := e.Show(ctx, pid, ref, false)
-	if err != nil || v.Kind != task.KindGroup {
+	pid, e, isGroup := c.findGroup(ctx, ref)
+	if !isGroup {
 		return false, nil
 	}
 	res, err := e.VerifyGroup(ctx, pid, ref)
@@ -367,4 +357,19 @@ func runContext(ctx context.Context, c *ctxt, args []string) error {
 
 func init() {
 	register("context", "operating contract, or worker handoff for a task id", runContext)
+}
+
+// findGroup resolves the project and engine when ref names a group. Any
+// lookup failure means ref is not a group, so the caller tries it as a token.
+func (c *ctxt) findGroup(ctx context.Context, ref string) (project.ID, *app.Engine, bool) {
+	pid, err := c.resolveProject(ctx)
+	if err != nil {
+		return "", nil, false
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return "", nil, false
+	}
+	v, err := e.Show(ctx, pid, ref, false)
+	return pid, e, err == nil && v.Kind == task.KindGroup
 }

@@ -65,7 +65,7 @@ func TestFailureAccountingIsFencedAndClassified(t *testing.T) {
 	f.waitStatus(string(c), task.StatusVerifying)
 	_, err = f.e.Verify(f.ctx, sc.Token, verification.ModeComplete)
 	wantCode(t, err, fault.CodeConflict)
-	must.OK(t, os.WriteFile(flag, []byte("1"), 0o644))
+	must.OK(t, os.WriteFile(flag, []byte("1"), 0o600))
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}

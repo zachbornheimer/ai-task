@@ -178,7 +178,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	}
 	// "Implement": write the file the task's check expects, commit it.
 	file := filepath.Join(s.Workspace, s.Task.Key+".txt")
-	if err := os.WriteFile(file, []byte("implemented by worker "+strconv.Itoa(n)), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte("implemented by worker "+strconv.Itoa(n)), 0o600); err != nil {
 		return err
 	}
 	if err := git(s.Workspace, "add", "."); err != nil {
@@ -202,8 +202,7 @@ func runOneAgent(ctx context.Context, eng *at.Store, s at.Session, n int, out *o
 	if err != nil {
 		return err
 	}
-	switch {
-	case res.Completed:
+	if res.Completed {
 		say(out, "worker %d: %s complete\n", n, s.Task.ID)
 	}
 	return nil
@@ -238,7 +237,7 @@ func fileProof(file string) *at.ProofSpec {
 
 // fakePlanner turns the prompt into a typed proposal. A real planner asks a
 // model and parses its answer into the same closed set of changes.
-func fakePlanner(prompt string) []at.Change {
+func fakePlanner(_ string) []at.Change {
 	task := func(key, title, parent string, requires ...at.Ref) at.AddTask {
 		return at.AddTask{Key: key, Title: title, Parent: at.Ref(parent), Requires: requires, Proof: fileProof(key + ".txt"), Regression: regressionProof}
 	}
@@ -258,7 +257,8 @@ func fakePlanner(prompt string) []at.Change {
 // the leaked-credential rotation is missing and adds it as a prerequisite
 // of the token store; afterwards it has nothing to add.
 func fakeReviewer(current at.PlanSnapshot) []at.Change {
-	for _, t := range current.Tasks {
+	for i := range current.Tasks {
+		t := &current.Tasks[i]
 		if t.Key == "rotate" {
 			return nil
 		}
@@ -274,10 +274,12 @@ func printPlan(ctx context.Context, eng *at.Store, project at.ProjectID, out *os
 		sayln(out, err)
 		return
 	}
-	for _, g := range snap.Groups {
+	for i := range snap.Groups {
+		g := &snap.Groups[i]
 		say(out, "  group %s %s (%d/%d)\n", g.ID, g.Title, g.Progress.Complete, g.Progress.Total)
 	}
-	for _, t := range snap.Tasks {
+	for i := range snap.Tasks {
+		t := &snap.Tasks[i]
 		say(out, "  %s %s  %s [%s]", at.Glyph(t.Status, t.Started), t.ID, t.Title, t.Status)
 		if r := t.Verification.Complete; r != nil && r.Summary != "" {
 			say(out, " — %s: %s", r.Status, r.Summary)
@@ -296,7 +298,7 @@ func initRepo(dir string) error {
 	if err := git(dir, "config", "user.email", "at@example"); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "README.txt"), []byte("example"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "README.txt"), []byte("example"), 0o600); err != nil {
 		return err
 	}
 	if err := git(dir, "add", "README.txt"); err != nil {
@@ -306,7 +308,9 @@ func initRepo(dir string) error {
 }
 
 func git(dir string, args ...string) error {
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd := exec.Command("git")
+	cmd.Args = append(cmd.Args, "-C", dir, "-c", "core.hooksPath=/dev/null")
+	cmd.Args = append(cmd.Args, args...)
 	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=at-example", "GIT_AUTHOR_EMAIL=at@example", "GIT_COMMITTER_NAME=at-example", "GIT_COMMITTER_EMAIL=at@example", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "HK=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git %v: %w\n%s", args, err, out)

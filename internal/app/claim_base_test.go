@@ -2,7 +2,6 @@ package app_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/task"
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -36,7 +36,7 @@ func stackedFixture(t *testing.T) *fixture {
 
 func (f *fixture) isAncestor(dir, rev string) bool {
 	f.t.Helper()
-	return exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", rev, "HEAD").Run() == nil
+	return testgit.Command(f.t, dir, "merge-base", "--is-ancestor", rev, "HEAD").Run() == nil
 }
 
 func TestClaimBaseMergesRequirements(t *testing.T) {

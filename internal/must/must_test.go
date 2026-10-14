@@ -31,8 +31,8 @@ type spy struct {
 	failed bool
 }
 
-func (s *spy) Helper()           {}
-func (s *spy) Fatal(args ...any) { s.failed = true }
+func (s *spy) Helper()        {}
+func (s *spy) Fatal(_ ...any) { s.failed = true }
 
 func TestOKFailsOnError(t *testing.T) {
 	s := &spy{TB: t}

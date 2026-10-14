@@ -381,9 +381,10 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 			return v, err
 		}
 		prog := &Progress{}
-		for _, c := range children {
+		for i := range children {
+			c := &children[i]
 			cs := c.Status(now, p.MaxAttempts)
-			v.Children = append(v.Children, rel(c, cs))
+			v.Children = append(v.Children, rel(*c, cs))
 			if c.Task.Kind == task.KindTask {
 				prog.Total++
 				if cs == task.StatusComplete {
@@ -412,21 +413,23 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	if err != nil {
 		return v, err
 	}
-	for _, d := range reqs {
+	for i := range reqs {
+		d := &reqs[i]
 		if d.Task.Archived() {
 			continue
 		}
-		v.Requires = append(v.Requires, rel(d, d.Status(now, p.MaxAttempts)))
+		v.Requires = append(v.Requires, rel(*d, d.Status(now, p.MaxAttempts)))
 	}
 	deps, err := tx.Dependents(t.ID)
 	if err != nil {
 		return v, err
 	}
-	for _, d := range deps {
+	for i := range deps {
+		d := &deps[i]
 		if d.Task.Archived() {
 			continue
 		}
-		v.Blocks = append(v.Blocks, rel(d, d.Status(now, p.MaxAttempts)))
+		v.Blocks = append(v.Blocks, rel(*d, d.Status(now, p.MaxAttempts)))
 	}
 	h, err := tx.Handoff(t.ID)
 	if err != nil {
@@ -442,11 +445,13 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	if err != nil {
 		return v, err
 	}
-	for _, a := range attempts {
+	for i := range attempts {
+		a := &attempts[i]
 		seqOf[a.ID] = a.Seq
 	}
-	for _, run := range runs {
-		rv := runView(run, seqOf[run.AttemptID], nil)
+	for i := range runs {
+		run := &runs[i]
+		rv := runView(*run, seqOf[run.AttemptID], nil)
 		switch run.Mode {
 		case verification.ModeProof:
 			v.Verification.Task = &rv
@@ -471,12 +476,13 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		for i := range subs {
 			hist.Submissions = append(hist.Submissions, *submissionView(&subs[i]))
 		}
-		for _, run := range runs {
+		for i := range runs {
+			run := &runs[i]
 			ev, err := tx.EvidenceForRun(run.ID)
 			if err != nil {
 				return v, err
 			}
-			hist.Runs = append(hist.Runs, runView(run, seqOf[run.AttemptID], ev))
+			hist.Runs = append(hist.Runs, runView(*run, seqOf[run.AttemptID], ev))
 		}
 		if hist.Logs == nil {
 			hist.Logs = []execution.RecordedLog{}
@@ -499,7 +505,8 @@ func (e *Engine) groupProgress(tx *sqlite.Tx, id task.ID, p project.Project, now
 	if err != nil {
 		return prog, err
 	}
-	for _, c := range children {
+	for i := range children {
+		c := &children[i]
 		if c.Task.Kind == task.KindGroup {
 			gp, err := e.groupProgress(tx, c.Task.ID, p, now)
 			if err != nil {

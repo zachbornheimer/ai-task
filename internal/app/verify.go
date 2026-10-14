@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -214,7 +215,8 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 		return out, nil
 	}
 	requiredTaskFailed := false
-	for _, ev := range out {
+	for i := range out {
+		ev := &out[i]
 		if ev.Required && ev.Outcome != verification.OutcomePassed {
 			requiredTaskFailed = true
 		}
@@ -345,7 +347,8 @@ func budgetWarnings(evidence []verification.Evidence, policy verification.Policy
 		regression[c.ID] = true
 	}
 	var w []string
-	for _, ev := range evidence {
+	for i := range evidence {
+		ev := &evidence[i]
 		if !ev.Required || ev.Outcome != verification.OutcomePassed {
 			continue
 		}
@@ -676,10 +679,5 @@ func timeoutMessage(v verification.Verdict, policy verification.Policy, taskBudg
 
 // hasField reports whether the whitespace-separated list s contains f.
 func hasField(s, f string) bool {
-	for _, x := range strings.Fields(s) {
-		if x == f {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Fields(s), f)
 }

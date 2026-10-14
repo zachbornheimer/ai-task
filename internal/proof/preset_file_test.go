@@ -11,10 +11,10 @@ func TestPresetFileExistsAbsent(t *testing.T) {
 	dir := t.TempDir()
 	for _, f := range []string{"a.txt", "sub/b.log", "sub/deep/c.log"} {
 		p := filepath.Join(dir, f)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, nil, 0o644); err != nil {
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
