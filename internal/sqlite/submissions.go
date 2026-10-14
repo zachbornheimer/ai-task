@@ -36,6 +36,9 @@ type NewRun struct {
 	Policy       verification.Policy
 	Environment  string
 	Summary      string
+	// HeartbeatEvery is how often the run's process stamps its heartbeat;
+	// zero for runs that carry no heartbeat.
+	HeartbeatEvery time.Duration
 }
 
 // InsertRun records a verification run.
@@ -60,9 +63,9 @@ func (t *Tx) InsertRun(r NewRun, now time.Time) (int64, error) {
 	if r.JobID != 0 {
 		job = r.JobID
 	}
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_runs (task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.TaskID, attempt, submission, job, r.Mode, r.Status, r.Revision, string(body), r.Policy.Digest(), r.Environment, ms(now), started, finished, r.Summary)
+	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_runs (task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary, heartbeat_at, heartbeat_every_ms)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.TaskID, attempt, submission, job, r.Mode, r.Status, r.Revision, string(body), r.Policy.Digest(), r.Environment, ms(now), started, finished, r.Summary, heartbeatStamp(r, now), r.HeartbeatEvery.Milliseconds())
 	if err != nil {
 		return 0, wrapInternal(err, "insert verification run")
 	}
@@ -72,8 +75,21 @@ func (t *Tx) InsertRun(r NewRun, now time.Time) (int64, error) {
 
 // FinishRun records the final state of a run.
 func (t *Tx) FinishRun(runID int64, status RunStatus, summary string, now time.Time) error {
-	_, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = ?, summary = ?, finished_at = ? WHERE id = ?`, status, summary, ms(now), runID)
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = ?, summary = ?, finished_at = ? WHERE id = ? AND (status = 'running' OR ? <> 'running')`, status, summary, ms(now), runID, status)
 	return wrapInternal(err, "finish verification run")
+}
+
+// TouchRun stamps the heartbeat of a run that is still running.
+func (t *Tx) TouchRun(runID int64, now time.Time) error {
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET heartbeat_at = ? WHERE id = ? AND status = 'running'`, ms(now), runID)
+	return wrapInternal(err, "touch verification run")
+}
+
+func heartbeatStamp(r NewRun, now time.Time) int64 {
+	if r.HeartbeatEvery <= 0 {
+		return 0
+	}
+	return ms(now)
 }
 
 // SetRunIntegratedRevision records the revision a run's evidence finally
@@ -240,6 +256,16 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 		return 0, wrapInternal(err, "reconcile final runs")
 	}
 	n, _ := res.RowsAffected()
+	// A run whose process stopped stamping its heartbeat for two intervals
+	// is dead even while its attempt lease is still live.
+	resH, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'process lost'
+		WHERE status = 'running' AND mode IN ('complete', 'proof', 'regression') AND heartbeat_every_ms > 0
+		  AND heartbeat_at + 2 * heartbeat_every_ms <= ?`, ms(now), ms(now))
+	if err != nil {
+		return 0, wrapInternal(err, "reap lost runs")
+	}
+	nH, _ := resH.RowsAffected()
+	n += nH
 	// Diagnostic runs whose attempt ended or expired while they were
 	// recorded running: the process is gone; close them (no task failure).
 	resD, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the attempt ended or its lease expired before the diagnostic run finished'

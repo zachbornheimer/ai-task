@@ -44,6 +44,9 @@ func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verific
 	if _, err := verification.ParseMode(string(mode)); err != nil {
 		return VerifyResult{}, err
 	}
+	if err := e.reconcile(ctx); err != nil {
+		return VerifyResult{}, err
+	}
 	var res VerifyResult
 	var err error
 	if mode == verification.ModeComplete {
@@ -119,13 +122,13 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 			return err
 		}
 		var err error
-		runID, err = tx.InsertRun(sqlite.NewRun{TaskID: p.rec.Task.ID, AttemptID: p.attempt.ID, Mode: mode, Status: sqlite.RunRunning, Revision: revision, Policy: policy, Environment: environmentFingerprint()}, now)
+		runID, err = tx.InsertRun(sqlite.NewRun{TaskID: p.rec.Task.ID, AttemptID: p.attempt.ID, Mode: mode, Status: sqlite.RunRunning, Revision: revision, Policy: policy, Environment: environmentFingerprint(), HeartbeatEvery: e.renewalInterval(p.attempt.Lease)}, now)
 		return err
 	})
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	opCtx, stop := e.heartbeat(ctx, token, p.attempt.Lease)
+	opCtx, stop := e.heartbeatWithPulse(ctx, token, p.attempt.Lease, runID)
 	fence := func(tx *sqlite.Tx) error { _, err := e.authorize(tx, token, e.now()); return err }
 	changed, _ := workspace.ChangedFiles(ctx, p.dir, "refs/heads/"+p.proj.TargetBranch)
 	if st, err := workspace.Inspect(ctx, p.dir); err == nil {
@@ -427,14 +430,14 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		if fr.submission, err = tx.InsertSubmission(r.Task.ID, p.attempt.ID, revision, now); err != nil {
 			return err
 		}
-		fr.runID, err = tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, AttemptID: p.attempt.ID, SubmissionID: fr.submission, Mode: verification.ModeComplete, Status: sqlite.RunRunning, Revision: revision, Policy: p.policy, Environment: environmentFingerprint()}, now)
+		fr.runID, err = tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, AttemptID: p.attempt.ID, SubmissionID: fr.submission, Mode: verification.ModeComplete, Status: sqlite.RunRunning, Revision: revision, Policy: p.policy, Environment: environmentFingerprint(), HeartbeatEvery: e.renewalInterval(p.attempt.Lease)}, now)
 		return err
 	})
 	if err != nil {
 		return VerifyResult{}, err
 	}
 	e.notify()
-	opCtx, stop := e.heartbeat(ctx, token, p.attempt.Lease)
+	opCtx, stop := e.heartbeatWithPulse(ctx, token, p.attempt.Lease, fr.runID)
 	fr.checkCtx = opCtx
 	res, err := e.executeFinal(ctx, fr)
 	if terr := stop(); terr != nil && err != nil && opCtx.Err() != nil && ctx.Err() == nil {

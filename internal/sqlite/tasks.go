@@ -344,6 +344,11 @@ func (t *Tx) ArchiveTask(id task.ID, reason string, now time.Time) error {
 // never ended whose lease expired), returning the task to ready. It
 // reports whether anything changed; a live claim is never touched.
 func (t *Tx) ResetAttempts(id task.ID, now time.Time) (bool, error) {
+	// Close dead runs first so a vanished verification does not keep the
+	// task in verifying after its attempt ends.
+	if _, err := t.ReconcileRuns(now); err != nil {
+		return false, err
+	}
 	res, err := t.tx.ExecContext(t.ctx, `UPDATE execution_attempts SET ended_at = ?, end_reason = ? WHERE task_id = ? AND ended_at IS NULL AND lease_expires_at <= ?`, ms(now), execution.EndReleased, id, ms(now))
 	if err != nil {
 		return false, wrapInternal(err, "end dead attempt")
