@@ -15,7 +15,7 @@ File an objective with atask add "title" --proof "run: cmd" --regression "run: c
 
 atask claim with no id takes the oldest claimable task. atask claim ID takes that one. The claim prints a session token and a workspace. The token is claim JSON field result.token. Present it by running in the task worktree (stored there), ATASK_SESSION, or one positional TOKEN (- reads stdin) on log, verify, claim renew, claim release; log and verify take no task id, so quote flag values. An expired or unauthorized claim cannot complete a task.
 
-Work only on the claimed task. Hard dependencies: B --requires A means B cannot be claimed until A is complete. Cycles and cross-project edges are rejected. To delegate, ensure the objective has a task, then have a worker claim it and follow atask context ID. The host launches, heartbeats, cancels, and recovers workers.
+Work only on the claimed task. Hard dependencies: B --requires A means B cannot be claimed until A is complete. Cycles and edges between tasks sharing no project are rejected. A task may name several projects with repeated --project; the first is its home. To delegate, ensure the objective has a task, then have a worker claim it and follow atask context ID. The host launches, heartbeats, cancels, and recovers workers.
 
 Record progress with atask log --done "..." --next "..." --learned "..." --note "...". Next is what the following attempt reads first. Log requires a live session.
 

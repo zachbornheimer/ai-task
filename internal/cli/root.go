@@ -45,7 +45,37 @@ type Env struct {
 type globals struct {
 	db      string
 	project string
-	json    bool
+	// projects are the --project flags given after add or update, in
+	// order; the first is the home. Empty otherwise: a --project before the
+	// command only scopes it.
+	projects []string
+	json     bool
+}
+
+// repeatableCommands accept --project more than once.
+var repeatableCommands = map[string]bool{"add": true, "update": true}
+
+// projectFlag binds --project: a single value everywhere, a repeatable
+// list (first is the home) on add and update.
+type projectFlag struct {
+	g        *globals
+	repeated bool
+}
+
+func (f *projectFlag) String() string {
+	if f == nil || f.g == nil {
+		return ""
+	}
+	return f.g.project
+}
+
+func (f *projectFlag) Set(v string) error {
+	f.g.project = v
+	if f.repeated {
+		f.g.projects = append(f.g.projects, v)
+		f.g.project = f.g.projects[0]
+	}
+	return nil
 }
 
 type command struct {
@@ -127,7 +157,11 @@ func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
 		dbHelp = "database path (env ATASK_DB; default " + def + ")"
 	}
 	fs.StringVar(&c.g.db, "db", c.g.db, dbHelp)
-	fs.StringVar(&c.g.project, "project", c.g.project, "project id or name (env ATASK_PROJECT)")
+	help := "project id or name (env ATASK_PROJECT)"
+	if repeatableCommands[c.name] {
+		help = "project id or name (env ATASK_PROJECT); repeat to name more projects, the first is the home"
+	}
+	fs.Var(&projectFlag{g: &c.g, repeated: c.fs == fs && repeatableCommands[c.name]}, "project", help)
 	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env ATASK_OUTPUT=json)")
 }
 

@@ -93,7 +93,8 @@ type TaskView struct {
 	ID          task.ID                    `json:"id"`
 	Kind        task.Kind                  `json:"kind"`
 	Key         string                     `json:"key,omitempty"`
-	Project     string                     `json:"project,omitempty"`
+	Project     string                     `json:"project,omitempty"`  // home
+	Projects    []string                   `json:"projects,omitempty"` // ordered; first is the home
 	Title       string                     `json:"title"`
 	Outcome     string                     `json:"outcome,omitempty"`
 	Constraints []string                   `json:"constraints,omitempty"`
@@ -334,8 +335,13 @@ func relFor(tx *sqlite.Tx, id task.ID, p project.Project, now time.Time) (Rel, b
 func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Project, now time.Time, depth viewDepth, head targetHead) (TaskView, error) {
 	st := r.Status(now, p.MaxAttempts)
 	t := r.Task
+	names, err := projectNames(tx, t, p)
+	if err != nil {
+		return TaskView{}, err
+	}
 	v := TaskView{
-		ID: t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
+		Projects: names,
+		ID:       t.ID, Kind: t.Kind, Key: t.Key, Project: p.Name, Title: t.Description, Outcome: t.Outcome, Constraints: t.Constraints,
 		Checks: t.Verification.TaskChecks, Proof: t.Verification.Proof, Regression: t.Verification.RegressionProof, ContractRev: t.ContractRev, Status: st, Started: r.Attempt != nil,
 		Attempt: attemptView(r.Attempt, now), Submission: submissionView(r.Submission),
 		Failures: r.Failures, LastError: r.LastError, CompletedAt: r.CompletedAt, CompletedRevision: r.CompletedRevision, ArchivedAt: t.ArchivedAt, ArchiveReason: t.ArchiveReason, Creator: t.Creator, CreatedCwd: t.CreatedCwd, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
@@ -541,4 +547,22 @@ func (e *Engine) groupProgress(tx *sqlite.Tx, id task.ID, p project.Project, now
 		}
 	}
 	return prog, nil
+}
+
+// projectNames lists a task's project names in order, reusing the already
+// loaded home.
+func projectNames(tx *sqlite.Tx, t task.Task, home project.Project) ([]string, error) {
+	names := make([]string, 0, len(t.Projects))
+	for _, id := range t.Projects {
+		if id == home.ID {
+			names = append(names, home.Name)
+			continue
+		}
+		p, err := tx.GetProject(id)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, p.Name)
+	}
+	return names, nil
 }

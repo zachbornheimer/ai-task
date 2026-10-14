@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,6 +110,15 @@ type applier struct {
 	result   plan.Result
 }
 
+// resolveAny is resolve for a prerequisite or blocker, which may live in any
+// project; insertEdges enforces that it shares one with the dependent.
+func (a *applier) resolveAny(r plan.Ref) (sqlite.Record, error) {
+	if r.IsID() {
+		return a.tx.GetRecord(task.ID(r))
+	}
+	return a.resolve(r)
+}
+
 // resolve turns a Ref into an existing task record.
 func (a *applier) resolve(r plan.Ref) (sqlite.Record, error) {
 	if r.IsID() {
@@ -116,7 +126,7 @@ func (a *applier) resolve(r plan.Ref) (sqlite.Record, error) {
 		if err != nil {
 			return rec, err
 		}
-		if rec.Task.ProjectID != a.cs.ProjectID {
+		if !slices.Contains(rec.Task.Projects, a.cs.ProjectID) {
 			return rec, fault.New(fault.CodeInvalidInput, "%s belongs to another project", r)
 		}
 		return rec, nil
@@ -155,7 +165,9 @@ func (a *applier) createdName(i int, key string) string {
 	return fmt.Sprintf("#%d", i)
 }
 
-func (a *applier) parentGroup(ref plan.Ref) (task.ID, error) {
+// parentGroup resolves the enclosing group of a child whose home is home;
+// a group and its children share one home project.
+func (a *applier) parentGroup(ref plan.Ref, home project.ID) (task.ID, error) {
 	if ref == "" {
 		return "", nil
 	}
@@ -166,11 +178,14 @@ func (a *applier) parentGroup(ref plan.Ref) (task.ID, error) {
 	if g.Task.Kind != task.KindGroup || g.Task.Archived() {
 		return "", fault.New(fault.CodeInvalidInput, "%s is not a live group", ref)
 	}
+	if g.Task.ProjectID != home {
+		return "", fault.New(fault.CodeInvalidInput, "%s: a group's children share the group's home project", ref)
+	}
 	return g.Task.ID, nil
 }
 
 func (a *applier) addGroup(i int, c plan.AddGroup) error {
-	parent, err := a.parentGroup(c.Parent)
+	parent, err := a.parentGroup(c.Parent, a.cs.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -190,6 +205,9 @@ func (a *applier) addGroup(i int, c plan.AddGroup) error {
 		}
 	}
 	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindGroup, Key: c.Key, ParentID: parent, Description: c.Title, Verification: policy}
+	if err := a.requireProjectsExist(spec.AlsoIn); err != nil {
+		return err
+	}
 	id, err := a.insert(spec)
 	if err != nil {
 		return err
@@ -206,7 +224,7 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Projects: append([]project.ID{spec.ProjectID}, spec.AlsoIn...), Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := range 5 {
 		if attempt == 0 {
 			t.ID = a.e.newID()
@@ -236,11 +254,11 @@ func (a *applier) insert(spec task.Spec) (task.ID, error) {
 const taskIDWidth = 6
 
 func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
-	parent, err := a.parentGroup(c.Parent)
+	parent, err := a.parentGroup(c.Parent, a.cs.ProjectID)
 	if err != nil {
 		return err
 	}
-	spec := task.Spec{ProjectID: a.cs.ProjectID, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Verification: verification.Policy{TaskChecks: c.TaskChecks}}
+	spec := task.Spec{ProjectID: a.cs.ProjectID, AlsoIn: c.AlsoIn, Kind: task.KindTask, Key: c.Key, ParentID: parent, Description: c.Title, Outcome: c.Outcome, Constraints: c.Constraints, Verification: verification.Policy{TaskChecks: c.TaskChecks}}
 	if err := applyProofs(&spec.Verification, c.Proof, c.Regression); err != nil {
 		return err
 	}
@@ -255,7 +273,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	}
 	var requires []task.ID
 	for _, r := range c.Requires {
-		rec, err := a.resolve(r)
+		rec, err := a.resolveAny(r)
 		if err != nil {
 			return err
 		}
@@ -307,7 +325,7 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 		edges = append(edges, dependency.Edge{Task: id, Requires: r})
 	}
 	for _, b := range c.Blocks {
-		rec, err := a.resolve(b)
+		rec, err := a.resolveAny(b)
 		if err != nil {
 			return err
 		}
@@ -397,7 +415,7 @@ func (a *applier) sameBlocks(existing task.ID, blocks []plan.Ref) (bool, error) 
 		have[d.Task.ID] = true
 	}
 	for _, b := range blocks {
-		rec, err := a.resolve(b)
+		rec, err := a.resolveAny(b)
 		if err != nil {
 			return false, err
 		}
@@ -464,11 +482,11 @@ func (a *applier) requirePlanner(id task.ID) error {
 
 func (a *applier) insertEdges(ctx context.Context, edges []dependency.Edge) error {
 	for _, edge := range edges {
-		pa, ka, archA, err := a.tx.TaskProject(edge.Task)
+		_, ka, archA, err := a.tx.TaskProject(edge.Task)
 		if err != nil {
 			return err
 		}
-		pb, kb, archB, err := a.tx.TaskProject(edge.Requires)
+		_, kb, archB, err := a.tx.TaskProject(edge.Requires)
 		if err != nil {
 			return err
 		}
@@ -478,7 +496,11 @@ func (a *applier) insertEdges(ctx context.Context, edges []dependency.Edge) erro
 		if archA || archB {
 			return fault.New(fault.CodeConflict, "dependency on an archived task (%s requires %s)", edge.Task, edge.Requires)
 		}
-		if err := dependency.Validate(ctx, edge, pa == pb, a.tx); err != nil {
+		shared, err := a.tx.TasksShareProject(edge.Task, edge.Requires)
+		if err != nil {
+			return err
+		}
+		if err := dependency.Validate(ctx, edge, shared, a.tx); err != nil {
 			return err
 		}
 		if err := a.tx.InsertEdge(edge, a.now); err != nil {
@@ -500,6 +522,14 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 	if err := a.tx.LoadAcceptance(&t); err != nil {
 		return err
 	}
+	changed := false
+	if c.Projects.Set {
+		moved, did, err := a.replaceProjects(rec, c.Projects.Value)
+		if err != nil {
+			return err
+		}
+		t, changed = moved, did
+	}
 	contract := c.Proof != nil || c.Regression != nil || c.OnComplete.Set || c.Title != nil || c.Outcome != nil || c.Constraints.Set || c.Acceptance.Set || c.TaskChecks.Set || c.Parent != nil
 	edges := c.Requires.Set || len(c.AddRequires) > 0 || len(c.RemoveRequires) > 0
 	if rec.CompletedAt != nil && (contract || edges) && t.Kind != task.KindGroup {
@@ -512,7 +542,6 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	policyBefore := t.Verification
-	changed := false
 	if c.Title != nil {
 		t.Description, changed = *c.Title, true
 	}
@@ -553,7 +582,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		t.Verification, changed = pol, true
 	}
 	if c.Parent != nil {
-		parent, err := a.parentGroup(*c.Parent)
+		parent, err := a.parentGroup(*c.Parent, t.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -614,7 +643,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		want := map[task.ID]bool{}
 		if c.Requires.Set {
 			for _, r := range c.Requires.Value {
-				rec, err := a.resolve(r)
+				rec, err := a.resolveAny(r)
 				if err != nil {
 					return err
 				}
@@ -626,14 +655,14 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 			}
 		}
 		for _, r := range c.AddRequires {
-			rec, err := a.resolve(r)
+			rec, err := a.resolveAny(r)
 			if err != nil {
 				return err
 			}
 			want[rec.Task.ID] = true
 		}
 		for _, r := range c.RemoveRequires {
-			rec, err := a.resolve(r)
+			rec, err := a.resolveAny(r)
 			if err != nil {
 				return err
 			}

@@ -214,7 +214,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	if *file != "" {
-		if len(c.args) != 0 || *key != "" || *group || *outcome != "" || pfl.proof != "" || pfl.regression != "" || len(requires)+len(blocks) > 0 {
+		if len(c.args) != 0 || len(c.g.projects) > 1 || *key != "" || *group || *outcome != "" || pfl.proof != "" || pfl.regression != "" || len(requires)+len(blocks) > 0 {
 			return usage("-f takes the whole plan; no title or task flags alongside")
 		}
 		return c.addFromPlan(ctx, *file)
@@ -228,7 +228,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var op plan.Change
 	if *group {
-		if len(requires)+len(blocks)+len(accept)+len(constraints) > 0 || *outcome != "" {
+		if len(requires)+len(blocks)+len(accept)+len(constraints) > 0 || *outcome != "" || len(c.g.projects) > 1 {
 			return usage("--group takes --key, --parent, --proof and --regression (run on the merge of every child's completed revision once every child is complete); prerequisites, blockers, outcome and acceptance belong to tasks")
 		}
 		g := plan.AddGroup{Key: *key, Title: c.args[0], Parent: plan.Ref(*parent)}
@@ -242,7 +242,11 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		}
 		op = g
 	} else {
-		t := plan.AddTask{Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks)}
+		also, err := c.namedProjectIDs(ctx, c.g.projects[min(1, len(c.g.projects)):])
+		if err != nil {
+			return err
+		}
+		t := plan.AddTask{AlsoIn: also, Key: *key, Title: c.args[0], Outcome: *outcome, Parent: plan.Ref(*parent), Constraints: constraints, Acceptance: accept, Requires: refs(requires), Blocks: refs(blocks)}
 		if t.Proof, t.Regression, err = pfl.parse(); err != nil {
 			return err
 		}
@@ -360,6 +364,23 @@ func (c *ctxt) addFromPlan(ctx context.Context, file string) error {
 	return c.emitAdd(ctx, pid, res, id, title)
 }
 
+// namedProjectIDs resolves project names or ids given on the command line.
+func (c *ctxt) namedProjectIDs(ctx context.Context, names []string) ([]project.ID, error) {
+	e, err := c.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]project.ID, 0, len(names))
+	for _, n := range names {
+		p, err := e.ResolveProject(ctx, n, "")
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, p.ID)
+	}
+	return ids, nil
+}
+
 func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	outcome := c.fs.String("outcome", "", "new outcome")
 	parent := c.fs.String("parent", "\x00", "move into a group (id or key); empty string clears")
@@ -388,7 +409,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 		if strings.TrimSpace(*reason) == "" {
 			return usage("--archive needs --reason: say why the item is leaving the plan")
 		}
-		if *outcome != "" || *parent != "\x00" || len(constraints)+len(accept)+len(requires)+len(remove) > 0 || *reset || pfl.proof != "" || pfl.regression != "" || len(pfl.actions) > 0 {
+		if *outcome != "" || *parent != "\x00" || len(constraints)+len(accept)+len(requires)+len(remove)+len(c.g.projects) > 0 || *reset || pfl.proof != "" || pfl.regression != "" || len(pfl.actions) > 0 {
 			return usage("--archive cannot be combined with other edits; archive in its own update")
 		}
 		ops = append(ops, plan.ArchiveTask{Target: target, Reason: *reason})
@@ -418,6 +439,13 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 				return err
 			}
 			u.OnComplete = plan.Replace(acts)
+		}
+		if len(c.g.projects) > 0 {
+			ids, err := c.namedProjectIDs(ctx, c.g.projects)
+			if err != nil {
+				return err
+			}
+			u.Projects = plan.Replace(ids)
 		}
 		u.AddRequires = refs(requires)
 		u.RemoveRequires = refs(remove)

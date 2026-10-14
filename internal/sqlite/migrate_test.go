@@ -80,3 +80,35 @@ func TestMigrationLedgerRefusesNameMismatch(t *testing.T) {
 		t.Errorf("code = %q, want INVALID_INPUT", fault.CodeOf(err))
 	}
 }
+
+// TestTaskProjectsMigrationKeepsHome: a task stored before task_projects
+// becomes position 0 of its own project, so no home changes.
+func TestTaskProjectsMigrationKeepsHome(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "at.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'one', 1, 1)`)
+	exec(`INSERT INTO tasks (id, project_id, description, outcome, policy_digest, kind, created_at, updated_at) VALUES ('t1', 'p1', 't1', 't1', 'd', 'task', 1, 1)`)
+	exec(`DROP TABLE task_projects`)
+	exec(`DELETE FROM schema_migrations WHERE name LIKE '%task_projects%'`)
+	must.OK(t, s.Close())
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { must.OK(t, s.Close()) }()
+	var pid string
+	var pos int
+	if err := s.db.QueryRowContext(ctx, `SELECT project_id, position FROM task_projects WHERE task_id = 't1'`).Scan(&pid, &pos); err != nil || pid != "p1" || pos != 0 {
+		t.Fatalf("want (p1, 0), got (%q, %d) %v", pid, pos, err)
+	}
+}

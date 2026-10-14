@@ -3,6 +3,7 @@ package sqlite
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
@@ -12,6 +13,9 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
+
+// projectListSeparator joins a task's ordered project ids in recordSelect.
+const projectListSeparator = "\x1f"
 
 // RunStatus is the stored state of a verification run.
 type RunStatus string
@@ -154,7 +158,8 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
        t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error,
-       t.creator, t.created_cwd
+       t.creator, t.created_cwd,
+       (SELECT group_concat(project_id, char(31)) FROM (SELECT project_id FROM task_projects WHERE task_id = t.id ORDER BY position))
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
 LEFT JOIN submissions s ON s.id = t.latest_submission_id
@@ -176,6 +181,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var run runScan
 	var completedRev sql.NullString
 	var completedSub sql.NullInt64
+	var projects sql.NullString
 	err := sc.Scan(&r.Task.ID, &r.Task.ProjectID, &r.Task.Kind, &key, &parent, &r.Task.Description, &r.Task.Outcome, &constraints, &policy,
 		&r.Task.ContractRev, &archived, &r.Task.ArchiveReason, &r.Failures, &nextEligible,
 		&completed, &created, &updated, &r.UnmetRequires,
@@ -183,9 +189,14 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
 		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError,
-		&r.Task.Creator, &r.Task.CreatedCwd)
+		&r.Task.Creator, &r.Task.CreatedCwd, &projects)
 	if err != nil {
 		return r, err
+	}
+	for id := range strings.SplitSeq(projects.String, projectListSeparator) {
+		if id != "" {
+			r.Task.Projects = append(r.Task.Projects, project.ID(id))
+		}
 	}
 	r.CompletedSubmissionID = completedSub.Int64
 	r.Task.Key, r.Task.ParentID = key.String, task.ID(parent.String)
@@ -273,6 +284,9 @@ func (t *Tx) InsertTask(tk task.Task) error {
 			return err // caller distinguishes id vs key collisions
 		}
 		return wrapInternal(err, "insert task")
+	}
+	if err := t.SetTaskProjects(tk.ID, homeFirst(tk)); err != nil {
+		return err
 	}
 	return t.replaceAcceptance(tk.ID, tk.Acceptance)
 }
@@ -455,7 +469,7 @@ const (
 
 // ListRecords returns the tasks of a project in creation order.
 func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time, maxAttempts int) ([]Record, error) {
-	where, args := scopeWhere(pid, scope, now, maxAttempts)
+	where, args := scopeWhere(pid, scope, now, maxAttempts, true)
 	rows, err := t.tx.QueryContext(t.ctx, recordSelect+where+` ORDER BY t.created_at, t.id`, args...)
 	if err != nil {
 		return nil, wrapInternal(err, "list tasks")
@@ -472,10 +486,16 @@ func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time, maxAtte
 	return out, rows.Err()
 }
 
-func scopeWhere(pid project.ID, scope ListScope, now time.Time, maxAttempts int) (string, []any) {
+// scopeWhere filters by project: a member project sees every task naming
+// it; otherwise only tasks whose home it is (claiming works on homes).
+func scopeWhere(pid project.ID, scope ListScope, now time.Time, maxAttempts int, anyMember bool) (string, []any) {
 	where := ` WHERE 1=1`
 	var args []any
-	if pid != "" {
+	switch {
+	case pid != "" && anyMember:
+		where = ` WHERE EXISTS (SELECT 1 FROM task_projects tp WHERE tp.task_id = t.id AND tp.project_id = ?)`
+		args = []any{pid}
+	case pid != "":
 		where = ` WHERE t.project_id = ?`
 		args = []any{pid}
 	}
@@ -509,7 +529,7 @@ const claimableWhere = `
 // ClaimCandidate picks the task automatic Claim should take: the oldest
 // claimable task, ties broken by ID. Deterministic; no priority field.
 func (t *Tx) ClaimCandidate(pid project.ID, now time.Time, maxAttempts int) (Record, bool, error) {
-	where, args := scopeWhere(pid, ScopeClaimable, now, maxAttempts)
+	where, args := scopeWhere(pid, ScopeClaimable, now, maxAttempts, false)
 	row := t.tx.QueryRowContext(t.ctx, recordSelect+where+` ORDER BY t.created_at, t.id LIMIT 1`, args...)
 	r, err := scanRecord(row)
 	if isNoRows(err) {
@@ -529,6 +549,67 @@ func (t *Tx) TaskProject(id task.ID) (project.ID, task.Kind, bool, error) {
 		return "", "", false, fault.New(fault.CodeNotFound, "task %s not found", id)
 	}
 	return pid, kind, archived.Valid, wrapInternal(err, "task project")
+}
+
+// homeFirst is the ordered project list to store for a new task: its
+// Projects when named, else just its home.
+func homeFirst(tk task.Task) []project.ID {
+	if len(tk.Projects) > 0 {
+		return tk.Projects
+	}
+	return []project.ID{tk.ProjectID}
+}
+
+// SetTaskProjects stores the ordered project list of a task; the first is
+// the home and is mirrored into tasks.project_id, the only writer of it
+// after insert.
+func (t *Tx) SetTaskProjects(id task.ID, ordered []project.ID) error {
+	seen := map[project.ID]bool{}
+	var unique []project.ID
+	for _, p := range ordered {
+		if !seen[p] {
+			seen[p] = true
+			unique = append(unique, p)
+		}
+	}
+	if len(unique) == 0 {
+		return fault.New(fault.CodeInvalidInput, "task %s needs at least one project", id)
+	}
+	if _, err := t.tx.ExecContext(t.ctx, `DELETE FROM task_projects WHERE task_id = ?`, id); err != nil {
+		return wrapInternal(err, "clear task projects")
+	}
+	for i, p := range unique {
+		if _, err := t.tx.ExecContext(t.ctx, `INSERT INTO task_projects (task_id, project_id, position) VALUES (?, ?, ?)`, id, p, i); err != nil {
+			return wrapInternal(err, "insert task project")
+		}
+	}
+	_, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET project_id = ? WHERE id = ?`, unique[0], id)
+	return wrapInternal(err, "mirror task home")
+}
+
+// TasksShareProject reports whether two tasks name at least one common project.
+func (t *Tx) TasksShareProject(a, b task.ID) (bool, error) {
+	var n int
+	err := t.tx.QueryRowContext(t.ctx, `SELECT count(*) FROM task_projects x JOIN task_projects y ON x.project_id = y.project_id WHERE x.task_id = ? AND y.task_id = ?`, a, b).Scan(&n)
+	return n > 0, wrapInternal(err, "tasks share project")
+}
+
+// ForeignHomes lists the home projects, other than pid, of tasks that name pid.
+func (t *Tx) ForeignHomes(pid project.ID) ([]project.ID, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT DISTINCT t.project_id FROM tasks t JOIN task_projects tp ON tp.task_id = t.id WHERE tp.project_id = ? AND t.project_id <> ?`, pid, pid)
+	if err != nil {
+		return nil, wrapInternal(err, "foreign homes")
+	}
+	defer discard.CloseReadOnly(rows)
+	var out []project.ID
+	for rows.Next() {
+		var p project.ID
+		if err := rows.Scan(&p); err != nil {
+			return nil, wrapInternal(err, "scan foreign home")
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // MarkComplete records the completion fact.

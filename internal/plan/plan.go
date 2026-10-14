@@ -51,9 +51,11 @@ type AddTask struct {
 	Parent      Ref // optional group
 	Constraints []string
 	Acceptance  []string
-	Requires    []Ref
-	Blocks      []Ref // existing tasks that will require the new one
-	TaskChecks  []verification.CheckSpec
+	// AlsoIn are the memberships after the home (the ChangeSet project).
+	AlsoIn     []project.ID
+	Requires   []Ref
+	Blocks     []Ref // existing tasks that will require the new one
+	TaskChecks []verification.CheckSpec
 	// Proof and Regression are the task's two proofs; when Proof is set it
 	// supplies the task's required gate.
 	Proof      *proof.ProofSpec
@@ -66,17 +68,20 @@ type AddTask struct {
 // to an empty value clears. List fields use Patch to distinguish unchanged
 // from replaced.
 type UpdateTask struct {
-	Target         Ref
-	Title          *string
-	Outcome        *string
-	Parent         *Ref // pointer to "" clears the parent
-	Constraints    Patch[string]
-	Acceptance     Patch[string]
-	TaskChecks     Patch[verification.CheckSpec]
-	Proof          *proof.ProofSpec
-	Regression     *proof.ProofSpec
-	OnComplete     Patch[proof.ActionSpec]
-	Requires       Patch[Ref] // replace the whole prerequisite set
+	Target      Ref
+	Title       *string
+	Outcome     *string
+	Parent      *Ref // pointer to "" clears the parent
+	Constraints Patch[string]
+	Acceptance  Patch[string]
+	TaskChecks  Patch[verification.CheckSpec]
+	Proof       *proof.ProofSpec
+	Regression  *proof.ProofSpec
+	OnComplete  Patch[proof.ActionSpec]
+	Requires    Patch[Ref] // replace the whole prerequisite set
+	// Projects replaces the ordered project list; the first is the home,
+	// which may change only before the first claim.
+	Projects       Patch[project.ID]
 	AddRequires    []Ref
 	RemoveRequires []Ref
 	// ResetAttempts clears failure bookkeeping so an exhausted task can be

@@ -50,6 +50,9 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 	heads := map[project.ID]targetHead{}
 	if q.ProjectID != "" {
 		heads[q.ProjectID] = e.resolveTargetHead(ctx, q.ProjectID)
+		for _, home := range e.foreignHomes(ctx, q.ProjectID) {
+			heads[home] = e.resolveTargetHead(ctx, home)
+		}
 	} else {
 		var err error
 		heads, err = e.projectHeads(ctx)
@@ -96,6 +99,10 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				}
 				if rp.MaxAttempts == 0 {
 					rp.MaxAttempts = project.DefaultMaxAttempts
+				}
+			} else if r.Task.ProjectID != q.ProjectID {
+				if rp, err = homeOf(tx, byID, r.Task.ProjectID); err != nil {
+					return err
 				}
 			}
 			st := r.Status(now, rp.MaxAttempts)
@@ -257,6 +264,26 @@ func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 	return s, err
 }
 
+// homeOf loads a task's home project once per listing.
+func homeOf(tx *sqlite.Tx, cache map[project.ID]project.Project, id project.ID) (project.Project, error) {
+	if p, ok := cache[id]; ok {
+		return p, nil
+	}
+	p, err := tx.GetProject(id)
+	if err == nil {
+		cache[id] = p
+	}
+	return p, err
+}
+
+// foreignHomes lists the home projects, other than pid, of tasks naming pid;
+// a failed read yields none and the listing's own read reports the error.
+func (e *Engine) foreignHomes(ctx context.Context, pid project.ID) []project.ID {
+	var out []project.ID
+	_ = e.store.Read(ctx, func(tx *sqlite.Tx) (err error) { out, err = tx.ForeignHomes(pid); return })
+	return out
+}
+
 func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[project.ID]targetHead, byID map[project.ID]project.Project) (Summary, error) {
 	n := e.now()
 	s := Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}
@@ -273,6 +300,10 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[projec
 			rp := proj
 			if p, ok := byID[r.Task.ProjectID]; ok {
 				rp = p
+			} else if r.Task.ProjectID != proj.ID {
+				if rp, err = homeOf(tx, map[project.ID]project.Project{}, r.Task.ProjectID); err != nil {
+					return s, err
+				}
 			}
 			gv, err := e.groupVerification(tx, *r, rp, n, heads[rp.ID])
 			if err != nil {

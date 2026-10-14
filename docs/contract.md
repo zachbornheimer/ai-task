@@ -65,7 +65,7 @@ atask prune
 ### Global flags
 
 ```text
---project NAME|ID      default: general
+--project NAME|ID      default: general; repeatable on add and update, the first is the home
 --db PATH
 --json                 also ATASK_OUTPUT=json
 ```
@@ -222,6 +222,7 @@ type TaskDefinition struct {
     Outcome     string
     Constraints []string
     Acceptance  []string
+    Projects    []ProjectID          // ordered; the first is the home
     Requires    []TaskID
     Proof       ProofSpec   // proves this task works, 30 s
     Regression  ProofSpec   // proves nothing else broke, sized
@@ -343,7 +344,7 @@ const (
   proofs, and `on_complete` configuration. A task filed without both proofs is a draft: listed under its own glyph, never claimable, no attempt budget. Giving it both proofs makes it ready. Vacuity rules apply once proofs are supplied. A task missing any required field is a draft; the required fields are proof and regression (the title is required at add). Adding an open title that already exists
   returns the existing task.
 - `List` / `Show`: task state, hierarchy, history, every `RunResult`, and
-  action results. When the proof, regression, or on-complete actions of a task that has ever been claimed change, the change is recorded, never refused: `Show` returns `check_history` (time, field, old and new spec, actor, cwd; the actor is `attempt:<id>` for a session token and `planner` otherwise), and `atask show` prints it under CHECK HISTORY. `List` marks such a task with `△` right after its status glyph (a draft is `◌`). `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed outside a registered repo. The list is board-wide by default.
+  action results. When the proof, regression, or on-complete actions of a task that has ever been claimed change, the change is recorded, never refused: `Show` returns `check_history` (time, field, old and new spec, actor, cwd; the actor is `attempt:<id>` for a session token and `planner` otherwise), and `atask show` prints it under CHECK HISTORY. `List` marks such a task with `△` right after its status glyph (a draft is `◌`). `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed outside a registered repo. The list is board-wide by default. A task belongs to one or more projects: the first is its home, which decides its repo, worktree, target branch and base and is fixed after the first claim, and the rest are memberships; `list --project X` includes every task naming X, `--requires` needs one shared project, and a group's children share the group's home.
 - `Claim`: atomic eligibility and exclusive leased assignment; isolated
   worktree for Git tasks. The token is discoverable from the task worktree;
   elsewhere it is passed explicitly or via `ATASK_SESSION`.

@@ -264,7 +264,9 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 		say(w, "Type: %s\n", kindLabel(v.Kind))
 	}
 	say(w, "Created: %s · Updated: %s\n", v.CreatedAt.Format("2006-01-02"), updatedAt(v).Format("2006-01-02"))
-	if v.Project != "" {
+	if len(v.Projects) > 1 {
+		say(w, "Projects: %s\n", strings.Join(v.Projects, ", "))
+	} else if v.Project != "" {
 		say(w, "Project: %s\n", v.Project)
 	}
 	if v.Key != "" {

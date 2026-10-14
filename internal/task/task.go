@@ -102,7 +102,8 @@ type AcceptanceCriterion struct {
 
 // Spec is the input to task creation.
 type Spec struct {
-	ProjectID    project.ID
+	ProjectID    project.ID   // home
+	AlsoIn       []project.ID // memberships after the home
 	Kind         Kind
 	Key          string
 	ParentID     ID // organizational group, optional
@@ -116,7 +117,8 @@ type Spec struct {
 // Task is the stored contract.
 type Task struct {
 	ID            ID                    `json:"id"`
-	ProjectID     project.ID            `json:"project_id"`
+	ProjectID     project.ID            `json:"project_id"`         // home
+	Projects      []project.ID          `json:"projects,omitempty"` // ordered; [0] is the home
 	Kind          Kind                  `json:"kind"`
 	Key           string                `json:"key,omitempty"`
 	ParentID      ID                    `json:"parent_id,omitempty"`
