@@ -187,7 +187,7 @@ func renderSession(w io.Writer, s app.Session) {
 	if len(s.Regression) > 0 {
 		fmt.Fprintf(w, "Regression: %d check(s) run by `verify complete` after the task checks:\n", len(s.Regression))
 		for _, ch := range s.Regression {
-			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, app.ShellJoin(ch.Command))
+			fmt.Fprintf(w, "  - %s: %s\n", ch.ID, app.CheckText(ch))
 		}
 	}
 	if s.WorkspaceDirty {

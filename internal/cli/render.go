@@ -269,7 +269,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 		if len(v.Checks) > 0 {
 			fmt.Fprintf(w, "\nEPIC CHECKS (size %s; run on the target once every member is complete)\n", v.Size)
 			for _, ch := range v.Checks {
-				fmt.Fprintf(w, "  • %s: %s\n", ch.ID, app.ShellJoin(ch.Command))
+				fmt.Fprintf(w, "  • %s: %s\n", ch.ID, app.CheckText(ch))
 			}
 			if gv := v.GroupVerification; gv != nil {
 				status := gv.Status
@@ -345,7 +345,7 @@ func renderShow(w io.Writer, v app.TaskView, full bool, p painter) {
 			if !ch.Required {
 				kind = "optional"
 			}
-			fmt.Fprintf(w, "  • %s (%s): %s\n", ch.ID, kind, app.ShellJoin(ch.Command))
+			fmt.Fprintf(w, "  • %s (%s): %s\n", ch.ID, kind, app.CheckText(ch))
 		}
 	}
 	fmt.Fprintln(w, "\nVERIFICATION")

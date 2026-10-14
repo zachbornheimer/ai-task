@@ -270,7 +270,7 @@ func renderContext(c Context) string {
 			if !ch.Required {
 				req = "optional"
 			}
-			fmt.Fprintf(&w, "- %s (%s): `%s`\n", ch.ID, req, shellJoin(ch.Command))
+			fmt.Fprintf(&w, "- %s (%s): `%s`\n", ch.ID, req, CheckText(ch))
 		}
 		w.WriteString("\n")
 	}
@@ -279,7 +279,7 @@ func renderContext(c Context) string {
 	}
 	w.WriteString("Regression checks (`atask verify regression`):\n")
 	for _, ch := range c.Regression {
-		fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, shellJoin(ch.Command))
+		fmt.Fprintf(&w, "- %s: `%s`\n", ch.ID, CheckText(ch))
 	}
 	w.WriteString("\n")
 	if len(v.Requires) > 0 {
@@ -437,4 +437,13 @@ func regressionBudgetOf(rp *proof.ProofSpec, size string) time.Duration {
 		return rp.Size.Budget()
 	}
 	return proof.Size(size).Budget()
+}
+
+// CheckText renders a check as a person would type it: its argv, or for an
+// in-process proof its "PRESET: SUBJECT [k=v]" spec.
+func CheckText(c verification.CheckSpec) string {
+	if c.Eval != nil {
+		return c.Eval.String()
+	}
+	return shellJoin(c.Command)
 }
