@@ -1,5 +1,8 @@
 // Package testgit owns how tests run Git: with the user's configuration
-// removed, so no test can sign a commit or wait on a passphrase prompt.
+// removed, so no test can sign a commit or wait on a passphrase prompt, and
+// with Git's upward repository discovery fenced off at the test temp root:
+// a stray .git above it (an empty one in HOME, say, when the sandbox puts
+// TMPDIR under HOME) must never be adopted by a test's init or commit.
 package testgit
 
 import (
@@ -12,6 +15,34 @@ import (
 	"testing"
 )
 
+const (
+	ceilingVar       = "GIT_CEILING_DIRECTORIES"
+	acrossFSVar      = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
+	homeVar          = "HOME"
+	pathListSeparate = string(os.PathListSeparator)
+)
+
+// discoveryCeilings lists the directories Git must not climb into: the
+// parent of the temp root, plus the real HOME when the temp root is under it.
+func discoveryCeilings() string {
+	tempRoot := resolved(os.TempDir())
+	ceilings := []string{filepath.Dir(tempRoot)}
+	if home := resolved(os.Getenv(homeVar)); home != "" && strings.HasPrefix(tempRoot, home+string(filepath.Separator)) {
+		ceilings = append(ceilings, home)
+	}
+	return strings.Join(ceilings, pathListSeparate)
+}
+
+func resolved(path string) string {
+	if path == "" {
+		return ""
+	}
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		return target
+	}
+	return filepath.Clean(path)
+}
+
 // Overrides returns KEY=VALUE pairs that cut Git (and anything it spawns,
 // such as gpg or hooks) off from the user's configuration. home must be a
 // directory the caller owns.
@@ -21,7 +52,9 @@ func Overrides(home string) ([]string, error) {
 		return nil, fmt.Errorf("write empty git config in %s: %w", home, err)
 	}
 	return []string{
-		"HOME=" + home,
+		ceilingVar + "=" + discoveryCeilings(),
+		acrossFSVar + "=0",
+		homeVar + "=" + home,
 		"GIT_CONFIG_GLOBAL=" + empty,
 		"GIT_CONFIG_SYSTEM=" + empty,
 		"GIT_CONFIG_NOSYSTEM=1",
