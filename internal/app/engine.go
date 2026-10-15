@@ -252,16 +252,20 @@ func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Pro
 // refuseHomeOrAncestor rejects a project root that is the user's home
 // directory or one of its ancestors, before any repository is created there.
 func refuseHomeOrAncestor(dir, root string) error {
+	// An unresolvable home must refuse, not register: the guard cannot prove safety.
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil
+		return fault.Wrap(err, fault.CodeInvalidInput, "resolve home directory")
 	}
 	canonicalHome, err := project.CanonicalRoot(home)
 	if err != nil {
-		return nil
+		return fault.Wrap(err, fault.CodeInvalidInput, "resolve home directory")
 	}
 	rel, err := filepath.Rel(root, canonicalHome)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil {
+		return fault.Wrap(err, fault.CodeInvalidInput, "compare project root with home directory")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil
 	}
 	shown, err := filepath.Abs(dir)

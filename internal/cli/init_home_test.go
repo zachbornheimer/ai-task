@@ -47,7 +47,7 @@ func TestInitRefusesHomeDirectory(t *testing.T) {
 	}
 	t.Run("child registers", func(t *testing.T) {
 		child := filepath.Join(home, "proj")
-		if err := os.Mkdir(child, 0o755); err != nil {
+		if err := os.Mkdir(child, 0o750); err != nil {
 			t.Fatal(err)
 		}
 		if code, out := runInitAt(t, child); code != ExitOK {
