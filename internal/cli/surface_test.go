@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,6 +15,33 @@ func TestAgentContractWordCount(t *testing.T) {
 	n := agentContractWordCount()
 	if n < 300 || n > 1000 {
 		t.Fatalf("agent contract is %d words; want 300-1000", n)
+	}
+}
+
+func TestAgentContractText(t *testing.T) {
+	want, err := os.ReadFile("contract.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := Main(Env{
+		Args:   []string{"context"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &out,
+		Stderr: &errb,
+		Cwd:    t.TempDir(),
+		Getenv: func(k string) string {
+			if k == "ATASK_DB" {
+				return filepath.Join(t.TempDir(), "missing", "no.db")
+			}
+			return ""
+		},
+	})
+	if code != ExitOK {
+		t.Fatalf("context: %d %s", code, errb.String())
+	}
+	if out.String() != string(want) {
+		t.Fatalf("context output differs from contract.txt:\n%s", out.String())
 	}
 }
 
@@ -46,7 +74,7 @@ func TestContextNeedsNoDatabase(t *testing.T) {
 		"verify complete",
 		"lease",
 		"claim release",
-		"Do not assume complete",
+		"agent summary is not",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("context lacks %q:\n%s", want, got)

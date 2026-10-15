@@ -1,0 +1,134 @@
+atask manages verifiable objectives, dependencies, claims, progress, and completion.
+
+Create an objective only when there is a meaningful outcome with explicit
+acceptance criteria: a software fix, research result, report, infrastructure
+change, or operational deliverable. Do not create tasks for conversations,
+tool calls, or individual implementation steps. Track outcomes, not activity.
+
+CONTEXT
+
+atask context             Static operating contract (this text).
+atask context ID          Complete, current handoff for task ID.
+atask context --hook      Minimal current-task context for agent hooks.
+atask help                Full command reference.
+atask version             Build information.
+
+The static contract is invariant across sessions. Dynamic task state belongs
+in task handoffs or hook context, not in this contract.
+
+DISCOVERY
+
+atask list                All non-archived tasks, including completed tasks.
+atask list ready          Claimable tasks.
+atask list blocked        Blocked tasks.
+atask list open           Incomplete tasks.
+atask list complete       Completed tasks.
+atask list archived       Archived tasks.
+
+Global --project NAME scopes commands to a repository.
+
+atask show                Current claim, if resolvable.
+atask show ID             Any task.
+
+Outside a resolvable claim, show requires an explicit ID.
+
+CREATION
+
+atask add "title" --proof "run: cmd" --regression "run: cmd"
+
+Every claimable task requires:
+- A specific outcome.
+- A proof check demonstrating that outcome.
+- A regression check demonstrating that existing behavior still works.
+
+Missing either check leaves the task in draft state and makes it unclaimable.
+
+Adding the same open title returns the existing task ID.
+Use atask update ID to change task fields.
+Use atask update ID --archive --reason "..." to remove it from active planning.
+
+CLAIMS AND DEPENDENCIES
+
+atask claim               Claim the oldest eligible task.
+atask claim ID            Claim a specific eligible task.
+
+A claim provides a session token and workspace. Work only on the claimed task.
+
+Claim authorization is resolved from:
+- The task worktree or claiming directory.
+- ATASK_SESSION.
+- An explicit positional TOKEN (or "-" for stdin).
+
+The claim token is result.token in the claim JSON.
+
+Hard dependencies block claiming:
+B --requires A means B cannot be claimed until A completes.
+
+Dependency cycles and cross-project edges without a shared project are invalid.
+A task can belong to several projects; its first project is its home.
+
+To delegate, create or identify the objective, then have the worker claim it
+and follow atask context ID. The host manages launch, heartbeat, cancellation,
+recovery, and landing.
+
+EXECUTION
+
+atask log --done "..." --next "..." --learned "..." --note "..."
+
+Log requires a live claim.
+
+--done       Completed work.
+--next       The next action; read first when resuming.
+--learned    Durable findings that future attempts need.
+--note       Other relevant progress or observations.
+
+Keep the task record current enough for another worker to resume without
+reconstructing the previous conversation.
+
+VERIFICATION
+
+atask verify proof        Run the outcome check.
+atask verify regression   Run the regression check.
+atask verify complete     Attempt authoritative completion.
+
+Completion requires a live authorized claim and a committed implementation.
+
+atask verify complete runs required checks fresh. The engine decides whether
+the objective is complete. A green test, log entry, or agent summary is not
+proof of completion.
+
+Completion is recorded on the task branch. The host lands the result using
+wt merge; verify complete does not merge or fast-forward the target branch.
+
+If verification fails, fix the cause, record progress, and retry.
+
+A verification timeout is not a failed check. Narrow the command using -run
+or configure check size=medium|large.
+
+RECOVERY
+
+If the claim expires:
+  atask claim renew TOKEN
+  or atask claim ID
+
+To hand work back:
+  atask log --next "..."
+  atask claim release --note "..."
+
+The next worker receives current task state through atask context ID.
+
+HOOK CONTEXT
+
+atask context --hook is intended for agent-runtime integration.
+
+It resolves the current claim and returns only the task information needed
+to continue work: objective, acceptance checks, blockers, next action,
+relevant progress, and unresolved verification failures.
+
+If no claim exists, it explicitly reports that no task is active.
+If the task is complete, it reports completion without assigning more work.
+
+The hook must not emit session UUIDs, claim tokens, timestamps, telemetry,
+or unrelated project history.
+
+Its output must be deterministic for identical task state.
