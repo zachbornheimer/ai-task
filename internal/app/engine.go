@@ -249,6 +249,28 @@ func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Pro
 	return res.Project, err
 }
 
+// refuseHomeOrAncestor rejects a project root that is the user's home
+// directory or one of its ancestors, before any repository is created there.
+func refuseHomeOrAncestor(dir, root string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	canonicalHome, err := project.CanonicalRoot(home)
+	if err != nil {
+		return nil
+	}
+	rel, err := filepath.Rel(root, canonicalHome)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	shown, err := filepath.Abs(dir)
+	if err != nil {
+		shown = dir
+	}
+	return fault.New(fault.CodeInvalidInput, "refusing to register %s: use a project directory or atask project add NAME for work without a repository", shown)
+}
+
 // InitProjectResult is InitProject with details about the directory.
 func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitResult, error) {
 	var res InitResult
@@ -265,6 +287,9 @@ func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitR
 		if root, err = project.CanonicalRoot(dir); err != nil {
 			return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
 		}
+	}
+	if err := refuseHomeOrAncestor(dir, root); err != nil {
+		return res, err
 	}
 	if res.CreatedRepo, err = workspace.InitRepo(ctx, root); err != nil {
 		return res, err

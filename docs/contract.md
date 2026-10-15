@@ -374,7 +374,7 @@ const (
   target tip; otherwise the group fails `CHECK_FAILED` naming the child.
   Parents own no integration branch.
 - Projects: `general` exists by default and holds tasks filed outside a
-  registered repo. `init` registers a repo. `project` sets target branch and
+  registered repo. `init` registers a repo (it refuses the home directory and its ancestors). `project` sets target branch and
   attempt budget only; a project holds no checks. Agents do not run it.
   `project add NAME` creates a project with no repository, stored like
   `general` (no root, no target branch, so `project --target-branch` on it is
