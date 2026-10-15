@@ -16,7 +16,7 @@ import (
 var contractVerbs = []string{"add", "claim", "context", "list", "log", "show", "update", "verify"}
 
 // TestHostHooksNeverCallHookVerb: init writes one managed AGENTS.md block
-// naming only contract verbs and exactly one SessionStart hook; nothing it
+// naming only contract verbs and the three managed Claude Code hooks; nothing it
 // writes or ships references the removed hook surface.
 func TestHostHooksNeverCallHookVerb(t *testing.T) {
 	root := t.TempDir()
@@ -64,19 +64,33 @@ func TestHostHooksNeverCallHookVerb(t *testing.T) {
 		t.Fatalf("block not rewritten in place:\n%s", after)
 	}
 
-	// The settings: exactly one hook, SessionStart -> atask context.
+	// The settings: the three managed hooks, and a legacy single hook is replaced.
+	mustWrite(t, filepath.Join(root, ".claude", "settings.json"), `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"atask context && atask context --hook"}]}]}}`)
+	if _, err := app.InstallInstructions(root); err != nil {
+		t.Fatal(err)
+	}
 	settingsRaw := mustRead(t, filepath.Join(root, ".claude", "settings.json"))
 	var settings struct {
 		Hooks map[string][]struct {
-			Hooks []struct{ Type, Command string } `json:"hooks"`
+			Matcher string                           `json:"matcher"`
+			Hooks   []struct{ Type, Command string } `json:"hooks"`
 		} `json:"hooks"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &settings); err != nil {
 		t.Fatal(err)
 	}
-	ss := settings.Hooks["SessionStart"]
-	if len(settings.Hooks) != 1 || len(ss) != 1 || len(ss[0].Hooks) != 1 || ss[0].Hooks[0].Command != "atask context" {
-		t.Fatalf("settings must hold only SessionStart -> atask context:\n%s", settingsRaw)
+	var got3 []string
+	for _, ev := range []string{"SessionStart", "UserPromptSubmit"} {
+		for _, e := range settings.Hooks[ev] {
+			if len(e.Hooks) != 1 {
+				t.Fatalf("one command per entry:\n%s", settingsRaw)
+			}
+			got3 = append(got3, ev+"|"+e.Matcher+"|"+e.Hooks[0].Command)
+		}
+	}
+	want3 := "SessionStart|startup|atask context,SessionStart|compact|resume|atask context --hook,UserPromptSubmit||atask context --hook --changed"
+	if len(settings.Hooks) != 2 || strings.Join(got3, ",") != want3 {
+		t.Fatalf("settings hooks = %v, want %s\n%s", got3, want3, settingsRaw)
 	}
 
 	// The removed hook surface appears nowhere init writes or ships.

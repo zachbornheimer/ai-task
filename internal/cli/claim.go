@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"time"
@@ -341,8 +342,19 @@ func (c *ctxt) verifyGroup(ctx context.Context, ref string) (handled bool, err e
 }
 
 func runContext(ctx context.Context, c *ctxt, args []string) error {
+	hook := c.fs.Bool("hook", false, "print the current claim's minimal context")
+	changed := c.fs.Bool("changed", false, "with --hook: print only when the context changed since the last emission for this session")
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if *changed && !*hook {
+		return usage("--changed only works with --hook")
+	}
+	if *hook {
+		if len(c.args) != 0 {
+			return usage("context --hook takes no task id")
+		}
+		return runContextHook(ctx, c, *changed)
 	}
 	if len(c.args) == 0 {
 		return c.emit(map[string]string{"prompt": AgentContract}, func(w io.Writer) {
@@ -374,6 +386,53 @@ func runContext(ctx context.Context, c *ctxt, args []string) error {
 		_, _ = io.WriteString(w, cx.Prompt)
 	})
 }
+
+// runContextHook prints the current claim's context. With changed it stays
+// silent unless the output differs from this session's last emission.
+func runContextHook(ctx context.Context, c *ctxt, changed bool) error {
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	tok, err := c.token(ctx, nil)
+	if err != nil {
+		tok = ""
+	}
+	out, err := e.HookContext(ctx, tok)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if sid := hookSessionID(c.env.Stdin); sid != "" {
+			fresh, err := e.RecordHookEmission(sid, out)
+			if err != nil {
+				return err
+			}
+			if !fresh {
+				return nil
+			}
+		}
+	}
+	_, err = c.env.Stdout.Write(out)
+	return err
+}
+
+// hookSessionID reads the Claude Code hook payload and returns its
+// session_id ("" when stdin is missing or carries none).
+func hookSessionID(in io.Reader) string {
+	if in == nil {
+		return ""
+	}
+	var payload struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(in, hookPayloadLimit)).Decode(&payload); err != nil {
+		return ""
+	}
+	return payload.SessionID
+}
+
+const hookPayloadLimit = 1 << 20
 
 func init() {
 	register("context", "operating contract, or worker handoff for a task id", runContext)

@@ -7,6 +7,7 @@ atask
 atask help [COMMAND]
 atask version
 atask context [TASK_ID]
+atask context --hook [--changed]
 
 atask list [all|open|ready|blocked|draft|complete|archived]
 atask show [TASK_ID] [--full]

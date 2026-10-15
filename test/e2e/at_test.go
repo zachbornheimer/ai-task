@@ -545,7 +545,7 @@ func TestInitInstallsInstructions(t *testing.T) {
 		t.Fatalf("refresh damaged AGENTS.md:\n%s", b2)
 	}
 	settings, err := os.ReadFile(filepath.Join(e.cwd, ".claude", "settings.json"))
-	if err != nil || strings.Count(string(settings), "atask context") != 1 || !strings.Contains(string(settings), "SessionStart") {
+	if err != nil || strings.Count(string(settings), "atask context --hook --changed") != 1 || !strings.Contains(string(settings), "SessionStart") {
 		t.Fatalf(".claude/settings.json: %v\n%s", err, settings)
 	}
 }
