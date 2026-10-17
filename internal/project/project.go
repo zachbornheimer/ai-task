@@ -67,6 +67,20 @@ const DefaultMaxAttempts = 3
 // recommended so claim can use a worktree.
 const GeneralName = "general"
 
+// NameKey is the comparison key for a project name: lowercase, then every
+// character that is not an ASCII letter or digit removed. "AI Tooling" and
+// "ai-tooling" are the same key. An empty key matches nothing.
+func NameKey(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // IsGeneral reports whether p is the default project.
 func (p Project) IsGeneral() bool { return p.Name == GeneralName && p.RootPath == "" }
 

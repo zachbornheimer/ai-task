@@ -97,6 +97,20 @@ func TestMatchRoot(t *testing.T) {
 	}
 }
 
+func TestNameKey(t *testing.T) {
+	if NameKey("AI Tooling") != NameKey("ai-tooling") || NameKey("AI Tooling") != "aitooling" {
+		t.Fatalf("AI Tooling key = %q", NameKey("AI Tooling"))
+	}
+	for _, same := range []string{"AI-Tooling", "ai tooling", "AI_Tooling", "ai.tooling"} {
+		if NameKey(same) != "aitooling" {
+			t.Errorf("NameKey(%q) = %q, want aitooling", same, NameKey(same))
+		}
+	}
+	if NameKey("---") != "" || NameKey("AI Tooling") == NameKey("ai-task") {
+		t.Fatal("empty and distinct keys must not collapse")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	ok := Project{ID: NewID(), Name: "x"}
 	if err := ok.Validate(); err != nil {

@@ -59,20 +59,24 @@ func (t *Tx) GetProjectByRoot(root string) (project.Project, bool, error) {
 	return p, err == nil, wrapInternal(err, "get project by root")
 }
 
-// GetProjectByName loads a project by display name; ambiguity is an error.
+// GetProjectByName loads a project by display name. Names match when
+// project.NameKey is equal, so case and punctuation do not distinguish
+// them. Ambiguity is an error. A name that strips to an empty key matches
+// nothing.
 func (t *Tx) GetProjectByName(name string) (project.Project, bool, error) {
-	rows, err := t.tx.QueryContext(t.ctx, `SELECT `+projectColumns+` FROM projects WHERE name = ? LIMIT 2`, name)
-	if err != nil {
-		return project.Project{}, false, wrapInternal(err, "get project by name")
+	key := project.NameKey(name)
+	if key == "" {
+		return project.Project{}, false, nil
 	}
-	defer discard.CloseReadOnly(rows)
+	all, err := t.ListProjects()
+	if err != nil {
+		return project.Project{}, false, err
+	}
 	var found []project.Project
-	for rows.Next() {
-		p, err := scanProject(rows)
-		if err != nil {
-			return project.Project{}, false, wrapInternal(err, "scan project")
+	for _, p := range all {
+		if project.NameKey(p.Name) == key {
+			found = append(found, p)
 		}
-		found = append(found, p)
 	}
 	switch len(found) {
 	case 0:
