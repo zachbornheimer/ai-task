@@ -73,9 +73,9 @@ func (t *Tx) GetProjectByName(name string) (project.Project, bool, error) {
 		return project.Project{}, false, err
 	}
 	var found []project.Project
-	for _, p := range all {
-		if project.NameKey(p.Name) == key {
-			found = append(found, p)
+	for i := range all {
+		if project.NameKey(all[i].Name) == key {
+			found = append(found, all[i])
 		}
 	}
 	switch len(found) {
