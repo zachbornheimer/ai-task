@@ -326,7 +326,11 @@ verification]`, …) says why a task is not complete. A group shows
 `(n/m complete)`: `●` only when a nonempty member set is complete, `◐`
 when any member was started or completed, `○` otherwise. JSON carries
 `started` on tasks and `progress.started` on groups. Tokens never appear
-in any read view.
+in any read view. A `--project` name matches when lowercasing both and
+removing every character that is not a letter or digit leaves the same
+key: `ai-tooling` resolves `AI Tooling`. Two projects that collapse to
+one key are ambiguous; use the id. The exact selector `general` is still
+the default project.
 
 ## Token transport
 

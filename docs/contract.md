@@ -66,7 +66,7 @@ atask prune
 ### Global flags
 
 ```text
---project NAME|ID      default: general; repeatable on add and update, the first is the home
+--project NAME|ID      default: general; names match ignoring case and punctuation; repeatable on add and update, the first is the home
 --db PATH
 --json                 also ATASK_OUTPUT=json
 ```
@@ -378,7 +378,10 @@ const (
   attempt budget only; a project holds no checks. Agents do not run it.
   `project add NAME` creates a project with no repository, stored like
   `general` (no root, no target branch, so `project --target-branch` on it is
-  `INVALID_INPUT`); adding an existing name returns it. Its tasks have no
+  `INVALID_INPUT`); adding a name that matches an existing project (same
+  letters and digits, ignoring case and punctuation) returns it. A name
+  lookup that matches more than one project is `INVALID_INPUT`; use the id.
+  Its tasks have no
   worktree, and their checks run in the directory the task was claimed from.
 - Agent execution, worker pools, planning loops, and model calls stay outside
   atask.

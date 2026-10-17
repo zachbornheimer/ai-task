@@ -157,9 +157,9 @@ func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
 		dbHelp = "database path (env ATASK_DB; default " + def + ")"
 	}
 	fs.StringVar(&c.g.db, "db", c.g.db, dbHelp)
-	help := "project id or name (env ATASK_PROJECT)"
+	help := "project id or name; names match ignoring case and punctuation (env ATASK_PROJECT)"
 	if repeatableCommands[c.name] {
-		help = "project id or name (env ATASK_PROJECT); repeat to name more projects, the first is the home"
+		help = "project id or name; names match ignoring case and punctuation (env ATASK_PROJECT); repeat to name more projects, the first is the home"
 	}
 	fs.Var(&projectFlag{g: &c.g, repeated: c.fs == fs && repeatableCommands[c.name]}, "project", help)
 	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env ATASK_OUTPUT=json)")

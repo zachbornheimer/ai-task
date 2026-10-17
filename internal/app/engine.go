@@ -370,7 +370,8 @@ func (e *Engine) UpdateProject(ctx context.Context, p project.Project) error {
 }
 
 // ResolveProject finds the project for a command. Precedence:
-//  1. selector: a project ID or unique name (from --project / ATASK_PROJECT);
+//  1. selector: a project ID or unique name (from --project / ATASK_PROJECT).
+//     A name matches when project.NameKey is equal ("ai-tooling" is "AI Tooling").
 //  2. the Git repository containing dir, by registered main-worktree root;
 //  3. the longest registered root that contains dir;
 //  4. the general project, created on first use. The selector "general"
@@ -439,7 +440,10 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 
 // errUseGeneral is an in-process signal from the read lookup to create
 // or load the general project. It is never returned to callers.
-var errUseGeneral = fault.New(fault.CodeNotFound, "use general")
+// It must not be a fault.Error: Error.Is matches every error of the same
+// code, so a CodeNotFound sentinel would swallow "no project with id or
+// name" and silently select general.
+var errUseGeneral = errors.New("use general")
 
 // manager returns the Git workspace manager for a project.
 func (e *Engine) manager(p project.Project) workspace.Manager {

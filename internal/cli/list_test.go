@@ -190,3 +190,48 @@ func TestListHonorsProjectFlag(t *testing.T) {
 		t.Fatalf("list ready should still filter globally: %d %s %s", code, out, e)
 	}
 }
+
+func TestListResolvesNormalizedProjectName(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "at.db")
+	run := func(cwd string, args ...string) (int, string, string) {
+		var out, errb bytes.Buffer
+		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: func(k string) string {
+			if k == "ATASK_DB" {
+				return db
+			}
+			return ""
+		}})
+		return code, out.String(), errb.String()
+	}
+	cwd := t.TempDir()
+	if code, _, e := run(cwd, "project", "add", "AI Tooling"); code != ExitOK {
+		t.Fatalf("project add: %d %s", code, e)
+	}
+	if code, _, e := run(cwd, "--project", "AI Tooling", "add", "tooling-task", "--proof", "run: go version", "--regression", "run: go version"); code != ExitOK {
+		t.Fatalf("add: %d %s", code, e)
+	}
+	for _, sel := range []string{"ai-tooling", "AI-Tooling", "ai tooling", "AI_Tooling", "AI Tooling"} {
+		code, out, e := run(cwd, "list", "--project", sel)
+		if code != ExitOK || !strings.Contains(out, "tooling-task") {
+			t.Fatalf("--project %q: %d\n%s%s", sel, code, out, e)
+		}
+	}
+	if code, out, e := run(cwd, "list", "--project", "***"); code == ExitOK || !strings.Contains(out+e, "NOT_FOUND") {
+		t.Fatalf("punctuation-only name must not match: %d %s %s", code, out, e)
+	}
+	if code, out, e := run(cwd, "list", "--project", "ai-task"); code == ExitOK || !strings.Contains(out+e, "NOT_FOUND") {
+		t.Fatalf("distinct key must not match: %d %s %s", code, out, e)
+	}
+
+	left, right := t.TempDir(), t.TempDir()
+	if code, _, e := run(left, "init", "--name", "Case Fold"); code != ExitOK {
+		t.Fatalf("init left: %d %s", code, e)
+	}
+	if code, _, e := run(right, "init", "--name", "case-fold"); code != ExitOK {
+		t.Fatalf("init right: %d %s", code, e)
+	}
+	code, out, e := run(cwd, "list", "--project", "casefold")
+	if code == ExitOK || !strings.Contains(out+e, "ambiguous") {
+		t.Fatalf("colliding names must be ambiguous: %d %s %s", code, out, e)
+	}
+}
