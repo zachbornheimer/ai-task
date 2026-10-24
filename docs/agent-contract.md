@@ -28,8 +28,8 @@ stdout (an envelope in JSON mode) and exits `0`.
 
 | Code                   | Meaning |
 | ---------------------- | ------- |
-| `INVALID_INPUT`        | malformed argument, reference, spec, or dependency edge (cycle, self, duplicate, cross-project); `atask verify` without a mode; a proof the preset grammar or the vacuity rules reject |
-| `NOT_FOUND`            | unknown task, key, project, or no project for this directory (`--project` or `atask init`) |
+| `INVALID_INPUT`        | malformed argument, reference, spec, or dependency edge (cycle, self, duplicate, cross-project); `atask verify` without a mode; a proof the preset grammar or the vacuity rules reject; a `--project` selector that matches no registered project by id or name (the message names it and lists the registered names) |
+| `NOT_FOUND`            | unknown task, key, or stored project id, or no project for this directory (`atask init`) |
 | `CONFLICT`             | the request clashes with current state: stale `ChangeSet.ExpectedPlanRev` (Go API), edit to a completed or claimed contract, illegal archive, key reused with a different definition, task already claimed (live lease) or complete, `verify complete` still running for this attempt |
 | `INVALID_SESSION`      | the token is unknown, expired, superseded, or finished: stop editing and `atask claim <task>` again |
 | `NOT_READY`            | not possible right now: prerequisites incomplete, task awaiting verification, nothing claimable (non-waiting claim, cooldown), uncommitted changes or missing worktree, a cancelled call, a failed doctor check, or an I/O failure; the message says which |

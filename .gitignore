@@ -2,6 +2,7 @@
 /tasks
 /ai-task
 *.test
+/atask
 # local state
 *.db
 *.db-wal

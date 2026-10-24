@@ -385,15 +385,21 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 		if selector != "" {
 			if id, err := project.ParseID(selector); err == nil {
 				p, err := tx.GetProject(id)
+				if fault.Is(err, fault.CodeNotFound) {
+					return unknownProject(tx, selector)
+				}
+				if err != nil {
+					return err
+				}
 				out = p
-				return err
+				return nil
 			}
 			p, ok, err := tx.GetProjectByName(selector)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return fault.New(fault.CodeNotFound, "no project with id or name %q", selector)
+				return unknownProject(tx, selector)
 			}
 			out = p
 			return nil
@@ -444,6 +450,26 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 // code, so a CodeNotFound sentinel would swallow "no project with id or
 // name" and silently select general.
 var errUseGeneral = errors.New("use general")
+
+// unknownProject reports an explicit --project selector that matches no
+// registered project. It names the selector and lists the registered
+// names so a typo is visible. It must carry CodeInvalidInput, never
+// CodeNotFound: only the caller's absence of a selector may fall back to
+// general, and that path is signaled by errUseGeneral.
+func unknownProject(tx *sqlite.Tx, selector string) error {
+	ps, err := tx.ListProjects()
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(ps))
+	for i := range ps {
+		names = append(names, ps[i].Name)
+	}
+	if len(names) == 0 {
+		return fault.New(fault.CodeInvalidInput, "unknown project %q; no projects are registered yet (atask init or atask project add NAME)", selector)
+	}
+	return fault.New(fault.CodeInvalidInput, "unknown project %q; registered projects: %s", selector, strings.Join(names, ", "))
+}
 
 // manager returns the Git workspace manager for a project.
 func (e *Engine) manager(p project.Project) workspace.Manager {

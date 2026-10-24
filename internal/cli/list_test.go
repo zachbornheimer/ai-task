@@ -216,10 +216,10 @@ func TestListResolvesNormalizedProjectName(t *testing.T) {
 			t.Fatalf("--project %q: %d\n%s%s", sel, code, out, e)
 		}
 	}
-	if code, out, e := run(cwd, "list", "--project", "***"); code == ExitOK || !strings.Contains(out+e, "NOT_FOUND") {
+	if code, out, e := run(cwd, "list", "--project", "***"); code == ExitOK || !strings.Contains(out+e, "INVALID_INPUT") || !strings.Contains(out+e, "AI Tooling") {
 		t.Fatalf("punctuation-only name must not match: %d %s %s", code, out, e)
 	}
-	if code, out, e := run(cwd, "list", "--project", "ai-task"); code == ExitOK || !strings.Contains(out+e, "NOT_FOUND") {
+	if code, out, e := run(cwd, "list", "--project", "ai-task"); code == ExitOK || !strings.Contains(out+e, "INVALID_INPUT") || !strings.Contains(out+e, "AI Tooling") {
 		t.Fatalf("distinct key must not match: %d %s %s", code, out, e)
 	}
 
