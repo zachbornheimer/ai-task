@@ -52,11 +52,13 @@
 10. **Single host, local filesystem.** WAL-mode SQLite on a network
     filesystem is unsafe.
 
-11. **Proofs are isolated by snapshot, not sandboxed.** Each proof
-    runs on its own disposable worktree with a private `TMPDIR` and no
-    session token, but a proof can still reach the network, shared
-    services, the repository's other worktrees and the database file.
-    Declared proof permissions are future work.
+11. **Proofs are confined only on macOS, and rootless projects not at
+    all.** Each proof runs on its own disposable worktree with a private
+    `TMPDIR` and no session token, and repo-backed projects' checks
+    additionally run under a Seatbelt profile that denies home writes and
+    secret reads — but a proof can still reach the network and shared
+    services. A rootless project (no repository, including `general`) runs
+    its checks and actions entirely unconfined.
 
 12. **`at` collides with POSIX `at`.** The name is provisional; install
     under another name if the scheduler is in use.
