@@ -78,17 +78,13 @@ func TestRootlessClaimWorkspaceIsClaimDir(t *testing.T) {
 		return s
 	}
 
-	// A directory whose parent is read-only cannot hold <dir>.tmp: the
-	// claim is refused up front instead of every check failing later.
-	locked := t.TempDir()
-	stuck := filepath.Join(locked, "d")
-	if err := os.Mkdir(stuck, 0o700); err != nil {
+	// A directory whose <dir>.tmp cannot be created (here a file already
+	// holds that name) is refused up front instead of every check failing
+	// later.
+	stuck := t.TempDir()
+	if err := os.WriteFile(stuck+".tmp", nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(locked, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 	e = open(stuck)
 	if _, err := e.Claim(ctx, app.ClaimRequest{TaskID: &id}); fault.CodeOf(err) != fault.CodeInvalidInput || !strings.Contains(err.Error(), "TMPDIR") {
 		t.Fatalf("claim without a creatable TMPDIR: want INVALID_INPUT naming TMPDIR, got %v", err)
@@ -131,7 +127,7 @@ func TestRootlessClaimWorkspaceIsClaimDir(t *testing.T) {
 	if acts.Status != task.StatusComplete || len(acts.Actions) != 1 || acts.Actions[0].Status != proof.ActionSucceeded {
 		t.Fatalf("want complete with one succeeded action, got %s %+v", acts.Status, acts.Actions)
 	}
-	if b, err := os.ReadFile(filepath.Join(second, "action.txt")); err != nil || strings.TrimSpace(string(b)) != "done" {
+	if b, err := os.ReadFile(filepath.Clean(filepath.Join(second, "action.txt"))); err != nil || strings.TrimSpace(string(b)) != "done" {
 		t.Fatalf("on-complete action did not run in the claiming dir: %q %v", b, err)
 	}
 	for _, dir := range []string{filed, first} {
