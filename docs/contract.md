@@ -162,6 +162,10 @@ tool caches, and `TMPDIR`; reads of `~/.ssh`, `~/.aws`, `~/.gnupg`,
 `~/.config/op`, `~/.config/gh`, `~/Library/Keychains`, `~/.netrc`, `~/.docker`
 and `~/.local/state/atask` are denied. Run results report `"sandboxed": true`.
 A check run by an already confined `atask` inherits that confinement.
+Rootless projects (no repository, including `general`) run every check and
+action unconfined: their claim workspace is just the directory the task was
+claimed from, and their proofs routinely reach other checkouts and config
+paths on the machine. Those runs report `"sandboxed": false`.
 
 ```toml
 # ~/.config/atask/config.toml

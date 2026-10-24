@@ -14,9 +14,12 @@ import (
 )
 
 // runner executes checks under the contract budgets (proof 30 s, regression
-// by size); a configured ProofBudget replaces them all.
-func (e *Engine) runner(opts ...proof.RunnerOption) *proof.Runner {
-	opts = append(opts, proof.WithSandbox(sandboxPolicy(e.sandbox)))
+// by size); a configured ProofBudget replaces them all. Unrestricted runs
+// skip confinement; every other run keeps the configured sandbox.
+func (e *Engine) runner(unrestricted bool, opts ...proof.RunnerOption) *proof.Runner {
+	if !unrestricted {
+		opts = append(opts, proof.WithSandbox(sandboxPolicy(e.sandbox)))
+	}
 	if e.proofBudget > 0 {
 		opts = append(opts, proof.WithBudget(e.proofBudget))
 	}
@@ -56,8 +59,10 @@ func runResultsOf(evidence []verification.Evidence) []proof.RunResult {
 // wall-clock allowance on top: a check that would start after it is spent
 // is recorded as timed out without running.
 func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.Policy, runID int64, revision string, fence func(*sqlite.Tx) error, opts runOpts) ([]verification.Evidence, error) {
-	if err := e.ensureSandbox(); err != nil {
-		return nil, err
+	if !opts.unrestricted {
+		if err := e.ensureSandbox(); err != nil {
+			return nil, err
+		}
 	}
 	var out []verification.Evidence
 	requiredTaskFailed := false
@@ -66,7 +71,7 @@ func (e *Engine) runChecks(ctx context.Context, dir string, policy verification.
 		deadline = time.Now().Add(opts.budget)
 	}
 	extra := changedFilesEnv(dir, opts)
-	runner := e.runner()
+	runner := e.runner(opts.unrestricted)
 	for _, step := range verification.Plan(policy) {
 		if err := ctx.Err(); err != nil {
 			return out, fault.WrapInternal(err, "verification interrupted")

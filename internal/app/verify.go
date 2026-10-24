@@ -276,14 +276,20 @@ type runOpts struct {
 	logDir string
 	// size picks the regression budget (small, medium, large).
 	size proof.Size
+	// unrestricted runs checks without confinement. A rootless project has
+	// no repository, so its claim workspace is just the directory the task
+	// was claimed from: confining checks to it guards nothing, and their
+	// proofs routinely reach other checkouts and config paths.
+	unrestricted bool
 }
 
 // suiteOpts derives the task-check and regression allowances for a task
 // from its size and its regression proof's size.
 func (e *Engine) suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, regOpts runOpts) {
 	size, regSize := checkSizes(t)
-	taskOpts = runOpts{budget: e.sizeBudget(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: size}
-	regOpts = runOpts{budget: e.sizeBudget(regSize), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch, size: regSize}
+	unrestricted := proj.Rootless()
+	taskOpts = runOpts{budget: e.sizeBudget(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: size, unrestricted: unrestricted}
+	regOpts = runOpts{budget: e.sizeBudget(regSize), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch, size: regSize, unrestricted: unrestricted}
 	return taskOpts, regOpts
 }
 
