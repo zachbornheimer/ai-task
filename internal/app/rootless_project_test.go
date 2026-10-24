@@ -46,7 +46,7 @@ func TestRootlessProjectLifecycle(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	if s.Workspace != cwd {
-		t.Fatalf("workspace %q, want the creator's cwd %q", s.Workspace, cwd)
+		t.Fatalf("workspace %q, want the claiming cwd %q", s.Workspace, cwd)
 	}
 	v, err := e.Verify(ctx, s.Token, verification.ModeComplete)
 	if err != nil || !v.Passed {

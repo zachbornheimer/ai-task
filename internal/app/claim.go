@@ -157,6 +157,14 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				return fault.WrapInternal(err, "candidate selection disagreed with status rules")
 			}
 		}
+		// A rootless attempt runs in the claiming directory, and its checks
+		// get <dir>.tmp as TMPDIR: refuse the claim now rather than let
+		// every check that makes a temp file fail later.
+		if proj.Rootless() {
+			if err := ensureCheckTmp(e.cwd); err != nil {
+				return err
+			}
+		}
 		// A previous attempt that never ended (lease ran out) may still have
 		// a live process in the worktree: quarantine that worktree.
 		if prev := r.Attempt; prev != nil && prev.EndedAt == nil {
@@ -190,10 +198,10 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	}
 	e.notify()
 	if proj.Rootless() {
-		dir := sess.Task.CreatedCwd
-		if dir == "" {
-			dir = e.cwd
-		}
+		// A rootless attempt runs in place where it was claimed: its checks
+		// and on-complete actions use the claiming directory, the same
+		// directory its session token is stored under.
+		dir := e.cwd
 		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 			if err := tx.SetWorkspace(attempt.ID, dir, ""); err != nil {
 				return err

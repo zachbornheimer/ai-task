@@ -320,6 +320,22 @@ func checkEnv(dir string) []string {
 	return append(kept, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+tmp)
 }
 
+// ensureCheckTmp creates the TMPDIR checkEnv gives checks running in dir
+// and proves it writable.
+func ensureCheckTmp(dir string) error {
+	tmp := dir + ".tmp"
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		return fault.Wrap(err, fault.CodeInvalidInput, "checks run here get %s as TMPDIR and it cannot be created; claim from a directory whose parent is writable", tmp)
+	}
+	f, err := os.CreateTemp(tmp, ".atask-probe-")
+	if err != nil {
+		return fault.Wrap(err, fault.CodeInvalidInput, "checks run here get %s as TMPDIR and it is not writable", tmp)
+	}
+	name := f.Name()
+	_ = f.Close()
+	return os.Remove(name)
+}
+
 // changedFilesEnv writes the candidate's changed paths next to the
 // snapshot and names the file and the target branch for the checks.
 // Always non-nil so execStep can tell a spent budget from "no budget".

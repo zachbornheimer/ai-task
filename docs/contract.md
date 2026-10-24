@@ -349,7 +349,12 @@ const (
 - `Claim`: atomic eligibility and exclusive leased assignment; isolated
   worktree for Git tasks. The token is discoverable from the task worktree;
   a rootless claim's token is also stored under the state dir keyed by the claim directory, so log, verify, renew and release work from that directory;
-  elsewhere it is passed explicitly or via `ATASK_SESSION`.
+  elsewhere it is passed explicitly or via `ATASK_SESSION`. A rootless claim's
+  workspace is the claiming directory, not the directory the task was filed
+  from: its proof, regression and on-complete actions run there, and a
+  re-claim after release moves the workspace to the new claiming directory.
+  Its checks get `<dir>.tmp` as `TMPDIR`; a claim from a directory where that
+  cannot be created and written is refused with `INVALID_INPUT`.
 - `Renew` / `Release` / `Log`: session-fenced. `Release` with `Failed` counts
   an attempt; without it the attempt is not counted.
 - `VerifyProof` / `VerifyRegression`: fresh diagnostic run, no completion.
