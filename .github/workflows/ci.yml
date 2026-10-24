@@ -15,6 +15,15 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+      # The e2e suite creates task worktrees through Worktrunk; without wt on
+      # PATH every workspace test fails. Pinned to the release CI-tested
+      # against; bump with the repo's own tool pin.
+      - run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/max-sixty/worktrunk/releases/download/v0.81.0/worktrunk-x86_64-unknown-linux-musl.tar.xz \
+            | tar -xJ -C "$HOME/.local/bin" --strip-components=1 worktrunk-x86_64-unknown-linux-musl/wt
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/wt" --version
       - run: git config --global user.email ci@example.com && git config --global user.name ci
       - run: gofmt -l . && test -z "$(gofmt -l .)"
       - run: go vet ./...
