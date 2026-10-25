@@ -329,8 +329,9 @@ when any member was started or completed, `○` otherwise. JSON carries
 in any read view. A `--project` name matches when lowercasing both and
 removing every character that is not a letter or digit leaves the same
 key: `ai-tooling` resolves `AI Tooling`. Two projects that collapse to
-one key are ambiguous; use the id. The exact selector `general` is still
-the default project.
+one key are ambiguous: the `INVALID_INPUT` error lists each matching
+project as `id (root path)`; retry with the id. The exact selector
+`general` is still the default project.
 
 ## Token transport
 

@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
@@ -61,8 +63,9 @@ func (t *Tx) GetProjectByRoot(root string) (project.Project, bool, error) {
 
 // GetProjectByName loads a project by display name. Names match when
 // project.NameKey is equal, so case and punctuation do not distinguish
-// them. Ambiguity is an error. A name that strips to an empty key matches
-// nothing.
+// them. Ambiguity is a CodeInvalidInput error that lists each matching
+// project's id and root path, so the caller can retry with an id. A name
+// that strips to an empty key matches nothing.
 func (t *Tx) GetProjectByName(name string) (project.Project, bool, error) {
 	key := project.NameKey(name)
 	if key == "" {
@@ -84,7 +87,15 @@ func (t *Tx) GetProjectByName(name string) (project.Project, bool, error) {
 	case 1:
 		return found[0], true, nil
 	}
-	return project.Project{}, false, fault.New(fault.CodeInvalidInput, "project name %q is ambiguous; use its id", name)
+	matches := make([]string, len(found))
+	for i := range found {
+		where := found[i].RootPath
+		if where == "" {
+			where = "no directory"
+		}
+		matches[i] = fmt.Sprintf("%s (%s)", found[i].ID, where)
+	}
+	return project.Project{}, false, fault.New(fault.CodeInvalidInput, "project name %q is ambiguous; use its id: %s", name, strings.Join(matches, ", "))
 }
 
 // ListProjects returns every project ordered by creation.

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -231,7 +232,22 @@ func TestListResolvesNormalizedProjectName(t *testing.T) {
 		t.Fatalf("init right: %d %s", code, e)
 	}
 	code, out, e := run(cwd, "list", "--project", "casefold")
-	if code == ExitOK || !strings.Contains(out+e, "ambiguous") {
+	if code == ExitOK || !strings.Contains(out+e, "INVALID_INPUT") || !strings.Contains(out+e, "ambiguous") {
 		t.Fatalf("colliding names must be ambiguous: %d %s %s", code, out, e)
+	}
+	// Each match is listed as "ID (root)"; the listed ID must work as a
+	// retry selector with no further lookup.
+	for _, dir := range []string{left, right} {
+		root, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := regexp.MustCompile(`(\S+) \(` + regexp.QuoteMeta(root) + `\)`).FindStringSubmatch(out + e)
+		if m == nil {
+			t.Fatalf("ambiguous error must list the project at %s with its id: %s %s", root, out, e)
+		}
+		if code, _, e := run(cwd, "list", "--project", m[1]); code != ExitOK {
+			t.Fatalf("retry with listed id %s: %d %s", m[1], code, e)
+		}
 	}
 }
