@@ -188,15 +188,17 @@ verifies any ready group it finds.
 
 `claim --group REF` (id or key; a non-group, or a positional REF beside it, is
 `INVALID_INPUT`) takes the oldest claimable task at any depth beneath that
-group, whatever its project. Answers are scoped to the group: `DONE` when
+group; children share the group's project. Answers are scoped to the group: `DONE` when
 every descendant is complete and every group proof beneath it (its own
-included) passed; `STALLED` (details: the summary and its `reasons`) when open
+included) passed (a group with a required proof and no executable task beneath
+it never is: `STALLED`, the reason names it); `STALLED` (details: the summary and its `reasons`) when open
 members remain and nothing beneath it is claimable, in flight, or cooling,
 including a member required by a task outside the group, which the reason
 names (the run does not pull outside work in); otherwise `NOT_READY` with
 `details` `{group, group_proofs_pending, active}`. `group_proofs_pending` is
 true when every member of a group beneath it is complete and its proofs wait for
-a verifier: run `atask verify complete GROUP`, or claim with `--wait`, which
+a verifier, also while they wait out a retry backoff: run `atask verify complete GROUP`
+(it verifies ready nested proof groups first, deepest first), or claim with `--wait`, which
 runs only the proofs inside this group.
 
 The claim result carries the task view, the token (the only place it is

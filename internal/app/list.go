@@ -310,7 +310,7 @@ func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite
 	var err error
 	var exhausted, blockedByExhausted, workspaceBlocked, drafts int
 	var epicsPending, epicsFailed, epicsErrored int
-	var epicErrors, outsideReasons []string
+	var epicErrors, outsideReasons, emptyEpics []string
 	for i := range records {
 		r := &records[i]
 		if r.Task.Kind == task.KindGroup && verification.HasRequired(r.Task.Verification.TaskChecks) && r.CompletedAt == nil {
@@ -327,8 +327,24 @@ func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite
 				return s, err
 			}
 			switch gv.Status {
+			case "":
+				// Within a group run, a proof group with no executable
+				// member beneath it can never become ready: the run must
+				// not read as done.
+				if scope != nil {
+					prog, err := e.groupProgress(tx, r.Task.ID, rp, n)
+					if err != nil {
+						return s, err
+					}
+					if prog.Total == 0 {
+						emptyEpics = append(emptyEpics, fmt.Sprintf("group %s has a required proof but no executable task beneath it, so its proof can never run; add member tasks or archive the group", r.Task.ID))
+					}
+				}
 			case "pending", "running":
 				epicsPending++
+				if scope != nil && gv.Status == "pending" {
+					scope.proofsPending = true
+				}
 				if gv.NextRetry != nil {
 					s.Cooling++
 					if s.NextEligibleAt == nil || gv.NextRetry.Before(*s.NextEligibleAt) {
@@ -337,9 +353,6 @@ func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite
 					}
 				} else {
 					s.Active++
-					if scope != nil && gv.Status == "pending" {
-						scope.proofsPending = true
-					}
 				}
 			case "failed":
 				epicsFailed++
@@ -397,13 +410,14 @@ func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite
 		}
 	}
 	s.PendingEpics = epicsPending
-	s.Done = s.Open == 0 && epicsPending == 0 && epicsFailed == 0 && epicsErrored == 0
-	s.Stalled = (s.Open > 0 || epicsFailed > 0 || epicsErrored > 0) && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
+	s.Done = s.Open == 0 && epicsPending == 0 && epicsFailed == 0 && epicsErrored == 0 && len(emptyEpics) == 0
+	s.Stalled = (s.Open > 0 || epicsFailed > 0 || epicsErrored > 0 || len(emptyEpics) > 0) && s.Claimable == 0 && s.Active == 0 && s.Cooling == 0
 	if s.Stalled {
 		if epicsFailed > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d epic(s) failed their own checks on the current target; see the group's last_error, then add follow-up member tasks or fix the checks (`atask update <group> --check ...`)", epicsFailed))
 		}
 		s.Reasons = append(s.Reasons, epicErrors...)
+		s.Reasons = append(s.Reasons, emptyEpics...)
 		s.Reasons = append(s.Reasons, outsideReasons...)
 		if exhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `atask update <task> --reset-attempts`", exhausted))

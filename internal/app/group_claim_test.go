@@ -161,3 +161,88 @@ func TestClaimGroupRejectsNonGroup(t *testing.T) {
 	_, err = f.e.Claim(f.ctx, app.ClaimRequest{GroupID: g, TaskID: &a})
 	wantCode(t, err, fault.CodeInvalidInput)
 }
+
+// TestClaimGroupNested: when only a nested proof group is pending, the claim
+// says group proofs are due, and `verify complete` on the root group runs
+// the nested group first, then the root, so the next claim is DONE.
+func TestClaimGroupNested(t *testing.T) {
+	f := newGitFixture(t)
+	res := f.apply(
+		plan.AddGroup{Key: "g", Title: "G", TaskChecks: []verification.CheckSpec{check("outer", "test -d .", true)}},
+		plan.AddGroup{Key: "n", Title: "N", Parent: "g", TaskChecks: []verification.CheckSpec{check("inner", "test -d .", true)}},
+		plan.AddTask{Key: "b", Title: "b", Parent: "n", TaskChecks: okChecks()},
+	)
+	g, n, b := res.Created["g"], res.Created["n"], res.Created["b"]
+	f.complete(f.claim(string(b)))
+
+	_, err := claimGroup(f, g, false)
+	wantCode(t, err, fault.CodeNotReady)
+	if d, ok := groupDetails(t, err).(app.GroupNotReady); !ok || !d.GroupProofsPending {
+		t.Fatalf("a nested proof group is due: details = %+v", groupDetails(t, err))
+	}
+	out, err := f.e.VerifyGroup(f.ctx, f.proj.ID, string(g))
+	if err != nil || !out.Completed || out.TaskID != g {
+		t.Fatalf("verify complete on the root = %+v %v", out, err)
+	}
+	for _, id := range []task.ID{g, n} {
+		if v := f.show(string(id)); v.CompletedAt == nil {
+			t.Fatalf("group %s must be complete: %+v", id, v.GroupVerification)
+		}
+	}
+	_, err = claimGroup(f, g, false)
+	wantCode(t, err, fault.CodeDone)
+}
+
+// TestClaimGroupEmptyProofGroupIsNotDone: a group with a required proof and
+// no executable member can never become ready, so a run beneath it is
+// STALLED naming that group, never DONE; the same holds for such a group
+// nested in an otherwise finished group.
+func TestClaimGroupEmptyProofGroupIsNotDone(t *testing.T) {
+	f := newGitFixture(t)
+	res := f.apply(
+		plan.AddGroup{Key: "empty", Title: "Empty", TaskChecks: []verification.CheckSpec{check("p", "test -d .", true)}},
+		plan.AddGroup{Key: "g", Title: "G", TaskChecks: []verification.CheckSpec{check("outer", "test -d .", true)}},
+		plan.AddTask{Key: "a", Title: "a", Parent: "g", TaskChecks: okChecks()},
+		plan.AddGroup{Key: "n", Title: "N", Parent: "g", TaskChecks: []verification.CheckSpec{check("inner", "test -d .", true)}},
+	)
+	empty, g, a, n := res.Created["empty"], res.Created["g"], res.Created["a"], res.Created["n"]
+
+	_, err := claimGroup(f, empty, false)
+	wantCode(t, err, fault.CodeStalled)
+	if sum, ok := groupDetails(t, err).(app.Summary); !ok || !strings.Contains(strings.Join(sum.Reasons, "\n"), string(empty)) {
+		t.Fatalf("STALLED must name the empty group %s: %+v", empty, groupDetails(t, err))
+	}
+
+	f.complete(f.claim(string(a)))
+	for _, wait := range []bool{false, true} {
+		_, err = claimGroup(f, g, wait)
+		wantCode(t, err, fault.CodeStalled)
+		if sum, ok := groupDetails(t, err).(app.Summary); !ok || !strings.Contains(strings.Join(sum.Reasons, "\n"), string(n)) {
+			t.Fatalf("wait=%v: STALLED must name the nested empty group %s: %+v", wait, n, groupDetails(t, err))
+		}
+	}
+}
+
+// TestClaimGroupProofsPendingDuringBackoff: a group proof waiting out the
+// retry backoff of an environment error is still pending, and the claim
+// still says so.
+func TestClaimGroupProofsPendingDuringBackoff(t *testing.T) {
+	f := newGitFixture(t)
+	res := f.apply(
+		plan.AddGroup{Key: "g", Title: "G", TaskChecks: []verification.CheckSpec{check("outer", "test -d .", true)}},
+		plan.AddTask{Key: "a", Title: "a", Parent: "g", TaskChecks: okChecks()},
+	)
+	g, a := res.Created["g"], res.Created["a"]
+	f.complete(f.claim(string(a)))
+	now := f.c.Now().UnixMilli()
+	f.sql(`INSERT INTO verification_jobs (project_id, cohort, status, members_json, created_at, finished_at) VALUES (?, ?, 'error', '[]', ?, ?)`, f.proj.ID, "group:"+string(g), now, now)
+
+	if v := f.show(string(g)); v.GroupVerification.NextRetry == nil {
+		t.Fatalf("setup: the group must be in backoff: %+v", v.GroupVerification)
+	}
+	_, err := claimGroup(f, g, false)
+	wantCode(t, err, fault.CodeNotReady)
+	if d, ok := groupDetails(t, err).(app.GroupNotReady); !ok || !d.GroupProofsPending {
+		t.Fatalf("proofs in backoff are still pending: details = %+v", groupDetails(t, err))
+	}
+}

@@ -294,9 +294,12 @@ func (e *Engine) runPendingGroups(ctx context.Context, pid project.ID, only, wit
 }
 
 // VerifyGroup verifies one group now: its proofs run on the merge of every
-// child's completed revision and, when they pass, the group completes. It
-// fails with NOT_READY until every child is complete, and with
-// BASE_CONFLICT when the children's revisions cannot be merged.
+// child's completed revision and, when they pass, the group completes. Ready
+// proof groups nested in it are verified first, deepest first, because the
+// group is ready only once they are complete. It fails with NOT_READY until
+// every child is complete, and with BASE_CONFLICT when the children's
+// revisions cannot be merged. A nested group's failure is returned as is: its
+// result and error name that group.
 func (e *Engine) VerifyGroup(ctx context.Context, pid project.ID, ref string) (VerifyResult, error) {
 	v, err := e.Show(ctx, pid, ref, false)
 	if err != nil {
@@ -311,20 +314,76 @@ func (e *Engine) VerifyGroup(ctx context.Context, pid project.ID, ref string) (V
 	if err := e.reconcile(ctx); err != nil {
 		return VerifyResult{}, err
 	}
+	if res, err := e.verifyNestedGroups(ctx, pid, v.ID); err != nil {
+		return res, err
+	}
 	if err := e.requireGroupReady(ctx, pid, v.ID); err != nil {
 		return VerifyResult{}, err
 	}
-	job, ok, err := e.claimGroupJob(ctx, pid, v.ID, "")
+	return e.runGroupNow(ctx, pid, v.ID)
+}
+
+// runGroupNow runs the proofs of one ready group, ignoring retry backoff and
+// the memory of an unchanged failure: the caller asked for this group.
+func (e *Engine) runGroupNow(ctx context.Context, pid project.ID, id task.ID) (VerifyResult, error) {
+	job, ok, err := e.claimGroupJob(ctx, pid, id, "")
 	if err != nil {
 		return VerifyResult{}, err
 	}
 	if !ok {
-		return VerifyResult{}, fault.New(fault.CodeConflict, "%s: another verifier is running this group; wait for its result", v.ID)
+		return VerifyResult{}, fault.New(fault.CodeConflict, "%s: another verifier is running this group; wait for its result", id)
 	}
 	res, err := e.executeGroupJob(ctx, job)
 	e.notify()
 	writeRunResult(res, err)
 	return res, err
+}
+
+// verifyNestedGroups verifies every incomplete proof group beneath root that
+// is ready, deepest first. A group that is not ready is left for the caller's
+// own readiness check to report.
+func (e *Engine) verifyNestedGroups(ctx context.Context, pid project.ID, root task.ID) (VerifyResult, error) {
+	var nested []task.ID
+	if err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) { nested, err = nestedEpics(tx, root); return }); err != nil {
+		return VerifyResult{}, err
+	}
+	for _, id := range nested {
+		if err := e.requireGroupReady(ctx, pid, id); err != nil {
+			if fault.CodeOf(err) == fault.CodeNotReady {
+				continue
+			}
+			return VerifyResult{}, err
+		}
+		if res, err := e.runGroupNow(ctx, pid, id); err != nil {
+			return res, err
+		}
+	}
+	return VerifyResult{}, nil
+}
+
+// nestedEpics lists the groups with required proofs beneath id, at any depth
+// and through plain groups, that are not yet complete, deepest first.
+func nestedEpics(tx *sqlite.Tx, id task.ID) ([]task.ID, error) {
+	children, err := tx.Children(id)
+	if err != nil {
+		return nil, err
+	}
+	var out []task.ID
+	for i := range children {
+		c := &children[i]
+		if c.Task.Kind != task.KindGroup {
+			continue
+		}
+		below, err := nestedEpics(tx, c.Task.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, below...)
+		if verification.HasRequired(c.Task.Verification.TaskChecks) && c.CompletedAt == nil {
+			out = append(out, c.Task.ID)
+		}
+	}
+	return out, nil
 }
 
 // requireGroupReady fails with NOT_READY, saying how many children are

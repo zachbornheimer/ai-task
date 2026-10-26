@@ -534,7 +534,7 @@ func (t *Tx) ClaimCandidate(pid project.ID, now time.Time, maxAttempts int) (Rec
 }
 
 // GroupClaimCandidate is ClaimCandidate restricted to the live descendants
-// of a group, at any depth, whatever project each member belongs to.
+// of a group, at any depth. Children share their group's project.
 func (t *Tx) GroupClaimCandidate(group task.ID, now time.Time, maxAttempts int) (Record, bool, error) {
 	where, args := scopeWhere("", ScopeClaimable, now, maxAttempts, false)
 	return t.claimCandidate(where+` AND t.id IN `+descendantIDs, append(args, group))
