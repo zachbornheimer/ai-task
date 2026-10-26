@@ -75,7 +75,7 @@ func TestContractVerbFlagsAndFilters(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	for verb, want := range map[string][]string{
-		"claim":           {"--wait"},
+		"claim":           {"--wait", "--group"},
 		"claim release":   {"--note", "--failed"},
 		"verify complete": {"--reverify"},
 		"add":             {"-f", "--proof", "--key"},

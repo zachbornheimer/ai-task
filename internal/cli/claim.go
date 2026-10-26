@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	register("claim", "claim work: atask claim [REF] [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
+	register("claim", "claim work: atask claim [REF] [--wait] | atask claim --group REF [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
 	register("log", "record progress under the current session: atask log --done .. --next .. --learned .. --note ..", runLog)
 	register("verify", "run checks under the current session: atask verify proof|regression|complete", runVerify)
 }
@@ -108,7 +108,7 @@ func (c *ctxt) guardWorkspace(ctx context.Context, tok execution.Token) error {
 // are interleaved (`atask claim --json renew` dispatches like `atask claim
 // renew --json`), and returns the remaining args.
 func claimSubcommand(args []string) (string, []string) {
-	valueFlags := map[string]bool{"--note": true, "--db": true, "--project": true}
+	valueFlags := map[string]bool{"--note": true, "--db": true, "--project": true, "--group": true}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "renew" || a == "release" {
@@ -135,7 +135,8 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	if sub, rest := claimSubcommand(args); sub != "" {
 		return c.claimSub(ctx, sub, rest)
 	}
-	wait := c.fs.Bool("wait", false, "block until work is claimable, the project is done, or it is stalled")
+	wait := c.fs.Bool("wait", false, "block until work is claimable, the project (or group) is done, or it is stalled")
+	group := c.fs.String("group", "", "claim the next ready task beneath this group (id or key); DONE, STALLED, and NOT_READY describe that group")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -148,6 +149,28 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	}
 	req := app.ClaimRequest{Wait: *wait}
 	pid, perr := c.resolveProject(ctx)
+	if *group != "" {
+		if len(c.args) > 0 {
+			return fault.New(fault.CodeInvalidInput, "--group claims the next task beneath a group; it does not take a task reference")
+		}
+		if task.IsID(*group) {
+			req.GroupID = task.ID(*group)
+		} else {
+			if perr != nil {
+				return perr
+			}
+			v, err := e.Show(ctx, pid, *group, false)
+			if err != nil {
+				return err
+			}
+			req.GroupID = v.ID
+		}
+		s, err := e.Claim(ctx, req)
+		if err != nil {
+			return err
+		}
+		return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+	}
 	if len(c.args) == 1 {
 		ref := c.args[0]
 		if task.IsID(ref) {

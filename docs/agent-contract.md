@@ -121,7 +121,7 @@ replay returns the committed result (even with a stale
   edges form a DAG; cycles, self-edges, and cross-project edges are
   rejected and nothing is written.
 - Groups (`--group`, `--parent`) are organizational: membership never
-  implies an edge, groups cannot be claimed, and group progress is derived.
+  implies an edge, a group itself cannot be claimed (`claim --group` takes its next ready member), and group progress is derived.
   A group may carry its own proofs (`--group --proof ... --regression ...`,
   each with its own `size=`). They run on the merge of every child's
   completed revision, built in a scratch worktree: no integration branch
@@ -164,6 +164,7 @@ atask context ID worker handoff for that task
 atask help add syntax, plus every proof preset: subject, options, default size
 atask show [REF] current claim, or a particular task
 atask claim [REF] [--wait] one atomic leased attempt; prints the token once
+atask claim --group REF [--wait] the same, for the oldest claimable task beneath a group
 atask claim renew [token|-] extend the lease (inside the worktree no token is needed)
 atask claim release [token|-] [--note ..] [--failed]
 atask log --done .. --next .. --learned .. --note .. (token: see Token transport)
@@ -184,6 +185,19 @@ preparation (the repair path after fixing the worktree); `atask update <ref>
 --reset-attempts` clears the mark. `--wait` blocks until work is
 claimable, `DONE`, `STALLED`, or interrupted; while waiting the process
 verifies any ready group it finds.
+
+`claim --group REF` (id or key; a non-group, or a positional REF beside it, is
+`INVALID_INPUT`) takes the oldest claimable task at any depth beneath that
+group, whatever its project. Answers are scoped to the group: `DONE` when
+every descendant is complete and every group proof beneath it (its own
+included) passed; `STALLED` (details: the summary and its `reasons`) when open
+members remain and nothing beneath it is claimable, in flight, or cooling,
+including a member required by a task outside the group, which the reason
+names (the run does not pull outside work in); otherwise `NOT_READY` with
+`details` `{group, group_proofs_pending, active}`. `group_proofs_pending` is
+true when every member of a group beneath it is complete and its proofs wait for
+a verifier: run `atask verify complete GROUP`, or claim with `--wait`, which
+runs only the proofs inside this group.
 
 The claim result carries the task view, the token (the only place it is
 ever printed), `attempt`, `lease_until`, `workspace` and `branch`,

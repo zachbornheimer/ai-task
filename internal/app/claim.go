@@ -23,13 +23,19 @@ var (
 
 // ClaimRequest selects work. TaskID picks a specific task (eligibility is
 // still enforced); nil lets the engine choose the oldest claimable task.
+// GroupID restricts that choice to the executable tasks beneath a group, at
+// any depth: each member is claimed in its own project, the answers DONE,
+// STALLED, and NOT_READY describe that subtree only, and ProjectID is
+// ignored (the group's own project applies). It excludes TaskID.
 type ClaimRequest struct {
 	ProjectID project.ID
 	TaskID    *task.ID
-	// Wait blocks until work is claimable, the project is done (ErrDone),
-	// nothing can proceed (ErrStalled), or ctx ends. While waiting, the
-	// caller runs any pending cohort verification job, since it has
-	// capacity and the job must not depend on a hidden extra command.
+	GroupID   task.ID
+	// Wait blocks until work is claimable, the project (or group) is done
+	// (ErrDone), nothing can proceed (ErrStalled), or ctx ends. While
+	// waiting, the caller runs any pending cohort verification job, since
+	// it has capacity and the job must not depend on a hidden extra
+	// command. A group wait runs only that group's pending proofs.
 	Wait bool
 }
 
@@ -40,16 +46,35 @@ type ClaimRequest struct {
 // second short transaction.
 func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 	lease := e.lease
-	if req.TaskID == nil && req.ProjectID == "" {
+	switch {
+	case req.GroupID != "":
+		if req.TaskID != nil {
+			return Session{}, fault.New(fault.CodeInvalidInput, "a claim names a task or a group, not both")
+		}
+		pid, err := e.groupHome(ctx, req.GroupID)
+		if err != nil {
+			return Session{}, err
+		}
+		req.ProjectID = pid
+	case req.TaskID == nil && req.ProjectID == "":
 		if _, err := e.EnsureGeneral(ctx); err != nil {
 			return Session{}, err
 		}
 	}
 	if !req.Wait {
-		return e.claimOnce(ctx, req, lease)
+		s, err := e.claimOnce(ctx, req, lease)
+		if err == errNoClaimable && req.GroupID != "" { //nolint:errorlint // the sentinel is returned as is; errors.Is matches by code
+			return Session{}, e.groupIdle(ctx, req.GroupID)
+		}
+		return s, err
 	}
 	for {
-		if req.ProjectID != "" {
+		switch {
+		case req.GroupID != "":
+			if _, err := e.runPendingGroups(ctx, req.ProjectID, "", req.GroupID); err != nil && ctx.Err() != nil {
+				return Session{}, ctx.Err()
+			}
+		case req.ProjectID != "":
 			if _, err := e.RunPendingGroups(ctx, req.ProjectID, ""); err != nil && ctx.Err() != nil {
 				return Session{}, ctx.Err()
 			}
@@ -63,8 +88,18 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 			return Session{}, err
 		}
 		wait := e.poll
-		if req.ProjectID != "" || req.TaskID == nil { // no project: the unscoped board
-			sum, serr := e.Summary(ctx, req.ProjectID)
+		var sum Summary
+		var serr error
+		scoped := true
+		switch {
+		case req.GroupID != "":
+			sum, _, serr = e.groupSummary(ctx, req.GroupID)
+		case req.ProjectID != "" || req.TaskID == nil: // no project: the unscoped board
+			sum, serr = e.Summary(ctx, req.ProjectID)
+		default:
+			scoped = false
+		}
+		if scoped {
 			if serr != nil {
 				return Session{}, serr
 			}
@@ -140,12 +175,18 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				}
 				maxAttempts = proj.MaxAttempts
 			}
-			cand, ok, err := tx.ClaimCandidate(req.ProjectID, now, maxAttempts)
+			var cand sqlite.Record
+			var ok bool
+			if req.GroupID != "" {
+				cand, ok, err = tx.GroupClaimCandidate(req.GroupID, now, maxAttempts)
+			} else {
+				cand, ok, err = tx.ClaimCandidate(req.ProjectID, now, maxAttempts)
+			}
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return fault.New(fault.CodeNotReady, "no claimable task")
+				return errNoClaimable
 			}
 			r = cand
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {

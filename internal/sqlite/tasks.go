@@ -530,12 +530,51 @@ const claimableWhere = `
 // claimable task, ties broken by ID. Deterministic; no priority field.
 func (t *Tx) ClaimCandidate(pid project.ID, now time.Time, maxAttempts int) (Record, bool, error) {
 	where, args := scopeWhere(pid, ScopeClaimable, now, maxAttempts, false)
+	return t.claimCandidate(where, args)
+}
+
+// GroupClaimCandidate is ClaimCandidate restricted to the live descendants
+// of a group, at any depth, whatever project each member belongs to.
+func (t *Tx) GroupClaimCandidate(group task.ID, now time.Time, maxAttempts int) (Record, bool, error) {
+	where, args := scopeWhere("", ScopeClaimable, now, maxAttempts, false)
+	return t.claimCandidate(where+` AND t.id IN `+descendantIDs, append(args, group))
+}
+
+func (t *Tx) claimCandidate(where string, args []any) (Record, bool, error) {
 	row := t.tx.QueryRowContext(t.ctx, recordSelect+where+` ORDER BY t.created_at, t.id LIMIT 1`, args...)
 	r, err := scanRecord(row)
 	if isNoRows(err) {
 		return r, false, nil
 	}
 	return r, err == nil, wrapInternal(err, "select candidate")
+}
+
+// descendantIDs selects the live tasks and groups beneath a group (one
+// bound parameter: the group), at any depth. An archived group prunes
+// everything under it, as Children does.
+const descendantIDs = `(WITH RECURSIVE sub(id) AS (
+    SELECT id FROM tasks WHERE parent_id = ? AND archived_at IS NULL
+    UNION ALL
+    SELECT c.id FROM tasks c JOIN sub ON c.parent_id = sub.id WHERE c.archived_at IS NULL
+  ) SELECT id FROM sub)`
+
+// Descendants returns every live task and group beneath a group, at any
+// depth, oldest first.
+func (t *Tx) Descendants(id task.ID) ([]Record, error) {
+	rows, err := t.tx.QueryContext(t.ctx, recordSelect+` WHERE t.id IN `+descendantIDs+` ORDER BY t.created_at, t.id`, id)
+	if err != nil {
+		return nil, wrapInternal(err, "list descendants")
+	}
+	defer discard.CloseReadOnly(rows)
+	var out []Record
+	for rows.Next() {
+		r, err := scanRecord(rows)
+		if err != nil {
+			return nil, wrapInternal(err, "scan descendant")
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // TaskProject returns the owning project and kind of a task without

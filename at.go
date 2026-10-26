@@ -189,14 +189,15 @@ type (
 
 // Read models.
 type (
-	ListQuery    = app.ListQuery
-	ListFilter   = app.Filter
-	PlanSnapshot = app.PlanSnapshot
-	TaskView     = app.TaskView
-	GroupView    = app.GroupView
-	Summary      = app.Summary
-	VerifyResult = app.VerifyResult
-	Evidence     = verification.Evidence
+	ListQuery     = app.ListQuery
+	ListFilter    = app.Filter
+	PlanSnapshot  = app.PlanSnapshot
+	TaskView      = app.TaskView
+	GroupView     = app.GroupView
+	GroupNotReady = app.GroupNotReady
+	Summary       = app.Summary
+	VerifyResult  = app.VerifyResult
+	Evidence      = verification.Evidence
 )
 
 // Verify modes.

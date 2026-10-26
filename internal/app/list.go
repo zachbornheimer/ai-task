@@ -285,15 +285,32 @@ func (e *Engine) foreignHomes(ctx context.Context, pid project.ID) []project.ID 
 }
 
 func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[project.ID]targetHead, byID map[project.ID]project.Project) (Summary, error) {
+	records, err := tx.ListRecords(proj.ID, sqlite.ScopeLive, e.now(), proj.MaxAttempts)
+	if err != nil {
+		return Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}, err
+	}
+	return e.summarize(tx, proj, records, heads, byID, nil)
+}
+
+// groupScope narrows a summary to the subtree of one group.
+type groupScope struct {
+	id     task.ID
+	inside map[task.ID]bool
+	// proofsPending is an output: a group in the subtree has every member
+	// complete and is waiting for a verifier nobody is running yet.
+	proofsPending bool
+}
+
+// summarize derives the summary of records. With a scope, a task blocked
+// by a requirement outside the group is stalled by name: the run does not
+// pull in work beyond its group.
+func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite.Record, heads map[project.ID]targetHead, byID map[project.ID]project.Project, scope *groupScope) (Summary, error) {
 	n := e.now()
 	s := Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}
-	records, err := tx.ListRecords(proj.ID, sqlite.ScopeLive, n, proj.MaxAttempts)
-	if err != nil {
-		return s, err
-	}
+	var err error
 	var exhausted, blockedByExhausted, workspaceBlocked, drafts int
 	var epicsPending, epicsFailed, epicsErrored int
-	var epicErrors []string
+	var epicErrors, outsideReasons []string
 	for i := range records {
 		r := &records[i]
 		if r.Task.Kind == task.KindGroup && verification.HasRequired(r.Task.Verification.TaskChecks) && r.CompletedAt == nil {
@@ -320,6 +337,9 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[projec
 					}
 				} else {
 					s.Active++
+					if scope != nil && gv.Status == "pending" {
+						scope.proofsPending = true
+					}
 				}
 			case "failed":
 				epicsFailed++
@@ -364,7 +384,16 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[projec
 		case st == task.StatusDraft:
 			drafts++
 		case st == task.StatusBlocked:
-			blockedByExhausted++
+			outside, err := outsideRequirements(tx, *r, scope)
+			if err != nil {
+				return s, err
+			}
+			if len(outside) == 0 {
+				blockedByExhausted++
+			}
+			for j := range outside {
+				outsideReasons = append(outsideReasons, fmt.Sprintf("task %s requires %s (%s), which is outside group %s and not complete; complete it or move it into the group", r.Task.ID, outside[j].Task.ID, outside[j].Task.Description, scope.id))
+			}
 		}
 	}
 	s.PendingEpics = epicsPending
@@ -375,6 +404,7 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[projec
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d epic(s) failed their own checks on the current target; see the group's last_error, then add follow-up member tasks or fix the checks (`atask update <group> --check ...`)", epicsFailed))
 		}
 		s.Reasons = append(s.Reasons, epicErrors...)
+		s.Reasons = append(s.Reasons, outsideReasons...)
 		if exhausted > 0 {
 			s.Reasons = append(s.Reasons, fmt.Sprintf("%d task(s) exhausted their attempts; fix and `atask update <task> --reset-attempts`", exhausted))
 		}

@@ -171,7 +171,7 @@ func TestHelpCommandListsOnlyThatCommandsFlags(t *testing.T) {
 		t.Fatalf("help claim: %d %s", code, errOut)
 	}
 	got := flagsFromHelp(out)
-	assertExact(t, "help claim flags", []string{"db", "json", "project", "wait"}, got)
+	assertExact(t, "help claim flags", []string{"db", "group", "json", "project", "wait"}, got)
 	code, out, errOut = runAt(t, "help", "add")
 	if code != ExitOK || !strings.Contains(out, "-proof") || !strings.Contains(out, "run:") || strings.Contains(out, "-wait") {
 		t.Fatalf("help add: %d\n%s\n%s", code, out, errOut)

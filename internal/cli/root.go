@@ -377,6 +377,7 @@ atask update ID [--proof ...] [--regression ...] [--archive --reason ...]
 atask list [ready|blocked|complete|archived|open]
 atask show [ID] [--full]
 atask claim [ID] [--wait]
+atask claim --group REF [--wait]
 atask claim renew [token]
 atask claim release [token] [--note ...] [--failed]
 atask log --done ... --next ... --learned ... --note ...

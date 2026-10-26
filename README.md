@@ -54,6 +54,7 @@ atask verify proof                                        # diagnostic
 # commit in the worktree, then:
 atask verify complete                                     # both proofs fresh on a snapshot, then complete
 atask claim --wait                                        # next eligible task, or DONE / STALLED
+atask claim --group G --wait                              # the same, for the tasks beneath group G only
 ```
 
 Things that surprise people the first time:

@@ -51,8 +51,11 @@ CLAIMS AND DEPENDENCIES
 
 atask claim               Claim the oldest eligible task.
 atask claim ID            Claim a specific eligible task.
+atask claim --group ID    Claim the oldest eligible task beneath a group.
 
 A claim provides a session token and workspace. Work only on the claimed task.
+With --group, DONE, STALLED, and NOT_READY describe that group only; a member
+blocked by a task outside the group stalls it, naming that task.
 
 Claim authorization is resolved from:
 - The task worktree or claiming directory.

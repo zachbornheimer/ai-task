@@ -18,6 +18,7 @@ atask add -f PLAN            # yaml or json; - for stdin
 atask update TASK_ID [FLAGS]
 
 atask claim [TASK_ID] [--wait]
+atask claim --group REF [--wait]
 atask claim renew [TOKEN|-]
 atask claim release [TOKEN|-] [--note TEXT] [--failed]
 
@@ -184,7 +185,9 @@ Every command prints `{"ok":true,"result":...}` or
 `{"ok":false,"error":{"code":CODE,"message":TEXT}}` under `--json`. Codes:
 `INVALID_INPUT`, `NOT_FOUND`, `CONFLICT`, `INVALID_SESSION`, `NOT_READY`,
 `BASE_CONFLICT`, `CHECK_FAILED`, `IDEMPOTENCY_CONFLICT`, `DONE` (claim --wait
-with an empty board), `STALLED` (claim --wait with only blocked tasks).
+with an empty board, or `claim --group` on a finished group), `STALLED` (claim --wait
+with only blocked tasks). `claim --group` answers `NOT_READY` with `details`
+`{group, group_proofs_pending, active}` when nothing is claimable yet.
 
 Lease is 30 minutes; `claim renew` extends it by 30 minutes from now and never
 shortens it. Default attempt budget is 3 per task.

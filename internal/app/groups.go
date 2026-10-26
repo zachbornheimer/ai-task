@@ -266,12 +266,19 @@ func groupRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, erro
 // durable job each. Claim(wait) calls it so any worker with capacity
 // verifies a ready group.
 func (e *Engine) RunPendingGroups(ctx context.Context, pid project.ID, only task.ID) (bool, error) {
+	return e.runPendingGroups(ctx, pid, only, "")
+}
+
+// runPendingGroups is RunPendingGroups limited, when within is set, to
+// that group and the groups beneath it: a group claim verifies only its
+// own subtree.
+func (e *Engine) runPendingGroups(ctx context.Context, pid project.ID, only, within task.ID) (bool, error) {
 	if err := e.reconcile(ctx); err != nil {
 		return false, err
 	}
 	ran := false
 	for {
-		job, ok, err := e.claimGroupJob(ctx, pid, only)
+		job, ok, err := e.claimGroupJob(ctx, pid, only, within)
 		if err != nil || !ok {
 			return ran, err
 		}
@@ -307,7 +314,7 @@ func (e *Engine) VerifyGroup(ctx context.Context, pid project.ID, ref string) (V
 	if err := e.requireGroupReady(ctx, pid, v.ID); err != nil {
 		return VerifyResult{}, err
 	}
-	job, ok, err := e.claimGroupJob(ctx, pid, v.ID)
+	job, ok, err := e.claimGroupJob(ctx, pid, v.ID, "")
 	if err != nil {
 		return VerifyResult{}, err
 	}
@@ -348,7 +355,7 @@ func (e *Engine) requireGroupReady(ctx context.Context, pid project.ID, id task.
 	})
 }
 
-func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID) (groupJob, bool, error) {
+func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only, within task.ID) (groupJob, bool, error) {
 	now := e.now()
 	owner := execution.NewToken()
 	var job groupJob
@@ -368,9 +375,20 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only task.ID
 		if err != nil {
 			return err
 		}
+		var inside map[task.ID]bool
+		if within != "" {
+			below, err := tx.Descendants(within)
+			if err != nil {
+				return err
+			}
+			inside = map[task.ID]bool{within: true}
+			for i := range below {
+				inside[below[i].Task.ID] = true
+			}
+		}
 		for i := range records {
 			r := &records[i]
-			if r.Task.Kind != task.KindGroup || r.CompletedAt != nil || (only != "" && r.Task.ID != only) {
+			if r.Task.Kind != task.KindGroup || r.CompletedAt != nil || (only != "" && r.Task.ID != only) || (inside != nil && !inside[r.Task.ID]) {
 				continue
 			}
 			ready, err := e.groupReady(tx, *r, proj, now)
