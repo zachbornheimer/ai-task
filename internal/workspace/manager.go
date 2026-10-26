@@ -246,7 +246,9 @@ func (c Candidate) Cleanup() {
 
 // PrepareMerge merges sources, in order, onto the target branch's current
 // revision in a scratch worktree, without touching the target. A conflict
-// fails with BASE_CONFLICT naming the conflicting source.
+// fails with BASE_CONFLICT naming the conflicting source; a merge git
+// refuses without conflicted paths is an internal error carrying git's
+// message. User commit hooks never run.
 func (m Manager) PrepareMerge(ctx context.Context, target string, sources []string, message string) (Candidate, error) {
 	base, err := m.Revision(ctx, "refs/heads/"+target)
 	if err != nil {
@@ -271,10 +273,12 @@ func (m Manager) PrepareMerge(ctx context.Context, target string, sources []stri
 	}
 	cand.cleanup = cleanup
 	for _, src := range sources {
-		if _, err := git(ctx, path, "merge", "--no-ff", "--no-edit", "-m", message, src); err != nil {
-			conflicts, _ := git(ctx, path, "diff", "--name-only", "--diff-filter=U")
-			_, _ = git(ctx, path, "merge", "--abort")
+		conflicts, err := scratchMerge(ctx, path, message, src, "--no-ff")
+		if err != nil {
 			cleanup()
+			if strings.TrimSpace(conflicts) == "" {
+				return Candidate{}, err
+			}
 			ce := &ConflictError{Source: src, Target: target, Err: err}
 			for f := range strings.SplitSeq(strings.TrimSpace(conflicts), "\n") {
 				if f != "" {

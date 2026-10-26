@@ -88,7 +88,8 @@ func (m Manager) Base(ctx context.Context, target string, reqs []Requirement) (s
 // in a scratch worktree that is removed afterwards. Pending requirements
 // merge their task branch tip when the branch exists, else the recorded
 // revision. A merge that conflicts fails with *BaseConflict wrapped as
-// BASE_CONFLICT.
+// BASE_CONFLICT; one git refuses without conflicted paths is an internal
+// error (NOT_READY) carrying git's message. User commit hooks never run.
 func (m Manager) ResolveBase(ctx context.Context, target string, reqs []Requirement) (BaseResult, error) {
 	return m.resolveBase(ctx, target, reqs, false)
 }
@@ -130,9 +131,11 @@ func (m Manager) resolveBase(ctx context.Context, target string, reqs []Requirem
 	defer cleanup()
 	for i, req := range pending {
 		message := fmt.Sprintf("chore: base of %s on %s", target, req.Task)
-		if _, err := git(ctx, path, "merge", "--no-edit", "-m", message, req.Revision); err != nil {
-			conflicts, _ := git(ctx, path, "diff", "--name-only", "--diff-filter=U")
-			_, _ = git(ctx, path, "merge", "--abort")
+		conflicts, err := scratchMerge(ctx, path, message, req.Revision)
+		if err != nil {
+			if strings.TrimSpace(conflicts) == "" {
+				return BaseResult{}, err
+			}
 			bc := &BaseConflict{First: req, Files: lines(conflicts)}
 			if i > 0 {
 				bc.First, bc.Second = m.earlierTouching(ctx, tip, pending[:i], conflicts), req

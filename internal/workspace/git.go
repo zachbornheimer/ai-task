@@ -157,6 +157,25 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
+// scratchMerge merges rev into the scratch worktree at path. The merge is
+// atask's own plumbing, so the user's commit hooks (--no-verify) neither
+// run nor decide its outcome. On failure the merge is aborted. When git
+// reports conflicted paths they are returned with git's error; a failure
+// without any is not a conflict but an infrastructure error carrying
+// git's message, returned with no conflicts.
+func scratchMerge(ctx context.Context, path, message, rev string, extra ...string) (conflicts string, err error) {
+	args := append([]string{"merge", "--no-verify", "--no-edit"}, extra...)
+	if _, err = git(ctx, path, append(args, "-m", message, rev)...); err == nil {
+		return "", nil
+	}
+	conflicts, _ = git(ctx, path, "diff", "--name-only", "--diff-filter=U")
+	_, _ = git(ctx, path, "merge", "--abort")
+	if strings.TrimSpace(conflicts) == "" {
+		return "", fault.WrapInternal(err, "merge %s", short(rev))
+	}
+	return conflicts, err
+}
+
 // Identity returns the "Name <email>" Git commits as in dir, from its
 // configuration or the GIT_COMMITTER_* environment. It fails with
 // NOT_READY naming the fix when Git cannot determine one.
