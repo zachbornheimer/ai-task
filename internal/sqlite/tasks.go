@@ -146,27 +146,9 @@ func (r Record) Status(now time.Time, maxAttempts int) task.Status {
 }
 
 // recordSelect is the one query shape used for every task read. The
-// correlated subqueries are index-backed.
-const recordSelect = `
-SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome, t.constraints_json, t.policy_json,
-       t.contract_rev, t.archived_at, t.archive_reason, t.failures, t.next_eligible_at,
-       t.completed_at, t.created_at, t.updated_at,
-       (SELECT count(*) FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
-         WHERE d.task_id = t.id AND r.completed_at IS NULL) AS unmet,
-       a.id, a.seq, a.started_at, a.lease_expires_at, a.ended_at, a.end_reason, a.workspace_path, a.workspace_branch, a.lease_ms,
-       s.id, s.attempt_id, sa.seq, s.revision, s.submitted_at,
-       vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
-       (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
-       t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error,
-       t.creator, t.created_cwd,
-       (SELECT group_concat(project_id, char(31)) FROM (SELECT project_id FROM task_projects WHERE task_id = t.id ORDER BY position))
-FROM tasks t
-LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
-LEFT JOIN submissions s ON s.id = t.latest_submission_id
-LEFT JOIN execution_attempts sa ON sa.id = s.attempt_id
-LEFT JOIN verification_runs vr ON vr.id = (
-    SELECT id FROM verification_runs WHERE submission_id = s.id ORDER BY id DESC LIMIT 1)
-`
+// correlated subqueries are index-backed. The query is assembled per engine
+// (see dialect_sql.go): SQLite and PostgreSQL differ only in the
+// ordered-projects aggregate.
 
 func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var r Record
@@ -403,7 +385,7 @@ func nonNil(s []string) []string {
 
 // GetRecord loads one task with its status facts.
 func (t *Tx) GetRecord(id task.ID) (Record, error) {
-	row := t.tx.QueryRowContext(t.ctx, recordSelect+` WHERE t.id = ?`, id)
+	row := t.tx.QueryRowContext(t.ctx, t.recordSelect()+` WHERE t.id = ?`, id)
 	r, err := scanRecord(row)
 	if isNoRows(err) {
 		return r, fault.New(fault.CodeNotFound, "task %s not found", id)
@@ -413,7 +395,7 @@ func (t *Tx) GetRecord(id task.ID) (Record, error) {
 
 // GetByKey loads a task by its stable key within a project.
 func (t *Tx) GetByKey(pid project.ID, key string) (Record, bool, error) {
-	row := t.tx.QueryRowContext(t.ctx, recordSelect+` WHERE t.project_id = ? AND t.key = ?`, pid, key)
+	row := t.tx.QueryRowContext(t.ctx, t.recordSelect()+` WHERE t.project_id = ? AND t.key = ?`, pid, key)
 	r, err := scanRecord(row)
 	if isNoRows(err) {
 		return r, false, nil
@@ -423,7 +405,7 @@ func (t *Tx) GetByKey(pid project.ID, key string) (Record, bool, error) {
 
 // GetOpenByTitle loads the oldest live open task with this exact title.
 func (t *Tx) GetOpenByTitle(title string) (Record, bool, error) {
-	row := t.tx.QueryRowContext(t.ctx, recordSelect+` WHERE t.kind = 'task' AND t.description = ? AND t.archived_at IS NULL AND t.completed_at IS NULL ORDER BY t.created_at, t.id LIMIT 1`, title)
+	row := t.tx.QueryRowContext(t.ctx, t.recordSelect()+` WHERE t.kind = 'task' AND t.description = ? AND t.archived_at IS NULL AND t.completed_at IS NULL ORDER BY t.created_at, t.id LIMIT 1`, title)
 	r, err := scanRecord(row)
 	if isNoRows(err) {
 		return r, false, nil
@@ -469,8 +451,8 @@ const (
 
 // ListRecords returns the tasks of a project in creation order.
 func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time, maxAttempts int) ([]Record, error) {
-	where, args := scopeWhere(pid, scope, now, maxAttempts, true)
-	rows, err := t.tx.QueryContext(t.ctx, recordSelect+where+` ORDER BY t.created_at, t.id`, args...)
+	where, args := t.scopeWhere(pid, scope, now, maxAttempts, true)
+	rows, err := t.tx.QueryContext(t.ctx, t.recordSelect()+where+` ORDER BY t.created_at, t.id`, args...)
 	if err != nil {
 		return nil, wrapInternal(err, "list tasks")
 	}
@@ -488,7 +470,7 @@ func (t *Tx) ListRecords(pid project.ID, scope ListScope, now time.Time, maxAtte
 
 // scopeWhere filters by project: a member project sees every task naming
 // it; otherwise only tasks whose home it is (claiming works on homes).
-func scopeWhere(pid project.ID, scope ListScope, now time.Time, maxAttempts int, anyMember bool) (string, []any) {
+func (t *Tx) scopeWhere(pid project.ID, scope ListScope, now time.Time, maxAttempts int, anyMember bool) (string, []any) {
 	where := ` WHERE 1=1`
 	var args []any
 	switch {
@@ -505,43 +487,28 @@ func scopeWhere(pid project.ID, scope ListScope, now time.Time, maxAttempts int,
 	case ScopeOpen:
 		where += ` AND t.archived_at IS NULL AND t.completed_at IS NULL`
 	case ScopeClaimable:
-		where += claimableWhere
+		where += t.claimableWhere()
 		args = append(args, ms(now), ms(now), maxAttempts, maxAttempts)
 	}
 	return where, args
 }
 
-// claimableWhere mirrors task.Status.Claimable in SQL. It is a pre-filter:
-// the application re-derives the status from the returned facts before
-// claiming.
-const claimableWhere = `
-  AND t.archived_at IS NULL AND t.completed_at IS NULL AND t.kind = 'task'
-  AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks r ON r.id = d.requires_id
-                  WHERE d.task_id = t.id AND r.completed_at IS NULL)
-  AND (a.id IS NULL OR a.ended_at IS NOT NULL OR a.lease_expires_at <= ?)
-  AND (s.id IS NULL OR vr.status IN ('failed', 'error'))
-  AND t.next_eligible_at <= ?
-  AND (? = 0 OR t.failures < ?)
-  AND EXISTS (SELECT 1 FROM json_each(t.policy_json, '$.task_checks') WHERE json_extract(value, '$.required') = 1)
-  AND NOT (json_type(t.policy_json, '$.proof') IS NOT NULL AND json_type(t.policy_json, '$.regression_proof') IS NULL)
-  AND t.workspace_error = ''`
-
 // ClaimCandidate picks the task automatic Claim should take: the oldest
 // claimable task, ties broken by ID. Deterministic; no priority field.
 func (t *Tx) ClaimCandidate(pid project.ID, now time.Time, maxAttempts int) (Record, bool, error) {
-	where, args := scopeWhere(pid, ScopeClaimable, now, maxAttempts, false)
+	where, args := t.scopeWhere(pid, ScopeClaimable, now, maxAttempts, false)
 	return t.claimCandidate(where, args)
 }
 
 // GroupClaimCandidate is ClaimCandidate restricted to the live descendants
 // of a group, at any depth. Children share their group's project.
 func (t *Tx) GroupClaimCandidate(group task.ID, now time.Time, maxAttempts int) (Record, bool, error) {
-	where, args := scopeWhere("", ScopeClaimable, now, maxAttempts, false)
+	where, args := t.scopeWhere("", ScopeClaimable, now, maxAttempts, false)
 	return t.claimCandidate(where+` AND t.id IN `+descendantIDs, append(args, group))
 }
 
 func (t *Tx) claimCandidate(where string, args []any) (Record, bool, error) {
-	row := t.tx.QueryRowContext(t.ctx, recordSelect+where+` ORDER BY t.created_at, t.id LIMIT 1`, args...)
+	row := t.tx.QueryRowContext(t.ctx, t.recordSelect()+where+` ORDER BY t.created_at, t.id LIMIT 1`, args...)
 	r, err := scanRecord(row)
 	if isNoRows(err) {
 		return r, false, nil
@@ -561,7 +528,7 @@ const descendantIDs = `(WITH RECURSIVE sub(id) AS (
 // Descendants returns every live task and group beneath a group, at any
 // depth, oldest first.
 func (t *Tx) Descendants(id task.ID) ([]Record, error) {
-	rows, err := t.tx.QueryContext(t.ctx, recordSelect+` WHERE t.id IN `+descendantIDs+` ORDER BY t.created_at, t.id`, id)
+	rows, err := t.tx.QueryContext(t.ctx, t.recordSelect()+` WHERE t.id IN `+descendantIDs+` ORDER BY t.created_at, t.id`, id)
 	if err != nil {
 		return nil, wrapInternal(err, "list descendants")
 	}
@@ -674,7 +641,7 @@ func (t *Tx) ClearComplete(id task.ID, now time.Time) error {
 
 // Children returns the direct members of a group (live only), oldest first.
 func (t *Tx) Children(id task.ID) ([]Record, error) {
-	rows, err := t.tx.QueryContext(t.ctx, recordSelect+` WHERE t.parent_id = ? AND t.archived_at IS NULL ORDER BY t.created_at, t.id`, id)
+	rows, err := t.tx.QueryContext(t.ctx, t.recordSelect()+` WHERE t.parent_id = ? AND t.archived_at IS NULL ORDER BY t.created_at, t.id`, id)
 	if err != nil {
 		return nil, wrapInternal(err, "list children")
 	}

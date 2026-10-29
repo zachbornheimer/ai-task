@@ -39,12 +39,11 @@ func (t *Tx) InsertJob(pid project.ID, name string, members []JobMember, ownerDi
 	if err != nil {
 		return 0, wrapInternal(err, "encode members")
 	}
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_jobs (project_id, cohort, status, members_json, owner_digest, lease_expires_at, created_at) VALUES (?, ?, 'running', ?, ?, ?, ?)`,
+	id, err := t.insertID(`INSERT INTO verification_jobs (project_id, cohort, status, members_json, owner_digest, lease_expires_at, created_at) VALUES (?, ?, 'running', ?, ?, ?, ?)`,
 		pid, name, string(body), ownerDigest, ms(lease), ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "insert job")
 	}
-	id, _ := res.LastInsertId()
 	return id, nil
 }
 

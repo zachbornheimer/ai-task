@@ -18,6 +18,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/sqlite"
 )
 
 // Version is set by the build; "dev" otherwise.
@@ -152,9 +153,11 @@ func Main(env Env) int {
 }
 
 func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
-	dbHelp := "database path (env ATASK_DB)"
+	dbHelp := "database path or postgres URL (env ATASK_DB_URL, ATASK_DB)"
 	if def, err := app.DefaultPath(); err == nil && c.g.db == "" {
-		dbHelp = "database path (env ATASK_DB; default " + def + ")"
+		// Redacted: a postgres URL carries credentials and must never
+		// reach output, not even a help string.
+		dbHelp = "database path or postgres URL (env ATASK_DB_URL, ATASK_DB; default " + sqlite.Redacted(def) + ")"
 	}
 	fs.StringVar(&c.g.db, "db", c.g.db, dbHelp)
 	help := "project id or name; names match ignoring case and punctuation (env ATASK_PROJECT)"
@@ -392,7 +395,7 @@ Commands:`)
 	for _, n := range names {
 		say(w, "  %-18s %s\n", n, commands[n].summary)
 	}
-	sayln(w, "\nEnvironment: ATASK_DB, ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
+	sayln(w, "\nEnvironment: ATASK_DB_URL (postgres URL for shared state), ATASK_DB (local SQLite path), ATASK_PROJECT, ATASK_OUTPUT=json, ATASK_SESSION (optional inside a task worktree: the token is stored there)")
 }
 
 var commands = map[string]command{}
@@ -425,7 +428,7 @@ func init() {
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		h := help{Usage: "atask [--db PATH] [--project ID|NAME] [--json] [command [args]]", Environment: []string{"ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
+		h := help{Usage: "atask [--db PATH] [--project ID|NAME] [--json] [command [args]]", Environment: []string{"ATASK_DB_URL", "ATASK_DB", "ATASK_PROJECT", "ATASK_OUTPUT=json", "ATASK_SESSION"}}
 		for _, n := range names {
 			h.Commands = append(h.Commands, cmd{n, commands[n].summary})
 		}

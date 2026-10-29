@@ -103,3 +103,10 @@ tooling.
 (macOS), `%LOCALAPPDATA%\at\` (Windows), or `ATASK_DB`. Worktrees live beside
 the database. One file holds every
 project. Network filesystems are unsupported.
+
+`ATASK_DB_URL` selects the same store on PostgreSQL (`postgres://…`): the
+`sqlite` package owns one dialect layer (placeholder rebinding,
+`RETURNING id` for allocated ids, and the two engine-specific query
+fragments) so the rest of the engine runs unchanged. Local SQLite files
+keep today's DSN pragmas exactly. `atask sync` copies the local state into
+the remote database; it is the only writer of the remote one.

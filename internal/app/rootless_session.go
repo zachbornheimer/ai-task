@@ -14,8 +14,12 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
-// DefaultSessionRoot places rootless claim tokens beside the database.
+// DefaultSessionRoot places rootless claim tokens beside the database, or
+// in the local state directory when the database is remote.
 func DefaultSessionRoot(dbPath string) string {
+	if sqlite.IsPostgresURL(dbPath) {
+		return filepath.Join(localStateRoot(), "sessions")
+	}
 	if dbPath == ":memory:" {
 		return filepath.Join(os.TempDir(), "atask-sessions")
 	}

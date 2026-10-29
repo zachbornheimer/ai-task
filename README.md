@@ -25,6 +25,11 @@ There are no release tags yet, so `@main` (or `@latest`, which resolves to
 the same commit) installs the newest commit on `main`. State lives in one
 SQLite file, `~/.local/state/atask/atask.db` on Linux (`ATASK_DB` overrides; `at
 --help` shows the default), with task worktrees and run logs beside it.
+Set `ATASK_DB_URL` to a `postgres://` URL to keep state in PostgreSQL
+instead: every read and write uses it, and `atask sync [--from PATH]
+[--to URL] [--dry-run]` copies the local SQLite state into it (upserts by
+primary key, so a rerun writes nothing new). The local file stays the
+default.
 
 Every repository you use it in needs a Git identity (`git config
 user.name` / `user.email`): agents commit with it, and `atask` records the

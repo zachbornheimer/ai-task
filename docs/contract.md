@@ -34,6 +34,7 @@ atask projects
 atask project [FLAGS]
 atask doctor
 atask prune
+atask sync [--from PATH] [--to URL] [--dry-run]
 ```
 
 ### Task flags (`add` and `update`)
@@ -68,9 +69,23 @@ atask prune
 
 ```text
 --project NAME|ID      default: general; names match ignoring case and punctuation; repeatable on add and update, the first is the home
---db PATH
+--db PATH              local SQLite path; ATASK_DB overrides the default location
 --json                 also ATASK_OUTPUT=json
 ```
+
+### Storage
+
+```text
+ATASK_DB_URL           postgres:// URL: every read and write uses that database
+                       instead of the local SQLite file
+atask sync             copy the local SQLite state into that database; upserts
+                       by primary key, so a rerun writes nothing new; --dry-run
+                       prints per-table counts and writes nothing
+```
+
+The local SQLite file stays the default and the source of truth: `sync` is
+the only command that writes the remote database. A URL is never printed
+with its credentials.
 
 ### Presets
 

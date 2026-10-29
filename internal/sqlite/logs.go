@@ -10,12 +10,11 @@ import (
 
 // InsertLog appends an entry and returns its global sequence number.
 func (t *Tx) InsertLog(id task.ID, attemptID int64, e execution.LogEntry, now time.Time) (int64, error) {
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO task_log_entries (task_id, attempt_id, done, next, learned, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	seq, err := t.insertID(`INSERT INTO task_log_entries (task_id, attempt_id, done, next, learned, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		id, attemptID, e.Done, e.Next, e.Learned, e.Note, ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "insert log entry")
 	}
-	seq, _ := res.LastInsertId()
 	return seq, nil
 }
 

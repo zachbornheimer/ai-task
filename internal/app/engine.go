@@ -166,9 +166,20 @@ func (e *Engine) changes() <-chan struct{} {
 	return e.changed
 }
 
-// DefaultPath returns the OS-appropriate state location, honoring the
-// ATASK_DB override. Task state lives outside any source repository.
+// DefaultPath returns the database the engine opens when no path is given:
+// ATASK_DB_URL first (a postgres:// URL or a sqlite:// path), then the local
+// SQLite path. Task state lives outside any source repository.
 func DefaultPath() (string, error) {
+	if p := os.Getenv("ATASK_DB_URL"); p != "" {
+		return p, nil
+	}
+	return DefaultLocalPath()
+}
+
+// DefaultLocalPath returns the local SQLite state path: ATASK_DB, else the
+// OS-appropriate default. ATASK_DB_URL never applies here: a local file is
+// what sync reads and what an unset ATASK_DB_URL opens.
+func DefaultLocalPath() (string, error) {
 	if p := os.Getenv("ATASK_DB"); p != "" {
 		return p, nil
 	}
@@ -179,16 +190,35 @@ func DefaultPath() (string, error) {
 	return filepath.Join(base, "atask", "atask.db"), nil
 }
 
-// DefaultWorkspaceRoot places snapshots and quarantined trees beside the database.
+// localStateRoot names the directory that holds the engine's local state
+// (workspaces, logs, sessions, hook state) when the database itself is
+// remote and has no directory to sit beside.
+func localStateRoot() string {
+	base, err := stateDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), "atask")
+	}
+	return filepath.Join(base, "atask")
+}
+
+// DefaultWorkspaceRoot places snapshots and quarantined trees beside the
+// database, or in the local state directory when the database is remote.
 func DefaultWorkspaceRoot(dbPath string) string {
+	if sqlite.IsPostgresURL(dbPath) {
+		return filepath.Join(localStateRoot(), "workspaces")
+	}
 	if dbPath == ":memory:" {
 		return filepath.Join(os.TempDir(), "atask-workspaces")
 	}
 	return filepath.Join(filepath.Dir(dbPath), "workspaces")
 }
 
-// DefaultLogRoot places verification run logs beside the database.
+// DefaultLogRoot places verification run logs beside the database, or in
+// the local state directory when the database is remote.
 func DefaultLogRoot(dbPath string) string {
+	if sqlite.IsPostgresURL(dbPath) {
+		return filepath.Join(localStateRoot(), "logs")
+	}
 	if dbPath == ":memory:" {
 		return filepath.Join(os.TempDir(), "atask-logs")
 	}

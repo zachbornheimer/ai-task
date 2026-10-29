@@ -198,8 +198,12 @@ func marshalHook(v any) ([]byte, error) {
 	return buf.Bytes(), enc.Close()
 }
 
-// HookStateRoot is where per-session emission hashes live, beside the database.
+// HookStateRoot is where per-session emission hashes live: beside the
+// database, or in the local state directory when the database is remote.
 func HookStateRoot(dbPath string) string {
+	if sqlite.IsPostgresURL(dbPath) {
+		return filepath.Join(localStateRoot(), hookStateDirName)
+	}
 	if dbPath == ":memory:" {
 		return filepath.Join(os.TempDir(), "atask-"+hookStateDirName)
 	}

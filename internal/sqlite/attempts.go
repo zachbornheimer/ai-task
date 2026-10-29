@@ -66,12 +66,11 @@ func (t *Tx) StartAttempt(id task.ID, prev *execution.Attempt, digest string, no
 	if n, _ := res.RowsAffected(); n != 1 {
 		return execution.Attempt{}, fault.New(fault.CodeConflict, "task %s was taken concurrently", id)
 	}
-	r, err := t.tx.ExecContext(t.ctx, `INSERT INTO execution_attempts (task_id, seq, token_digest, started_at, lease_expires_at, lease_ms) VALUES (?, ?, ?, ?, ?, ?)`,
+	aid, err := t.insertID(`INSERT INTO execution_attempts (task_id, seq, token_digest, started_at, lease_expires_at, lease_ms) VALUES (?, ?, ?, ?, ?, ?)`,
 		id, seq, digest, ms(now), ms(expires), lease.Milliseconds())
 	if err != nil {
 		return execution.Attempt{}, wrapInternal(err, "insert attempt")
 	}
-	aid, _ := r.LastInsertId()
 	return execution.Attempt{ID: aid, TaskID: id, Seq: seq, StartedAt: now, LeaseExpiresAt: expires, Lease: lease}, nil
 }
 

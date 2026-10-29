@@ -16,12 +16,11 @@ import (
 // points the task at it. The newest submission is the one that must be
 // judged, so any completion fact for an older submission is withdrawn.
 func (t *Tx) InsertSubmission(id task.ID, attemptID int64, revision string, now time.Time) (int64, error) {
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO submissions (task_id, attempt_id, revision, submitted_at) VALUES (?, ?, ?, ?)`,
+	sid, err := t.insertID(`INSERT INTO submissions (task_id, attempt_id, revision, submitted_at) VALUES (?, ?, ?, ?)`,
 		id, attemptID, revision, ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "insert submission")
 	}
-	sid, _ := res.LastInsertId()
 	if _, err := t.tx.ExecContext(t.ctx, `UPDATE tasks SET latest_submission_id = ?, completed_at = NULL, completed_submission_id = NULL, updated_at = ? WHERE id = ?`, sid, ms(now), id); err != nil {
 		return 0, wrapInternal(err, "point task at submission")
 	}
@@ -80,13 +79,12 @@ func (t *Tx) InsertRun(r NewRun, now time.Time) (int64, error) {
 	if r.JobID != 0 {
 		job = r.JobID
 	}
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_runs (task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary, heartbeat_at, heartbeat_every_ms, owner_pid, owner_host, owner_start)
+	rid, err := t.insertID(`INSERT INTO verification_runs (task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary, heartbeat_at, heartbeat_every_ms, owner_pid, owner_host, owner_start)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.TaskID, attempt, submission, job, r.Mode, r.Status, r.Revision, string(body), r.Policy.Digest(), r.Environment, ms(now), started, finished, r.Summary, heartbeatStamp(r, now), r.HeartbeatEvery.Milliseconds(), r.Owner.PID, r.Owner.Host, r.Owner.Start)
 	if err != nil {
 		return 0, wrapInternal(err, "insert verification run")
 	}
-	rid, _ := res.LastInsertId()
 	return rid, nil
 }
 
@@ -202,14 +200,13 @@ func (t *Tx) InsertEvidence(e verification.Evidence) (int64, error) {
 	if e.ReusedFrom != 0 {
 		reusedFrom = e.ReusedFrom
 	}
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_results
+	id, err := t.insertID(`INSERT INTO verification_results
 		(run_id, check_id, check_version, check_digest, required, revision, policy_digest, started_at, finished_at, exit_code, outcome, reused, reused_from, message, stdout, stderr, log)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.RunID, e.CheckID, e.CheckVersion, e.CheckDigest, e.Required, e.Revision, e.PolicyDigest, ms(e.StartedAt), ms(e.FinishedAt), e.ExitCode, e.Outcome, e.Reused, reusedFrom, e.Message, e.Stdout, e.Stderr, e.Log)
 	if err != nil {
 		return 0, wrapInternal(err, "insert evidence")
 	}
-	id, _ := res.LastInsertId()
 	if e.Run != nil {
 		if err := t.InsertRunResult(e.RunID, id, *e.Run); err != nil {
 			return 0, err
