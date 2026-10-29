@@ -71,6 +71,12 @@ claimed and verifying.
 - A diagnostic run left running by a dead process is closed by
   reconciliation without a task failure.
   (`TestOrphanedDiagnosticRunsAreReconciled`)
+- A `verify complete` run whose process was killed does not pin its task
+  in verifying: the next verify or claim abandons the run (not a
+  failure) and proceeds; `atask doctor` reports it.
+  (`TestVerifyDeadOwnerRunIsAbandonedByNextVerify`,
+  `TestVerifyDeadOwnerRunDoesNotBlockClaim`,
+  `TestVerifyStaleOwnerPidIsAbandoned`, `TestVerifyOrphanRunIsReportedByDoctor`)
 - A group whose members are all complete can be archived; the members
   keep their history and the group appears in `list archived`.
   (`TestArchiveGroupWithCompletedMembers`)

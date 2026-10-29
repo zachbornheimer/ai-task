@@ -12,6 +12,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/process"
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
@@ -124,7 +125,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 			return err
 		}
 		var err error
-		runID, err = tx.InsertRun(sqlite.NewRun{TaskID: p.rec.Task.ID, AttemptID: p.attempt.ID, Mode: mode, Status: sqlite.RunRunning, Revision: revision, Policy: policy, Environment: environmentFingerprint(), HeartbeatEvery: e.renewalInterval(p.attempt.Lease)}, now)
+		runID, err = tx.InsertRun(sqlite.NewRun{TaskID: p.rec.Task.ID, AttemptID: p.attempt.ID, Mode: mode, Status: sqlite.RunRunning, Revision: revision, Policy: policy, Environment: environmentFingerprint(), HeartbeatEvery: e.renewalInterval(p.attempt.Lease), Owner: process.Self()}, now)
 		return err
 	})
 	if err != nil {
@@ -448,7 +449,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		if fr.submission, err = tx.InsertSubmission(r.Task.ID, p.attempt.ID, revision, now); err != nil {
 			return err
 		}
-		fr.runID, err = tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, AttemptID: p.attempt.ID, SubmissionID: fr.submission, Mode: verification.ModeComplete, Status: sqlite.RunRunning, Revision: revision, Policy: p.policy, Environment: environmentFingerprint(), HeartbeatEvery: e.renewalInterval(p.attempt.Lease)}, now)
+		fr.runID, err = tx.InsertRun(sqlite.NewRun{TaskID: r.Task.ID, AttemptID: p.attempt.ID, SubmissionID: fr.submission, Mode: verification.ModeComplete, Status: sqlite.RunRunning, Revision: revision, Policy: p.policy, Environment: environmentFingerprint(), HeartbeatEvery: e.renewalInterval(p.attempt.Lease), Owner: process.Self()}, now)
 		return err
 	})
 	if err != nil {

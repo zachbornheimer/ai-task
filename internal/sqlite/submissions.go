@@ -1,10 +1,13 @@
 package sqlite
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/process"
+	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
@@ -40,7 +43,20 @@ type NewRun struct {
 	// HeartbeatEvery is how often the run's process stamps its heartbeat;
 	// zero for runs that carry no heartbeat.
 	HeartbeatEvery time.Duration
+	// Owner is the process executing the run; the zero Owner (a run no
+	// process executes) is never judged gone.
+	Owner process.Owner
 }
+
+// Reasons a running run is closed without a result. Both begin with
+// AbandonedPrefix, which readers use to tell a lost verifier from a failed
+// check; an abandoned run never counts toward the attempt budget.
+const AbandonedPrefix = "abandoned:"
+
+const (
+	abandonedOwnerGone   = AbandonedPrefix + " the verifying process (pid %d) is gone"
+	abandonedNoHeartbeat = AbandonedPrefix + " the verifying process stopped sending heartbeats"
+)
 
 // InsertRun records a verification run.
 func (t *Tx) InsertRun(r NewRun, now time.Time) (int64, error) {
@@ -64,9 +80,9 @@ func (t *Tx) InsertRun(r NewRun, now time.Time) (int64, error) {
 	if r.JobID != 0 {
 		job = r.JobID
 	}
-	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_runs (task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary, heartbeat_at, heartbeat_every_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.TaskID, attempt, submission, job, r.Mode, r.Status, r.Revision, string(body), r.Policy.Digest(), r.Environment, ms(now), started, finished, r.Summary, heartbeatStamp(r, now), r.HeartbeatEvery.Milliseconds())
+	res, err := t.tx.ExecContext(t.ctx, `INSERT INTO verification_runs (task_id, attempt_id, submission_id, job_id, mode, status, revision, policy_json, policy_digest, environment, created_at, started_at, finished_at, summary, heartbeat_at, heartbeat_every_ms, owner_pid, owner_host, owner_start)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.TaskID, attempt, submission, job, r.Mode, r.Status, r.Revision, string(body), r.Policy.Digest(), r.Environment, ms(now), started, finished, r.Summary, heartbeatStamp(r, now), r.HeartbeatEvery.Milliseconds(), r.Owner.PID, r.Owner.Host, r.Owner.Start)
 	if err != nil {
 		return 0, wrapInternal(err, "insert verification run")
 	}
@@ -250,11 +266,19 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 		return 0, wrapInternal(err, "reconcile final runs")
 	}
 	n, _ := res.RowsAffected()
+	// A run whose owning process no longer exists is dead now, whatever its
+	// heartbeat and attempt lease still say.
+	nO, err := t.abandonRunsOfGoneOwners(now)
+	if err != nil {
+		return 0, err
+	}
+	n += nO
 	// A run whose process stopped stamping its heartbeat for two intervals
-	// is dead even while its attempt lease is still live.
-	resH, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'process lost'
+	// is dead even while its attempt lease is still live (and even when its
+	// owner cannot be probed).
+	resH, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = ?
 		WHERE status = 'running' AND mode IN ('complete', 'proof', 'regression') AND heartbeat_every_ms > 0
-		  AND heartbeat_at + 2 * heartbeat_every_ms <= ?`, ms(now), ms(now))
+		  AND heartbeat_at + 2 * heartbeat_every_ms <= ?`, ms(now), abandonedNoHeartbeat, ms(now))
 	if err != nil {
 		return 0, wrapInternal(err, "reap lost runs")
 	}
@@ -288,4 +312,77 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 	}
 	n3, _ := res3.RowsAffected()
 	return n + n3, nil
+}
+
+// abandonRunsOfGoneOwners closes running runs whose recorded owner process
+// provably no longer exists. It returns how many it closed.
+func (t *Tx) abandonRunsOfGoneOwners(now time.Time) (int64, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT id, owner_pid, owner_host, owner_start FROM verification_runs
+		WHERE status = 'running' AND mode IN ('complete', 'proof', 'regression') AND owner_pid > 0`)
+	if err != nil {
+		return 0, wrapInternal(err, "list running runs")
+	}
+	defer discard.CloseReadOnly(rows)
+	type owned struct {
+		id    int64
+		owner process.Owner
+	}
+	var gone []owned
+	for rows.Next() {
+		var o owned
+		if err := rows.Scan(&o.id, &o.owner.PID, &o.owner.Host, &o.owner.Start); err != nil {
+			return 0, wrapInternal(err, "scan running run")
+		}
+		if o.owner.Gone() {
+			gone = append(gone, o)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, wrapInternal(err, "list running runs")
+	}
+	discard.CloseReadOnly(rows)
+	var n int64
+	for _, o := range gone {
+		res, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = ? WHERE id = ? AND status = 'running'`,
+			ms(now), fmt.Sprintf(abandonedOwnerGone, o.owner.PID), o.id)
+		if err != nil {
+			return 0, wrapInternal(err, "abandon run of a gone owner")
+		}
+		c, _ := res.RowsAffected()
+		n += c
+	}
+	return n, nil
+}
+
+// AbandonedRun is the newest run of an open task, closed because its
+// verifying process was lost.
+type AbandonedRun struct {
+	RunID   int64
+	TaskID  task.ID
+	Summary string
+}
+
+// AbandonedRuns lists, oldest first, the open tasks of a project whose
+// newest verification run was abandoned. A later run of the task supersedes
+// the report.
+func (t *Tx) AbandonedRuns(pid project.ID) ([]AbandonedRun, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT r.id, r.task_id, r.summary FROM verification_runs r JOIN tasks t ON t.id = r.task_id
+		WHERE r.status = 'error' AND r.summary LIKE ? || '%'
+		  AND r.id = (SELECT max(id) FROM verification_runs WHERE task_id = r.task_id)
+		  AND t.completed_at IS NULL AND t.archived_at IS NULL
+		  AND EXISTS (SELECT 1 FROM task_projects tp WHERE tp.task_id = t.id AND tp.project_id = ?)
+		ORDER BY r.id`, AbandonedPrefix, pid)
+	if err != nil {
+		return nil, wrapInternal(err, "list abandoned runs")
+	}
+	defer discard.CloseReadOnly(rows)
+	var out []AbandonedRun
+	for rows.Next() {
+		var a AbandonedRun
+		if err := rows.Scan(&a.RunID, &a.TaskID, &a.Summary); err != nil {
+			return nil, wrapInternal(err, "scan abandoned run")
+		}
+		out = append(out, a)
+	}
+	return out, wrapInternal(rows.Err(), "list abandoned runs")
 }

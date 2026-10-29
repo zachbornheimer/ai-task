@@ -60,8 +60,15 @@ prerequisites, contract revision, evidence on the final revision; mark
 complete; end claim; record the revision and pending actions) → run
 `on_complete` actions (outside, each result recorded).
 
-`reconcile` (run on every claim, list, show, summary) closes final runs
-whose attempt lease expired, so a dead verifier leaves no phantom "verifying" state.
+`reconcile` (run on every claim, list, show, summary, verify) closes final
+runs whose attempt lease expired, so a dead verifier leaves no phantom
+"verifying" state. A running run also records its owner (pid, host, process
+start time) and a heartbeat: a run whose owner process provably no longer
+exists (pid gone, or reused by a process with another start time) is
+abandoned at once, and one whose heartbeat is two intervals stale is
+abandoned too. An abandoned run is an `error` run whose summary begins
+`abandoned:`; it is never counted toward the attempt budget, and the next
+`verify complete` or `claim` proceeds.
 
 ## Derived status
 

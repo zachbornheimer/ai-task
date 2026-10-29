@@ -90,8 +90,8 @@ func TestOrphanedVerificationRunIsReaped(t *testing.T) {
 	if err := db.QueryRow(`SELECT status, summary FROM verification_runs ORDER BY id DESC LIMIT 1`).Scan(&status, &summary); err != nil {
 		t.Fatal(err)
 	}
-	if status != "error" || summary != "process lost" {
-		t.Fatalf("run = %s %q, want error \"process lost\"", status, summary)
+	if status != "error" || summary != "abandoned: the verifying process stopped sending heartbeats" {
+		t.Fatalf("run = %s %q, want error \"abandoned: ...stopped sending heartbeats\"", status, summary)
 	}
 	if err := e.Release(f.ctx, app.ReleaseRequest{Token: s.Token}); err != nil {
 		t.Fatal(err)

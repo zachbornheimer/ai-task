@@ -70,7 +70,8 @@ checkout has no uncommitted or untracked files (a warning: checks and
 worktrees run on the committed revision), a Git identity
 exists for commits and for the merges that build a dependent's base (an error without one), the
 workspace root is writable, quarantined worktrees, tasks needing
-attention, a stalled plan, and Worktrunk's commit-message setup when
+attention, verification runs abandoned because their process died, a
+stalled plan, and Worktrunk's commit-message setup when
 `wt` is installed. An error-severity finding makes it `NOT_READY` with
 the report in `details`; JSON carries the report either way. The Go API's
 `ChangeSet.IdempotencyKey` is bound to the exact request: an identical

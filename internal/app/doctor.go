@@ -10,6 +10,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/sqlite"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
@@ -145,6 +146,19 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 		add("needs_attention", false, "warning", fmt.Sprintf("%d task(s) need a planner: %s", n, strings.Join(ids, "; ")), "atask update <task> --reset-attempts, or atask claim <task> to retry its worktree")
 	} else {
 		add("needs_attention", true, "info", "no task needs attention", "")
+	}
+	var abandoned []sqlite.AbandonedRun
+	if err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) { abandoned, err = tx.AbandonedRuns(pid); return err }); err != nil {
+		return rep, err
+	}
+	if len(abandoned) > 0 {
+		found := make([]string, len(abandoned))
+		for i, a := range abandoned {
+			found[i] = fmt.Sprintf("%s run %d (%s)", a.TaskID, a.RunID, strings.TrimPrefix(a.Summary, sqlite.AbandonedPrefix+" "))
+		}
+		add("abandoned_runs", false, "warning", fmt.Sprintf("%d task(s) had a verification run abandoned because its process died: %s; abandoned runs are not counted as failures", len(abandoned), strings.Join(found, "; ")), "run `atask verify complete` again, or `atask claim <task>` if the claim was released")
+	} else {
+		add("abandoned_runs", true, "info", "no verification run was abandoned", "")
 	}
 	switch {
 	case sum.Done:
