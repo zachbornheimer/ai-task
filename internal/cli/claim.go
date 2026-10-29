@@ -217,8 +217,8 @@ func renderSession(w io.Writer, s app.Session) {
 		}
 		sayln(w)
 	}
-	if s.TargetBranch != "" {
-		say(w, "Target:    %s", s.TargetBranch)
+	if s.BaseRef != "" {
+		say(w, "Base:      %s", s.BaseRef)
 		if s.TargetRevision != "" {
 			say(w, " at %s", s.TargetRevision[:min(12, len(s.TargetRevision))])
 		}

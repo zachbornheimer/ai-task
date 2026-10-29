@@ -1,0 +1,61 @@
+package workspace
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/must"
+)
+
+func TestLocateRootMainAndLinkedWorktree(t *testing.T) {
+	base := t.TempDir()
+	base, _ = CanonicalRoot(base)
+	main := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(main, ".git", "worktrees", "feat"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(main, "sub", "deeper"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "repo.feat")
+	if err := os.MkdirAll(filepath.Join(linked, "pkg"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	gitFile := "gitdir: " + filepath.Join(main, ".git", "worktrees", "feat") + "\n"
+	if err := os.WriteFile(filepath.Join(linked, ".git"), []byte(gitFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{main, filepath.Join(main, "sub", "deeper"), linked, filepath.Join(linked, "pkg")} {
+		got, err := LocateRoot(dir)
+		if err != nil {
+			t.Fatalf("LocateRoot(%s): %v", dir, err)
+		}
+		if got != main {
+			t.Errorf("LocateRoot(%s) = %q, want %q", dir, got, main)
+		}
+	}
+	plain := filepath.Join(base, "plain")
+	must.OK(t, os.MkdirAll(plain, 0o750))
+	got, err := LocateRoot(plain)
+	if err != nil || got != "" {
+		t.Fatalf("non-git dir: %q %v", got, err)
+	}
+}
+
+func TestMatchRoot(t *testing.T) {
+	sep := string(filepath.Separator)
+	roots := []string{sep + "a", sep + "a" + sep + "b", sep + "c", ""}
+	cases := map[string]string{
+		sep + "a" + sep + "b" + sep + "x": sep + "a" + sep + "b",
+		sep + "a" + sep + "y":             sep + "a",
+		sep + "a":                         sep + "a",
+		sep + "ab":                        "",
+		sep + "d":                         "",
+	}
+	for dir, want := range cases {
+		if got := MatchRoot(dir, roots); got != want {
+			t.Errorf("MatchRoot(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}

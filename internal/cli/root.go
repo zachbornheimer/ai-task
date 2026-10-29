@@ -49,7 +49,10 @@ type globals struct {
 	// order; the first is the home. Empty otherwise: a --project before the
 	// command only scopes it.
 	projects []string
-	json     bool
+	// repo names the directory whose repository new tasks are filed in;
+	// empty means the working directory.
+	repo string
+	json bool
 }
 
 // repeatableCommands accept --project more than once.
@@ -104,7 +107,7 @@ func Main(env Env) int {
 	}
 	ctx := context.Background()
 	c := &ctxt{env: env}
-	c.g = globals{db: env.Getenv("ATASK_DB"), project: env.Getenv("ATASK_PROJECT"), json: strings.EqualFold(env.Getenv("ATASK_OUTPUT"), "json")}
+	c.g = globals{db: env.Getenv("ATASK_DB"), project: env.Getenv("ATASK_PROJECT"), repo: env.Getenv("ATASK_REPO"), json: strings.EqualFold(env.Getenv("ATASK_OUTPUT"), "json")}
 
 	top := flag.NewFlagSet("atask", flag.ContinueOnError)
 	top.SetOutput(io.Discard)
@@ -162,6 +165,7 @@ func (c *ctxt) bindGlobals(fs *flag.FlagSet) {
 		help = "project id or name; names match ignoring case and punctuation (env ATASK_PROJECT); repeat to name more projects, the first is the home"
 	}
 	fs.Var(&projectFlag{g: &c.g, repeated: c.fs == fs && repeatableCommands[c.name]}, "project", help)
+	fs.StringVar(&c.g.repo, "repo", c.g.repo, "directory whose repository new tasks run in (env ATASK_REPO; default: the working directory)")
 	fs.BoolVar(&c.g.json, "json", c.g.json, "JSON output (env ATASK_OUTPUT=json)")
 }
 
@@ -269,14 +273,15 @@ func (c *ctxt) engine(ctx context.Context) (*app.Engine, error) {
 	return e, nil
 }
 
-// resolveProject applies --project / TASKS_PROJECT, then the working
-// directory.
+// resolveProject applies --project / TASKS_PROJECT; without one the answer
+// is general. A project is a planning scope, so the working directory does
+// not select it.
 func (c *ctxt) resolveProject(ctx context.Context) (project.ID, error) {
 	e, err := c.engine(ctx)
 	if err != nil {
 		return "", err
 	}
-	p, err := e.ResolveProject(ctx, c.g.project, c.env.Cwd)
+	p, err := e.ResolveProject(ctx, c.g.project)
 	if err != nil {
 		return "", err
 	}

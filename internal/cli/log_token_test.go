@@ -40,7 +40,7 @@ func TestLogAcceptsClaimToken(t *testing.T) {
 		return code, out.String() + errb.String()
 	}
 
-	if code, out := run(repo, "", "", "init", "--name", "tokens"); code != ExitOK {
+	if code, out := run(repo, "", "", "init"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, out)
 	}
 	code, out := run(repo, "", "", "--json", "add", "token-work", "--proof", "run: go version", "--regression", "run: go version")

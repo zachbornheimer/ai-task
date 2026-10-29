@@ -6,45 +6,52 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
-// TestBlankProjectBecomesGeneral: the pre-0018 default project (id ”) is
-// renamed to 'general' with a real id, and its tasks move with it.
-func TestBlankProjectBecomesGeneral(t *testing.T) {
+// TestProjectsHoldNoRepository: a project is a planning scope and a task
+// carries the execution binding. The final schema has no repository column
+// on projects and both binding columns on tasks.
+func TestProjectsHoldNoRepository(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "at.db")
-	s, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec := func(q string, args ...any) {
-		t.Helper()
-		if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-	}
-	exec(`INSERT INTO projects (id, name, created_at, updated_at) VALUES ('', '', 1, 1)`)
-	exec(`INSERT INTO tasks (id, project_id, description, outcome, policy_digest, kind, created_at, updated_at) VALUES ('t1', '', 't1', 't1', 'd', 'task', 1, 1)`)
-	exec(`DELETE FROM schema_migrations WHERE version = 18`)
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	s, err = Open(ctx, path)
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "at.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { must.OK(t, s.Close()) }()
-	var id, name, taskProject string
-	if err := s.db.QueryRowContext(ctx, `SELECT id, name FROM projects`).Scan(&id, &name); err != nil {
-		t.Fatalf("exactly one project expected: %v", err)
+	cols := func(table string) map[string]bool {
+		t.Helper()
+		rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer discard.CloseReadOnly(rows)
+		out := map[string]bool{}
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatal(err)
+			}
+			out[name] = true
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
 	}
-	if name != "general" || id == "" {
-		t.Fatalf("want general with real id, got id=%q name=%q", id, name)
+	projects := cols("projects")
+	for _, gone := range []string{"root_path", "target_branch", "workspace_root", "integration"} {
+		if projects[gone] {
+			t.Fatalf("projects must not hold %s: %v", gone, projects)
+		}
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id = 't1'`).Scan(&taskProject); err != nil || taskProject != id {
-		t.Fatalf("task must follow the project: %q %v", taskProject, err)
+	tasks := cols("tasks")
+	for _, want := range []string{"repo_root", "base_ref"} {
+		if !tasks[want] {
+			t.Fatalf("tasks must hold %s: %v", want, tasks)
+		}
 	}
 }
 

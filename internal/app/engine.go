@@ -37,8 +37,8 @@ type Config struct {
 	// NewTaskID supplies task IDs; nil means random. Tests inject a
 	// deterministic generator for golden output.
 	NewTaskID func() task.ID
-	// WorkspaceRoot holds per-attempt worktrees for projects that do not
-	// set their own; empty means DefaultWorkspaceRoot().
+	// WorkspaceRoot holds per-attempt worktrees and verification
+	// snapshots; empty means DefaultWorkspaceRoot().
 	WorkspaceRoot string
 	// LogRoot holds verification run logs; empty means DefaultLogRoot().
 	LogRoot string
@@ -223,78 +223,56 @@ func stateDir() (string, error) {
 	return filepath.Join(h, ".local", "state"), nil
 }
 
-// --- projects (bootstrap and trusted configuration) ---
+// --- repositories (execution substrate) ---
 
-// InitResult reports what InitProject did to the directory.
+// RepoAt returns the canonical main-worktree root of the repository that
+// holds dir, or "" when dir is not inside a Git repository. A linked
+// worktree resolves to its main worktree, so every checkout of one
+// repository names the same root.
+func RepoAt(dir string) (string, error) { return workspace.LocateRoot(dir) }
+
+// BaseRef returns the branch a task branch starts from for repo: the
+// repository's default branch. "" when repo is "".
+func BaseRef(ctx context.Context, repo string) string {
+	if repo == "" {
+		return ""
+	}
+	return (workspace.Manager{Repo: repo}).DefaultBranch(ctx)
+}
+
+// InitResult reports what InitRepo did to a directory.
 type InitResult struct {
-	Project     project.Project `json:"project"`
-	CreatedRepo bool            `json:"created_repo"`
+	Repo        string `json:"repo"`
+	CreatedRepo bool   `json:"created_repo"`
 	// UntrackedFiles lists what the directory already held when init
 	// created the repository. init never commits them; Warning says so.
 	UntrackedFiles []string `json:"untracked_files,omitempty"`
 	Warning        string   `json:"warning,omitempty"`
-	// Existing: the directory was already registered; nothing changed in
-	// the database.
-	Existing bool `json:"existing,omitempty"`
 }
 
-// InitProject registers a Git project. Every project is a Git project: if
-// dir is not a repository one is created (with an initial commit); if it is
-// inside a repository, the main worktree root is registered. The current
-// branch becomes the target branch and integration policy is "promote".
-// Nothing is written into the repository's hooks; the CLI's `atask init`
-// installs the agent instruction files (see InstallInstructions).
-func (e *Engine) InitProject(ctx context.Context, name, dir string) (project.Project, error) {
-	res, err := e.InitProjectResult(ctx, name, dir)
-	return res.Project, err
-}
-
-// refuseHomeOrAncestor rejects a project root that is the user's home
-// directory or one of its ancestors, before any repository is created there.
-func refuseHomeOrAncestor(dir, root string) error {
-	// An unresolvable home must refuse, not register: the guard cannot prove safety.
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fault.Wrap(err, fault.CodeInvalidInput, "resolve home directory")
-	}
-	canonicalHome, err := project.CanonicalRoot(home)
-	if err != nil {
-		return fault.Wrap(err, fault.CodeInvalidInput, "resolve home directory")
-	}
-	rel, err := filepath.Rel(root, canonicalHome)
-	if err != nil {
-		return fault.Wrap(err, fault.CodeInvalidInput, "compare project root with home directory")
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil
-	}
-	shown, err := filepath.Abs(dir)
-	if err != nil {
-		shown = dir
-	}
-	return fault.New(fault.CodeInvalidInput, "refusing to register %s: use a project directory or atask project add NAME for work without a repository", shown)
-}
-
-// InitProjectResult is InitProject with details about the directory.
-func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitResult, error) {
+// InitRepo prepares dir as a workable repository: if it is not inside a Git
+// repository one is created (with an initial commit), and files that were
+// already there stay untracked and are reported. It registers nothing: a
+// task records its own repository when it is filed, so no repository has to
+// be announced before work can be created against it.
+func (e *Engine) InitRepo(ctx context.Context, dir string) (InitResult, error) {
 	var res InitResult
 	if dir == "" {
-		return res, fault.New(fault.CodeInvalidInput, "a project needs a directory")
+		return res, fault.New(fault.CodeInvalidInput, "init needs a directory")
 	}
-	now := e.now()
-	p := project.Project{ID: project.NewID(), Name: strings.TrimSpace(name), MaxAttempts: project.DefaultMaxAttempts, CreatedAt: now, UpdatedAt: now}
-	root, err := project.LocateRoot(dir)
+	root, err := workspace.LocateRoot(dir)
 	if err != nil {
-		return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
+		return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve repository")
 	}
 	if root == "" {
-		if root, err = project.CanonicalRoot(dir); err != nil {
-			return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve project directory")
+		if root, err = workspace.CanonicalRoot(dir); err != nil {
+			return res, fault.Wrap(err, fault.CodeInvalidInput, "resolve repository")
 		}
 	}
 	if err := refuseHomeOrAncestor(dir, root); err != nil {
 		return res, err
 	}
+	res.Repo = root
 	if res.CreatedRepo, err = workspace.InitRepo(ctx, root); err != nil {
 		return res, err
 	}
@@ -304,29 +282,33 @@ func (e *Engine) InitProjectResult(ctx context.Context, name, dir string) (InitR
 			res.Warning = fmt.Sprintf("%d existing file(s) are untracked and not part of the repository's commits; commit them before the baseline can pass (at never commits them itself)", len(files))
 		}
 	}
-	p.RootPath = root
-	if p.Name == "" {
-		p.Name = filepath.Base(root)
+	return res, nil
+}
+
+// refuseHomeOrAncestor rejects a repository root that is the user's home
+// directory or one of its ancestors, before any repository is created there.
+func refuseHomeOrAncestor(dir, root string) error {
+	// An unresolvable home must refuse, not proceed: the guard cannot prove safety.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fault.Wrap(err, fault.CodeInvalidInput, "resolve home directory")
 	}
-	p.TargetBranch = (workspace.Manager{Repo: root}).DefaultBranch(ctx)
-	if err := p.Validate(); err != nil {
-		return res, err
+	canonicalHome, err := workspace.CanonicalRoot(home)
+	if err != nil {
+		return fault.Wrap(err, fault.CodeInvalidInput, "resolve home directory")
 	}
-	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		if p.RootPath != "" {
-			if existing, ok, err := tx.GetProjectByRoot(p.RootPath); err != nil {
-				return err
-			} else if ok {
-				// Re-running init is how the instruction files get
-				// refreshed; the registration itself is kept as is.
-				p, res.Existing = existing, true
-				return nil
-			}
-		}
-		return tx.InsertProject(p)
-	})
-	res.Project = p
-	return res, err
+	rel, err := filepath.Rel(root, canonicalHome)
+	if err != nil {
+		return fault.Wrap(err, fault.CodeInvalidInput, "compare repository root with home directory")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	shown, err := filepath.Abs(dir)
+	if err != nil {
+		shown = dir
+	}
+	return fault.New(fault.CodeInvalidInput, "refusing to create a repository in %s: choose a project directory", shown)
 }
 
 // Projects lists registered projects.
@@ -369,14 +351,14 @@ func (e *Engine) UpdateProject(ctx context.Context, p project.Project) error {
 	return err
 }
 
-// ResolveProject finds the project for a command. Precedence:
-//  1. selector: a project ID or unique name (from --project / ATASK_PROJECT).
-//     A name matches when project.NameKey is equal ("ai-tooling" is "AI Tooling").
-//  2. the Git repository containing dir, by registered main-worktree root;
-//  3. the longest registered root that contains dir;
-//  4. the general project, created on first use. The selector "general"
-//     names it directly.
-func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (project.Project, error) {
+// ResolveProject finds the project for a command's planning scope. A
+// selector names a project ID or unique name (from --project /
+// ATASK_PROJECT); a name matches when project.NameKey is equal
+// ("ai-tooling" is "AI Tooling"). Without a selector the answer is the
+// general project, created on first use. The working directory is not
+// consulted: a project is a planning scope, and the repository a task's
+// work runs in is recorded on the task.
+func (e *Engine) ResolveProject(ctx context.Context, selector string) (project.Project, error) {
 	var out project.Project
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		if selector == project.GeneralName {
@@ -403,38 +385,6 @@ func (e *Engine) ResolveProject(ctx context.Context, selector, dir string) (proj
 			}
 			out = p
 			return nil
-		}
-		if dir == "" {
-			return errUseGeneral
-		}
-		root, err := project.LocateRoot(dir)
-		if err != nil {
-			return fault.WrapInternal(err, "locate repository root")
-		}
-		if root != "" {
-			if p, ok, err := tx.GetProjectByRoot(root); err != nil {
-				return err
-			} else if ok {
-				out = p
-				return nil
-			}
-		}
-		canon, err := project.CanonicalRoot(dir)
-		if err != nil {
-			return fault.WrapInternal(err, "canonicalise directory")
-		}
-		roots, err := tx.ProjectRoots()
-		if err != nil {
-			return err
-		}
-		keys := make([]string, 0, len(roots))
-		for r := range roots {
-			keys = append(keys, r)
-		}
-		if best := project.MatchRoot(canon, keys); best != "" {
-			p, err := tx.GetProject(roots[best])
-			out = p
-			return err
 		}
 		return errUseGeneral
 	})
@@ -466,18 +416,15 @@ func unknownProject(tx *sqlite.Tx, selector string) error {
 		names = append(names, ps[i].Name)
 	}
 	if len(names) == 0 {
-		return fault.New(fault.CodeInvalidInput, "unknown project %q; no projects are registered yet (atask init or atask project add NAME)", selector)
+		return fault.New(fault.CodeInvalidInput, "unknown project %q; no projects exist yet (atask project add NAME, or file work under general)", selector)
 	}
-	return fault.New(fault.CodeInvalidInput, "unknown project %q; registered projects: %s", selector, strings.Join(names, ", "))
+	return fault.New(fault.CodeInvalidInput, "unknown project %q; existing projects: %s", selector, strings.Join(names, ", "))
 }
 
-// manager returns the Git workspace manager for a project.
-func (e *Engine) manager(p project.Project) workspace.Manager {
-	root := p.WorkspaceRoot
-	if root == "" {
-		root = filepath.Join(e.wsRoot, string(p.ID))
-	}
-	return workspace.Manager{Repo: p.RootPath, Root: root, Switch: e.swt}
+// manager returns the Git workspace manager for a repository. Task IDs are
+// globally unique, so one worktree root serves every repository.
+func (e *Engine) manager(repo string) workspace.Manager {
+	return workspace.Manager{Repo: repo, Root: e.wsRoot, Switch: e.swt}
 }
 
 // reconcile closes runs and jobs whose owners' leases expired so that no

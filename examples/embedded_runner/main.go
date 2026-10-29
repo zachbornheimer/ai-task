@@ -62,7 +62,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) (err e
 		return err
 	}
 	defer func() { err = errors.Join(err, eng.Close()) }()
-	proj, err := eng.InitProject(ctx, "example", repo)
+	proj, err := eng.AddProject(ctx, "example")
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) (err e
 	if err != nil {
 		return err
 	}
-	if _, err := eng.Apply(ctx, at.ChangeSet{ProjectID: proj.ID, ExpectedPlanRev: snap.Revision, IdempotencyKey: "plan-1", Operations: proposal}); err != nil {
+	if _, err := eng.Apply(ctx, at.ChangeSet{ProjectID: proj.ID, Repo: repo, ExpectedPlanRev: snap.Revision, IdempotencyKey: "plan-1", Operations: proposal}); err != nil {
 		return err
 	}
 
@@ -91,7 +91,7 @@ func run(ctx context.Context, repo, db string, workers int, out *os.File) (err e
 			stable = true
 			break
 		}
-		applied, err := eng.Apply(ctx, at.ChangeSet{ProjectID: proj.ID, ExpectedPlanRev: current.Revision, IdempotencyKey: fmt.Sprintf("review-%d", round), Operations: changes})
+		applied, err := eng.Apply(ctx, at.ChangeSet{ProjectID: proj.ID, Repo: repo, ExpectedPlanRev: current.Revision, IdempotencyKey: fmt.Sprintf("review-%d", round), Operations: changes})
 		if err != nil {
 			return err // a stale plan would surface here as CONFLICT: re-read, re-review
 		}

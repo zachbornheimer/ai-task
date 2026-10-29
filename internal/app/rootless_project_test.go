@@ -8,6 +8,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/plan"
+	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
 )
 
@@ -24,8 +25,8 @@ func TestRootlessProjectLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add project: %v", err)
 	}
-	if p.RootPath != "" || p.TargetBranch != "" || !p.Rootless() {
-		t.Fatalf("want rootless project, got %+v", p)
+	if p.Name != "AI Tooling" || p.ID == "" {
+		t.Fatalf("want the named project, got %+v", p)
 	}
 	again, err := e.AddProject(ctx, "AI Tooling")
 	if err != nil || again.ID != p.ID {
@@ -53,8 +54,10 @@ func TestRootlessProjectLifecycle(t *testing.T) {
 		t.Fatalf("verify complete: %+v %v", v, err)
 	}
 
-	p.TargetBranch = "main"
-	if err := e.UpdateProject(ctx, p); fault.CodeOf(err) != fault.CodeInvalidInput {
-		t.Fatalf("target branch on a rootless project: want INVALID_INPUT, got %v", err)
+	// A base ref belongs to a task's repository binding: without one it is
+	// refused when the task is filed, not stored on a project.
+	spec := task.Spec{ProjectID: p.ID, Description: "x", BaseRef: "main"}
+	if err := spec.Validate(); fault.CodeOf(err) != fault.CodeInvalidInput {
+		t.Fatalf("a base ref without a repository: want INVALID_INPUT, got %v", err)
 	}
 }

@@ -33,9 +33,11 @@
    and archived tasks and quarantined directories; `atask/<id>` branches
    stay for history and are yours to delete.
 
-8. **Git only.** A project must be a repository (`atask init` creates one).
-   Evidence is bound to the verified revision; a trivial proof
-   satisfies the mandatory-proof rule and is the planner's own risk.
+8. **Git only for worktrees.** A task records a repository or nothing; work
+   against something other than a Git repository has no worktree and runs
+   its checks where it was claimed. Evidence is bound to the verified
+   revision; a trivial proof satisfies the mandatory-proof rule and is the
+   planner's own risk.
 
 9. **Worktree-resident tokens and stale processes.** The token in a
    worktree's Git directory is readable by the same OS user, like the

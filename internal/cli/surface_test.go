@@ -480,10 +480,13 @@ func TestListColorsGlyphsAndDimsProject(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run(alpha, "init", "--name", "alpha"); code != ExitOK {
+	if code, _, errOut := run(alpha, "init"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(alpha, "add", "colored-work", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
+	if code, _, errOut := run(alpha, "project", "add", "alpha"); code != ExitOK {
+		t.Fatalf("project add: %d %s", code, errOut)
+	}
+	if code, _, errOut := run(alpha, "--project", "alpha", "add", "colored-work", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	loose := t.TempDir()

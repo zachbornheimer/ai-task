@@ -158,7 +158,7 @@ SELECT t.id, t.project_id, t.kind, t.key, t.parent_id, t.description, t.outcome,
        vr.id, vr.attempt_id, vr.job_id, vr.mode, vr.status, vr.revision, vr.policy_json, vr.policy_digest, vr.environment, vr.created_at, vr.started_at, vr.finished_at, vr.summary,
        (SELECT revision FROM submissions WHERE id = t.completed_submission_id),
        t.completed_submission_id, t.last_failure_attempt_id, t.last_error, t.workspace_error,
-       t.creator, t.created_cwd,
+       t.repo_root, t.base_ref, t.creator, t.created_cwd,
        (SELECT group_concat(project_id, char(31)) FROM (SELECT project_id FROM task_projects WHERE task_id = t.id ORDER BY position))
 FROM tasks t
 LEFT JOIN execution_attempts a ON a.task_id = t.id AND a.seq = t.current_attempt_seq
@@ -189,7 +189,7 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		&sID, &sAttempt, &sAttemptSeq, &sRev, &sAt,
 		&run.id, &run.attempt, &run.job, &run.mode, &run.status, &run.revision, &run.policy, &run.digest, &run.env, &run.created, &run.started, &run.finished, &run.summary,
 		&completedRev, &completedSub, &r.LastFailureAttemptID, &r.LastError, &r.WorkspaceError,
-		&r.Task.Creator, &r.Task.CreatedCwd, &projects)
+		&r.Task.RepoRoot, &r.Task.BaseRef, &r.Task.Creator, &r.Task.CreatedCwd, &projects)
 	if err != nil {
 		return r, err
 	}
@@ -276,9 +276,9 @@ func (t *Tx) InsertTask(tk task.Task) error {
 	if tk.ParentID != "" {
 		parent = tk.ParentID
 	}
-	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, contract_rev, created_at, updated_at, creator, created_cwd)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), ms(tk.CreatedAt), ms(tk.UpdatedAt), tk.Creator, tk.CreatedCwd)
+	_, err = t.tx.ExecContext(t.ctx, `INSERT INTO tasks (id, project_id, kind, key, parent_id, description, outcome, constraints_json, policy_json, policy_digest, contract_rev, created_at, updated_at, repo_root, base_ref, creator, created_cwd)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+		tk.ID, tk.ProjectID, tk.Kind, key, parent, tk.Description, tk.Outcome, string(constraints), string(policy), tk.Verification.Digest(), ms(tk.CreatedAt), ms(tk.UpdatedAt), tk.RepoRoot, tk.BaseRef, tk.Creator, tk.CreatedCwd)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return err // caller distinguishes id vs key collisions

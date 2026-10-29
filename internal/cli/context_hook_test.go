@@ -50,7 +50,7 @@ func newHookProject(t *testing.T) *hookProject {
 	testgit.Run(t, repo, "add", "a.txt")
 	testgit.Run(t, repo, "commit", "-q", "-m", "one")
 	h := &hookProject{t: t, repo: repo, db: filepath.Join(t.TempDir(), "at.db")}
-	if code, out := h.run(repo, "", "init", "--name", "hooks"); code != ExitOK {
+	if code, out := h.run(repo, "", "init"); code != ExitOK {
 		t.Fatalf("init: %d %s", code, out)
 	}
 	code, out := h.run(repo, "", "--json", "add", "hook-work", "--proof", "run: go version", "--regression", "run: go version")

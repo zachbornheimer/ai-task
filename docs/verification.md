@@ -9,7 +9,7 @@ completes a task; only `verify complete` can, and only with fresh evidence.
   own outcome. Required unless a task is a group.
 - **Regression** (`atask add --regression`, `atask update --regression`)
   proves nothing else broke. It belongs to the task; a project holds no
-  checks (`atask project` sets only target branch and attempts).
+  checks (`atask project` sets only the attempt budget).
 
 A task missing either proof is a draft and cannot be claimed or completed.
 

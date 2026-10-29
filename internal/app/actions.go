@@ -71,7 +71,7 @@ func (e *Engine) runCompletionActions(ctx context.Context, token execution.Token
 	if err != nil {
 		return nil, err
 	}
-	unrestricted := c.proj.Rootless()
+	unrestricted := !c.rec.Task.Worktree()
 	if !unrestricted {
 		if err := e.ensureSandbox(); err != nil {
 			return acts, err
@@ -156,13 +156,13 @@ func (e *Engine) Reverify(ctx context.Context, token execution.Token) (VerifyRes
 		return VerifyResult{}, fault.New(fault.CodeInvalidInput, "%s is not complete: there is no recorded revision to reverify; use `atask verify complete`", id)
 	}
 	res := VerifyResult{TaskID: id, Mode: verification.ModeComplete, Revision: c.revision, Status: task.StatusComplete, Completed: true, Passed: true}
-	mgr := e.manager(c.proj)
-	inPlace := c.proj.Rootless()
+	mgr := e.manager(c.rec.Task.RepoRoot)
+	inPlace := !c.rec.Task.Worktree()
 	var changed []string
 	if !inPlace {
-		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+c.proj.TargetBranch, c.revision)
+		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+c.rec.Task.BaseRef, c.revision)
 	}
-	taskOpts, regOpts := e.suiteOpts(c.rec.Task, c.proj, changed)
+	taskOpts, regOpts := e.suiteOpts(c.rec.Task, changed)
 	for _, mode := range []verification.Mode{verification.ModeProof, verification.ModeRegression} {
 		policy := c.policy.Subset(mode)
 		opts := taskOpts

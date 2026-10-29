@@ -47,21 +47,12 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		return PlanSnapshot{}, err
 	}
 	now := e.now()
-	heads := map[project.ID]targetHead{}
-	if q.ProjectID != "" {
-		heads[q.ProjectID] = e.resolveTargetHead(ctx, q.ProjectID)
-		for _, home := range e.foreignHomes(ctx, q.ProjectID) {
-			heads[home] = e.resolveTargetHead(ctx, home)
-		}
-	} else {
-		var err error
-		heads, err = e.projectHeads(ctx)
-		if err != nil {
-			return PlanSnapshot{}, err
-		}
+	heads, err := e.taskHeads(ctx, q.ProjectID)
+	if err != nil {
+		return PlanSnapshot{}, err
 	}
 	var snap PlanSnapshot
-	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+	err = e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		var proj project.Project
 		byID := map[project.ID]project.Project{}
 		if q.ProjectID != "" {
@@ -116,7 +107,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 				}
 				g := GroupView{ID: r.Task.ID, Key: r.Task.Key, Title: r.Task.Description, ParentID: r.Task.ParentID, Progress: prog, Complete: prog.Total > 0 && prog.Complete == prog.Total, ArchivedAt: r.Task.ArchivedAt, LastError: r.LastError}
 				if verification.HasRequired(r.Task.Verification.TaskChecks) {
-					gv, err := e.groupVerification(tx, *r, rp, now, heads[rp.ID])
+					gv, err := e.groupVerification(tx, *r, rp, now, heads[headKeyOf(r.Task)])
 					if err != nil {
 						return err
 					}
@@ -158,7 +149,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					continue
 				}
 			}
-			v, err := e.buildViewDepth(tx, *r, rp, now, viewList, heads[rp.ID])
+			v, err := e.buildViewDepth(tx, *r, rp, now, viewList, heads[headKeyOf(r.Task)])
 			if err != nil {
 				return err
 			}
@@ -179,15 +170,17 @@ func (e *Engine) Show(ctx context.Context, pid project.ID, ref string, full bool
 		return TaskView{}, err
 	}
 	now := e.now()
-	// Groups with checks compare against the target head, which is
-	// resolved before the read opens; a task view never consults it.
-	var head targetHead
+	// A group's proof state compares against its base head, which is
+	// resolved outside any database read: Git never runs with the store
+	// open. A task view never consults it.
+	var key headKey
 	_ = e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		if r, err := e.lookup(tx, pid, ref); err == nil && r.Task.Kind == task.KindGroup {
-			head = e.resolveTargetHead(ctx, r.Task.ProjectID)
+			key = headKeyOf(r.Task)
 		}
 		return nil
 	})
+	head := e.resolveHead(ctx, key)
 	var v TaskView
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		r, err := e.lookup(tx, pid, ref)
@@ -227,18 +220,12 @@ func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 	if err := e.reconcile(ctx); err != nil {
 		return Summary{}, err
 	}
-	heads := map[project.ID]targetHead{}
-	if pid != "" {
-		heads[pid] = e.resolveTargetHead(ctx, pid)
-	} else {
-		var err error
-		heads, err = e.projectHeads(ctx)
-		if err != nil {
-			return Summary{}, err
-		}
+	heads, err := e.taskHeads(ctx, pid)
+	if err != nil {
+		return Summary{}, err
 	}
 	var s Summary
-	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+	err = e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		var proj project.Project
 		var byID map[project.ID]project.Project
 		var err error
@@ -284,7 +271,7 @@ func (e *Engine) foreignHomes(ctx context.Context, pid project.ID) []project.ID 
 	return out
 }
 
-func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[project.ID]targetHead, byID map[project.ID]project.Project) (Summary, error) {
+func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[headKey]targetHead, byID map[project.ID]project.Project) (Summary, error) {
 	records, err := tx.ListRecords(proj.ID, sqlite.ScopeLive, e.now(), proj.MaxAttempts)
 	if err != nil {
 		return Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}, err
@@ -304,7 +291,7 @@ type groupScope struct {
 // summarize derives the summary of records. With a scope, a task blocked
 // by a requirement outside the group is stalled by name: the run does not
 // pull in work beyond its group.
-func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite.Record, heads map[project.ID]targetHead, byID map[project.ID]project.Project, scope *groupScope) (Summary, error) {
+func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite.Record, heads map[headKey]targetHead, byID map[project.ID]project.Project, scope *groupScope) (Summary, error) {
 	n := e.now()
 	s := Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}
 	var err error
@@ -322,7 +309,7 @@ func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite
 					return s, err
 				}
 			}
-			gv, err := e.groupVerification(tx, *r, rp, n, heads[rp.ID])
+			gv, err := e.groupVerification(tx, *r, rp, n, heads[headKeyOf(r.Task)])
 			if err != nil {
 				return s, err
 			}

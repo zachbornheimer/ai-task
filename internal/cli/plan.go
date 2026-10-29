@@ -17,9 +17,9 @@ import (
 )
 
 func init() {
-	register("init", "adopt a directory as a Git project (git init if needed) and install the agent instructions: AGENTS.md block + CLAUDE.md import; re-run to refresh. For a project with no repository use `atask project add NAME`", runInit)
-	register("projects", "list registered projects", runProjects)
-	register("project", "show or configure the current project (trusted): --target-branch, --attempts; `project add NAME` creates a project with no repository, whose checks run in the directory the task was claimed from", runProject)
+	register("init", "optionally prepare a directory: create the Git repository if it is not one and install the agent instructions (AGENTS.md block + CLAUDE.md import); re-run to refresh. It registers nothing; a task records its repository when it is filed", runInit)
+	register("projects", "list projects", runProjects)
+	register("project", "show or configure a project (trusted): --attempts; `project add NAME` creates a project", runProject)
 	register("add", "plan a task or group: atask add \"title\" [--key K] [--group] [--parent REF] [--requires REF]* [--blocks REF]* --proof \"run: cmd\" --regression \"run: cmd\" | atask add -f plan.yaml|plan.json|-", runAdd)
 	register("update", "change a plan item: atask update REF [--requires REF]* [--remove-requires REF]* [--proof ..] [--regression ..] [--archive --reason ..] [--reset-attempts]", runUpdate)
 	register("show", "show a task or group: atask show [REF] [--full] (no REF: the current claim)", runShow)
@@ -42,12 +42,11 @@ func (c *ctxt) changeSet(ctx context.Context, pid project.ID, ops ...plan.Change
 	if session == "" {
 		session = workspace.LoadToken(ctx, c.env.Cwd)
 	}
-	return plan.ChangeSet{ProjectID: pid, Session: session, Operations: ops}
+	return plan.ChangeSet{ProjectID: pid, Session: session, Repo: c.g.repo, Operations: ops}
 }
 
 func runInit(ctx context.Context, c *ctxt, args []string) error {
-	name := c.fs.String("name", "", "display name (default: directory name)")
-	path := c.fs.String("path", "", "directory to register (default: current directory)")
+	path := c.fs.String("path", "", "directory to prepare (default: current directory)")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -59,28 +58,22 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 	if dir == "" {
 		dir = c.env.Cwd
 	}
-	res, err := e.InitProjectResult(ctx, *name, dir)
+	res, err := e.InitRepo(ctx, dir)
 	if err != nil {
 		return err
 	}
-	p := res.Project
 	type out struct {
 		app.InitResult
 		Instructions *app.InstallResult `json:"instructions,omitempty"`
 	}
 	o := out{InitResult: res}
-	ir, err := app.InstallInstructions(p.RootPath)
+	ir, err := app.InstallInstructions(res.Repo)
 	if err != nil {
 		return err
 	}
 	o.Instructions = &ir
 	return c.emit(o, func(w io.Writer) {
-		if res.Existing {
-			say(w, "✓ Project %s · %s (already registered)\n", p.ID, p.Name)
-		} else {
-			say(w, "✓ Registered project %s · %s\n", p.ID, p.Name)
-		}
-		say(w, "Root:        %s\n", p.RootPath)
+		say(w, "✓ Repository %s\n", res.Repo)
 		if res.CreatedRepo {
 			sayln(w, "Repository:  created (git init + initial commit)")
 		}
@@ -90,7 +83,6 @@ func runInit(ctx context.Context, c *ctxt, args []string) error {
 				say(w, "             untracked: %s\n", f)
 			}
 		}
-		say(w, "Target:      %s (task branches atask/<id>)\n", p.TargetBranch)
 		say(w, "State:       %s\n", e.Path())
 		if ir := o.Instructions; ir != nil {
 			switch {
@@ -123,18 +115,16 @@ func runProjects(ctx context.Context, c *ctxt, args []string) error {
 	return c.emit(ps, func(w io.Writer) { _ = renderProjects(w, ps) })
 }
 
-// ProjectView is what `atask project` reports: identity, location, target
-// branch and attempt budget. A project holds nothing else.
+// ProjectView is what `atask project` reports: planning identity and
+// attempt budget. A project holds nothing else.
 type ProjectView struct {
-	ID           project.ID `json:"id"`
-	Name         string     `json:"name"`
-	Path         string     `json:"path"`
-	TargetBranch string     `json:"target_branch"`
-	Attempts     int        `json:"attempts"`
+	ID       project.ID `json:"id"`
+	Name     string     `json:"name"`
+	Attempts int        `json:"attempts"`
+	PlanRev  uint64     `json:"plan_rev"`
 }
 
 func runProject(ctx context.Context, c *ctxt, args []string) error {
-	target := c.fs.String("target-branch", "", "branch verified work is promoted to")
 	attempts := c.fs.Int("attempts", -1, "failed attempts before a task needs attention (0 = unlimited)")
 	if err := c.parse(args); err != nil {
 		return err
@@ -155,9 +145,6 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	changed := false
-	if *target != "" {
-		p.TargetBranch, changed = *target, true
-	}
 	if *attempts >= 0 {
 		p.MaxAttempts, changed = *attempts, true
 	}
@@ -169,14 +156,14 @@ func runProject(ctx context.Context, c *ctxt, args []string) error {
 			return err
 		}
 	}
-	v := ProjectView{ID: p.ID, Name: p.Name, Path: p.RootPath, TargetBranch: p.TargetBranch, Attempts: p.MaxAttempts}
+	v := ProjectView{ID: p.ID, Name: p.Name, Attempts: p.MaxAttempts, PlanRev: p.PlanRev}
 	return c.emit(v, func(w io.Writer) {
-		say(w, "Project:  %s · %s\nPath:     %s\nTarget:   %s\nAttempts: %d\n", v.ID, v.Name, v.Path, v.TargetBranch, v.Attempts)
+		say(w, "Project:  %s · %s\nAttempts: %d\nPlan:     rev %d\n", v.ID, v.Name, v.Attempts, v.PlanRev)
 	})
 }
 
-// runProjectAdd handles `atask project add NAME`: a project with no
-// repository, created idempotently by name.
+// runProjectAdd handles `atask project add NAME`: a planning scope,
+// created idempotently by name.
 func runProjectAdd(ctx context.Context, c *ctxt, e *app.Engine) error {
 	if len(c.args) != 2 || c.args[0] != "add" {
 		return usage("usage: atask project add NAME")
@@ -186,7 +173,7 @@ func runProjectAdd(ctx context.Context, c *ctxt, e *app.Engine) error {
 		return err
 	}
 	return c.emit(p, func(w io.Writer) {
-		say(w, "✓ Project %s · %s (no repository; checks run in the directory a task is claimed from)\n", p.ID, p.Name)
+		say(w, "✓ Project %s · %s\n", p.ID, p.Name)
 	})
 }
 
@@ -372,7 +359,7 @@ func (c *ctxt) namedProjectIDs(ctx context.Context, names []string) ([]project.I
 	}
 	ids := make([]project.ID, 0, len(names))
 	for _, n := range names {
-		p, err := e.ResolveProject(ctx, n, "")
+		p, err := e.ResolveProject(ctx, n)
 		if err != nil {
 			return nil, err
 		}
@@ -542,11 +529,11 @@ func (c *ctxt) showCurrent(ctx context.Context, full bool) error {
 
 func renderProjects(w io.Writer, ps []project.Project) error {
 	if len(ps) == 0 {
-		_, err := fmt.Fprintln(w, "no projects registered. run `atask init` here.")
+		_, err := fmt.Fprintln(w, "no projects yet; `atask add` files work under general")
 		return err
 	}
 	for i := range ps {
-		if _, err := fmt.Fprintf(w, "%s  %-20s  %s\n", ps[i].ID, ps[i].Name, ps[i].RootPath); err != nil {
+		if _, err := fmt.Fprintf(w, "%s  %s\n", ps[i].ID, ps[i].Name); err != nil {
 			return err
 		}
 	}
@@ -583,7 +570,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 	}
 	var pid project.ID
 	if strings.TrimSpace(c.g.project) != "" {
-		p, err := e.ResolveProject(ctx, c.g.project, "")
+		p, err := e.ResolveProject(ctx, c.g.project)
 		if err != nil {
 			return err
 		}

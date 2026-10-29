@@ -210,10 +210,11 @@ type Session struct {
 	LeaseUntil time.Time       `json:"lease_until"`
 	Workspace  string          `json:"workspace,omitempty"`
 	Branch     string          `json:"branch,omitempty"`
-	// TargetBranch is the branch verified work is promoted to and the one
-	// to merge into the task branch when integration reports a conflict;
-	// TargetRevision is its head when the claim was made.
-	TargetBranch   string `json:"target_branch,omitempty"`
+	// BaseRef is the branch the task branch started from and the branch
+	// verified work is promoted to; merge it into the task branch when a
+	// base conflict is reported. TargetRevision is its head when the claim
+	// was made. Both are empty for a task with no repository.
+	BaseRef        string `json:"base_ref,omitempty"`
 	TargetRevision string `json:"target_revision,omitempty"`
 	// Regression lists the project's regression checks, which `verify
 	// complete` runs after the task checks.

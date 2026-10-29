@@ -32,9 +32,24 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 	if err := cs.Validate(); err != nil {
 		return plan.Result{}, err
 	}
+	// The repository is resolved before the write transaction: Git never
+	// runs inside the database lock. Every task this set creates records
+	// it, so filing needs no prior registration of anything.
+	dir := cs.Repo
+	if dir == "" {
+		dir = e.cwd
+	}
+	var repo string
+	var err error
+	if dir != "" {
+		if repo, err = RepoAt(dir); err != nil {
+			return plan.Result{}, fault.Wrap(err, fault.CodeInvalidInput, "resolve repository")
+		}
+	}
+	base := BaseRef(ctx, repo)
 	now := e.now()
 	var result plan.Result
-	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		proj, err := tx.GetProject(cs.ProjectID)
 		if err != nil {
 			return err
@@ -61,7 +76,7 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 		if err != nil {
 			return err
 		}
-		a := &applier{e: e, tx: tx, cs: cs, proj: proj, now: now, refs: map[string]task.ID{}, result: plan.Result{PlanRev: current, Created: map[string]task.ID{}}}
+		a := &applier{e: e, tx: tx, cs: cs, proj: proj, repo: repo, base: base, now: now, refs: map[string]task.ID{}, result: plan.Result{PlanRev: current, Created: map[string]task.ID{}}}
 		order, err := referenceOrder(cs.Operations)
 		if err != nil {
 			return err
@@ -100,10 +115,14 @@ func (e *Engine) Apply(ctx context.Context, cs plan.ChangeSet) (plan.Result, err
 
 // applier carries the state of one Apply transaction.
 type applier struct {
-	e        *Engine
-	tx       *sqlite.Tx
-	cs       plan.ChangeSet
+	e  *Engine
+	tx *sqlite.Tx
+	cs plan.ChangeSet
+	// proj is the change set's home project; repo and base are the
+	// execution binding stamped onto every task it creates.
 	proj     project.Project
+	repo     string
+	base     string
 	now      time.Time
 	refs     map[string]task.ID // keys created in this set
 	archived []task.ID
@@ -181,6 +200,9 @@ func (a *applier) parentGroup(ref plan.Ref, home project.ID) (task.ID, error) {
 	if g.Task.ProjectID != home {
 		return "", fault.New(fault.CodeInvalidInput, "%s: a group's children share the group's home project", ref)
 	}
+	if g.Task.RepoRoot != a.repo {
+		return "", fault.New(fault.CodeInvalidInput, "%s: a group's children share the group's repository (%s), so its proof can run on the merge of their revisions", ref, g.Task.RepoRoot)
+	}
 	return g.Task.ID, nil
 }
 
@@ -221,10 +243,11 @@ func (a *applier) addGroup(i int, c plan.AddGroup) error {
 }
 
 func (a *applier) insert(spec task.Spec) (task.ID, error) {
+	spec.RepoRoot, spec.BaseRef = a.repo, a.base
 	if err := spec.Validate(); err != nil {
 		return "", err
 	}
-	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Projects: append([]project.ID{spec.ProjectID}, spec.AlsoIn...), Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
+	t := task.Task{ProjectID: spec.ProjectID, Kind: spec.Kind, Key: spec.Key, ParentID: spec.ParentID, RepoRoot: spec.RepoRoot, BaseRef: spec.BaseRef, Description: spec.Description, Outcome: spec.Outcome, Constraints: spec.Constraints, Acceptance: spec.Acceptance, Verification: spec.Verification, Projects: append([]project.ID{spec.ProjectID}, spec.AlsoIn...), Creator: a.e.actor, CreatedCwd: a.e.cwd, CreatedAt: a.now, UpdatedAt: a.now}
 	for attempt := range 5 {
 		if attempt == 0 {
 			t.ID = a.e.newID()
@@ -496,11 +519,7 @@ func (a *applier) insertEdges(ctx context.Context, edges []dependency.Edge) erro
 		if archA || archB {
 			return fault.New(fault.CodeConflict, "dependency on an archived task (%s requires %s)", edge.Task, edge.Requires)
 		}
-		shared, err := a.tx.TasksShareProject(edge.Task, edge.Requires)
-		if err != nil {
-			return err
-		}
-		if err := dependency.Validate(ctx, edge, shared, a.tx); err != nil {
+		if err := dependency.Validate(ctx, edge, a.tx); err != nil {
 			return err
 		}
 		if err := a.tx.InsertEdge(edge, a.now); err != nil {
@@ -608,7 +627,7 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 		}
 	}
 	if contract {
-		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification}
+		spec := task.Spec{ProjectID: t.ProjectID, Kind: t.Kind, Key: t.Key, ParentID: t.ParentID, RepoRoot: t.RepoRoot, BaseRef: t.BaseRef, Description: t.Description, Outcome: t.Outcome, Constraints: t.Constraints, Acceptance: t.Acceptance, Verification: t.Verification}
 		if err := spec.Validate(); err != nil {
 			return err
 		}

@@ -11,7 +11,7 @@ calls a model; the harness does.
 | Layer                | Holds                                                               | Where it lives                                                                                                                                        |
 | -------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bootstrap            | identity, the `atask` CLI, JSON envelopes, stop on lost authority   | the harness's system prompt where it can be set (`claude -p --append-system-prompt`, a bare model's system message); text in `docs/agent-contract.md` |
-| Project instructions | how work gets done here, the verbs, the execution contract          | `AGENTS.md` block installed by `atask init`; `CLAUDE.md` imports it                                                                                   |
+| Project instructions | how work gets done here, the verbs, the execution contract          | `AGENTS.md` block installed by `atask init` (optional); `CLAUDE.md` imports it                                                                        |
 | Task turn            | outcome, constraints, acceptance, proofs, workspace, state, handoff | `atask context ID` (worker handoff); `atask show` for the current claim; `atask list` for the plan                                                    |
 
 The project file is the lever: it says that any change starts with the
@@ -22,9 +22,9 @@ edited directly.
 
 ```sh
 cd repo
-atask init                                           # AGENTS.md block + CLAUDE.md import + SessionStart hook (.claude/settings.json)
-atask project --target-branch main
-atask doctor                                         # repository, target, identity, regression green on the target
+atask init                                           # optional: AGENTS.md block + CLAUDE.md import + SessionStart hook (.claude/settings.json); registers nothing
+atask project add work                               # a planning scope; the repository travels on each task
+atask doctor                                         # work tree, base branch, identity, workspace root
 git add AGENTS.md CLAUDE.md .claude/settings.json && git commit -m "Route agent work through atask"
 ```
 

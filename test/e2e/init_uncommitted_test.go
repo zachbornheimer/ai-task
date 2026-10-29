@@ -34,7 +34,7 @@ func TestInitAndDoctorWarnAboutUncommittedFiles(t *testing.T) {
 	}
 	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "main.go"), []byte("package main\n"), 0o600))
 
-	res := e.ok("init", "--name", "u")
+	res := e.ok("init")
 	if res["created_repo"] != true {
 		t.Fatalf("init did not create the repository: %v", res)
 	}

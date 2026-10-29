@@ -39,8 +39,8 @@ func TestContractDocParses(t *testing.T) {
 	}{
 		{"verbs", s.Verbs, []string{"list", "claim renew", "claim release", "verify proof", "verify regression", "verify complete"}, []string{"presets"}},
 		{"task flags", s.TaskFlags, []string{"--proof", "--regression", "--on-complete", "--on-complete-detach"}, []string{"--check", "--size"}},
-		{"project flags", s.ProjectFlags, []string{"--target-branch", "--attempts"}, nil},
-		{"global flags", s.GlobalFlags, []string{"--project", "--db", "--json"}, nil},
+		{"project flags", s.ProjectFlags, []string{"--attempts"}, []string{"--target-branch"}},
+		{"global flags", s.GlobalFlags, []string{"--project", "--repo", "--db", "--json"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -80,8 +80,8 @@ func TestContractVerbFlagsAndFilters(t *testing.T) {
 		"verify complete": {"--reverify"},
 		"add":             {"-f", "--proof", "--key"},
 		"update":          {"--archive", "--reason", "--reset-attempts", "--remove-requires", "--proof"},
-		"init":            {"--name", "--path"},
-		"project":         {"--target-branch", "--attempts"},
+		"init":            {"--path"},
+		"project":         {"--attempts"},
 	} {
 		for _, f := range want {
 			if !slices.Contains(s.VerbFlags[verb], f) {

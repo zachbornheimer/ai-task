@@ -60,44 +60,80 @@ func (h targetHead) unresolvedReason() (string, bool) {
 	return fault.MessageOf(h.err), true
 }
 
-// resolveTargetHead reads the project and resolves its target branch
-// outside any transaction. A project that cannot be read yields the zero
-// value; the caller's own read reports that error.
-func (e *Engine) resolveTargetHead(ctx context.Context, pid project.ID) targetHead {
-	var proj project.Project
-	if err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) { proj, err = tx.GetProject(pid); return }); err != nil {
+// headKey identifies the branch whose head a view consults: the repository
+// and the ref inside it. A task without a repository has no head, and its
+// zero key is never resolved.
+type headKey struct{ repo, base string }
+
+// headKeyOf names the binding a task's views resolve against.
+func headKeyOf(t task.Task) headKey { return headKey{repo: t.RepoRoot, base: t.BaseRef} }
+
+// resolveHead resolves k's branch head outside any transaction.
+func (e *Engine) resolveHead(ctx context.Context, k headKey) targetHead {
+	if k.repo == "" || k.base == "" {
 		return targetHead{}
 	}
-	return e.targetHeadOf(ctx, proj)
+	rev, err := e.manager(k.repo).Revision(ctx, "refs/heads/"+k.base)
+	return targetHead{rev: rev, err: err, known: true}
 }
 
-// projectHeads resolves the target branch of every enrolled git project.
-// General and gitless projects are omitted; callers treat a missing
-// entry as "no target" (epics there never need a head).
-func (e *Engine) projectHeads(ctx context.Context) (map[project.ID]targetHead, error) {
-	var ps []project.Project
+// keysOf collects the distinct bindings of a set of records.
+func keysOf(recs []sqlite.Record) []headKey {
+	out := make([]headKey, 0, len(recs))
+	seen := map[headKey]bool{}
+	for i := range recs {
+		k := headKeyOf(recs[i].Task)
+		if k.repo == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	return out
+}
+
+// taskHeads resolves the base branch of every repository the listed tasks
+// run in. It reads the bindings first so no Git call runs inside the
+// listing transaction.
+func (e *Engine) taskHeads(ctx context.Context, pid project.ID) (map[headKey]targetHead, error) {
+	var keys []headKey
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
-		var err error
-		ps, err = tx.ListProjects()
-		return err
+		recs, err := tx.ListRecords(pid, sqlite.ScopeAll, e.now(), project.DefaultMaxAttempts)
+		if err != nil {
+			return err
+		}
+		keys = keysOf(recs)
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[project.ID]targetHead, len(ps))
-	for i := range ps {
-		p := &ps[i]
-		if p.Rootless() {
-			continue
-		}
-		out[p.ID] = e.targetHeadOf(ctx, *p)
+	out := make(map[headKey]targetHead, len(keys))
+	for _, k := range keys {
+		out[k] = e.resolveHead(ctx, k)
 	}
 	return out, nil
 }
 
-func (e *Engine) targetHeadOf(ctx context.Context, proj project.Project) targetHead {
-	rev, err := e.manager(proj).Revision(ctx, "refs/heads/"+proj.TargetBranch)
-	return targetHead{rev: rev, err: err, known: true}
+// groupKeys lists the distinct bindings of a project's groups, so their
+// head can be resolved before the selection transaction opens.
+func (e *Engine) groupKeys(ctx context.Context, pid project.ID) ([]headKey, error) {
+	var out []headKey
+	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		recs, err := tx.ListRecords(pid, sqlite.ScopeLive, e.now(), project.DefaultMaxAttempts)
+		if err != nil {
+			return err
+		}
+		groups := make([]sqlite.Record, 0, len(recs))
+		for i := range recs {
+			if recs[i].Task.Kind == task.KindGroup {
+				groups = append(groups, recs[i])
+			}
+		}
+		out = keysOf(groups)
+		return nil
+	})
+	return out, err
 }
 
 // groupReady reports whether a group's checks may run now: not archived,
@@ -190,7 +226,7 @@ func (e *Engine) groupVerification(tx *sqlite.Tx, rec sqlite.Record, proj projec
 		// Without the target the epic can neither run nor be judged
 		// current: say so rather than reading as waiting for a verifier.
 		gv.Status = "error"
-		gv.Summary = fmt.Sprintf("cannot resolve target branch %s: %s", proj.TargetBranch, reason)
+		gv.Summary = fmt.Sprintf("cannot resolve target branch %s: %s", rec.Task.BaseRef, reason)
 		return gv, nil
 	}
 	gv.Status = "pending"
@@ -419,13 +455,18 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only, within
 	owner := execution.NewToken()
 	var job groupJob
 	found := false
-	// Resolve the target before the transaction: Git never runs inside
-	// the database lock. A failure is the caller's error, not "pending".
-	head := e.resolveTargetHead(ctx, pid)
-	if head.known && head.err != nil {
-		return job, false, head.err
+	// Resolve the groups' base heads before the transaction: Git never runs
+	// inside the database lock. A failure is the caller's error, not
+	// "pending".
+	keys, err := e.groupKeys(ctx, pid)
+	if err != nil {
+		return job, false, err
 	}
-	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+	heads := make(map[headKey]targetHead, len(keys))
+	for _, k := range keys {
+		heads[k] = e.resolveHead(ctx, k)
+	}
+	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		proj, err := tx.GetProject(pid)
 		if err != nil {
 			return err
@@ -470,6 +511,10 @@ func (e *Engine) claimGroupJob(ctx context.Context, pid project.ID, only, within
 			requirements, err := groupRequirements(tx, r.Task.ID)
 			if err != nil {
 				return err
+			}
+			head := heads[headKeyOf(r.Task)]
+			if head.known && head.err != nil {
+				return head.err
 			}
 			input := groupInputRevision(head.rev, requirements)
 			// Nothing changed since a failure on this very revision and
@@ -542,8 +587,8 @@ func (e *Engine) executeGroupJob(ctx context.Context, job groupJob) (VerifyResul
 		res.Summary, res.Status = summary, e.statusOf(ctx, job.rec.Task.ID)
 		return res, &fault.Error{Code: code, Message: fmt.Sprintf("group %s: %s", job.rec.Task.ID, summary), Details: res}
 	}
-	mgr := e.manager(job.proj)
-	resolved, err := mgr.ResolveGroupBase(ctx, job.proj.TargetBranch, job.requirements)
+	mgr := e.manager(job.rec.Task.RepoRoot)
+	resolved, err := mgr.ResolveGroupBase(ctx, job.rec.Task.BaseRef, job.requirements)
 	if err != nil {
 		summary := "cannot merge the children's completed revisions: " + fault.MessageOf(err)
 		status, jobStatus := sqlite.RunError, "error"

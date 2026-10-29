@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	register("doctor", "check the project before planning or starting workers: repository, target branch, Git identity, workspace root, stale worktrees, tasks needing attention", runDoctor)
+	register("doctor", "check a repository before working in it: work tree, base branch, Git identity, workspace root, stale worktrees, and the project's tasks needing attention", runDoctor)
 }
 
 func runDoctor(ctx context.Context, c *ctxt, args []string) error {
@@ -28,11 +28,15 @@ func runDoctor(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	rep, err := e.Doctor(ctx, pid)
+	repo, err := app.RepoAt(c.env.Cwd)
 	if err != nil {
 		return err
 	}
-	rep.Checks = append(rep.Checks, worktrunkChecks(rep.Root)...)
+	rep, err := e.Doctor(ctx, pid, repo)
+	if err != nil {
+		return err
+	}
+	rep.Checks = append(rep.Checks, worktrunkChecks(repo)...)
 	if !rep.Healthy {
 		return &fault.Error{Code: fault.CodeNotReady, Message: "the project is not ready to be worked; see the report", Details: rep}
 	}
@@ -40,7 +44,7 @@ func runDoctor(ctx context.Context, c *ctxt, args []string) error {
 }
 
 func renderDoctor(w io.Writer, rep app.DoctorReport) {
-	say(w, "Project %s · %s (target %s)\n", rep.Project, rep.Root, rep.Target)
+	say(w, "Project %s · %s (base %s)\n", rep.Project, rep.Repo, rep.BaseRef)
 	for _, ch := range rep.Checks {
 		mark := "✓"
 		switch {

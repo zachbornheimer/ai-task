@@ -21,14 +21,16 @@ import (
 // host hands the agent, plus the facts it was built from. The text is the
 // same for every harness; the agent only needs a shell with `atask` on PATH.
 type Context struct {
-	Prompt       string                   `json:"prompt"`
-	Project      project.ID               `json:"project"`
-	Task         *TaskView                `json:"task,omitempty"`
-	Workspace    string                   `json:"workspace,omitempty"`
-	Branch       string                   `json:"branch,omitempty"`
-	LeaseUntil   *time.Time               `json:"lease_until,omitempty"`
-	TargetBranch string                   `json:"target_branch"`
-	Regression   []verification.CheckSpec `json:"regression_checks"`
+	Prompt     string     `json:"prompt"`
+	Project    project.ID `json:"project"`
+	Task       *TaskView  `json:"task,omitempty"`
+	Workspace  string     `json:"workspace,omitempty"`
+	Branch     string     `json:"branch,omitempty"`
+	LeaseUntil *time.Time `json:"lease_until,omitempty"`
+	// BaseRef is the branch the task branch started from, and the branch
+	// verified work is promoted to; "" for a task without a repository.
+	BaseRef    string                   `json:"base_ref,omitempty"`
+	Regression []verification.CheckSpec `json:"regression_checks"`
 	// ChangedFiles are the files the task branch has changed against the
 	// target so far (earlier attempts' work); DirtyFiles are uncommitted
 	// changes left in the workspace.
@@ -64,6 +66,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 		proj       project.Project
 		sibs       []Rel
 		regression []verification.CheckSpec
+		baseRef    string
 	)
 	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		var r sqlite.Record
@@ -86,6 +89,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 		if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {
 			return err
 		}
+		baseRef = r.Task.BaseRef
 		if v, err = e.buildView(tx, r, proj, now, true, targetHead{}); err != nil {
 			return err
 		}
@@ -118,7 +122,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 	if len(sibs) > SiblingLimit {
 		sibs = sibs[:SiblingLimit]
 	}
-	c := Context{Project: proj.ID, Task: &v, TargetBranch: proj.TargetBranch, Regression: regression, Siblings: sibs}
+	c := Context{Project: proj.ID, Task: &v, BaseRef: baseRef, Regression: regression, Siblings: sibs}
 	if a := v.Attempt; a != nil && a.EndedAt == nil {
 		c.Workspace, c.Branch = a.Workspace, a.Branch
 		lease := a.LeaseExpiresAt
@@ -135,7 +139,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 				}
 			}
 		}
-		c.ChangedFiles, _ = workspace.ChangedFiles(ctx, c.Workspace, "refs/heads/"+proj.TargetBranch)
+		c.ChangedFiles, _ = workspace.ChangedFiles(ctx, c.Workspace, "refs/heads/"+baseRef)
 	}
 	c.Prompt = renderContext(c)
 	if withRules {
@@ -165,7 +169,7 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	if err != nil {
 		return Context{}, err
 	}
-	c := Context{Project: proj.ID, TargetBranch: proj.TargetBranch, Regression: []verification.CheckSpec{}, Summary: &sum}
+	c := Context{Project: proj.ID, Regression: []verification.CheckSpec{}, Summary: &sum}
 	for i := range snap.Tasks {
 		t := &snap.Tasks[i]
 		c.Claimable = append(c.Claimable, Rel{ID: t.ID, Key: t.Key, Title: t.Title, Status: t.Status})
@@ -205,10 +209,10 @@ func (e *Engine) projectContext(ctx context.Context, pid project.ID, withRules b
 	default:
 		w.WriteString("Nothing is claimable right now (work is in flight or cooling down); `atask claim --wait` blocks until something is.\n")
 	}
-	if proj.TargetBranch != "" {
-		fmt.Fprintf(&w, "\nAfter claiming, `cd` into the workspace the claim prints and run `atask show` there. Never edit %s directly.\n", proj.TargetBranch)
+	if len(c.Claimable) > 0 {
+		w.WriteString("\nAfter claiming, `cd` into the workspace the claim prints and run `atask show` there; a task without a repository runs where it was claimed.\n")
 	} else {
-		w.WriteString("\nClaim with `atask claim <id>`. Work in general completes without git.\n")
+		w.WriteString("\nClaim with `atask claim <id>`.\n")
 	}
 	c.Prompt = w.String()
 	if withRules {
@@ -291,7 +295,7 @@ func renderContext(c Context) string {
 		w.WriteString("\n")
 	}
 	if c.Workspace != "" {
-		fmt.Fprintf(&w, "Workspace: %s (branch %s; it started from %s).", c.Workspace, c.Branch, c.TargetBranch)
+		fmt.Fprintf(&w, "Workspace: %s (branch %s; it started from %s).", c.Workspace, c.Branch, c.BaseRef)
 		if c.LeaseUntil != nil {
 			fmt.Fprintf(&w, " Lease until %s.", c.LeaseUntil.UTC().Format(time.RFC3339))
 		}
@@ -300,7 +304,9 @@ func renderContext(c Context) string {
 			renderState(&w, c)
 		}
 	} else {
-		fmt.Fprintf(&w, "Completion records the task branch revision; it does not move %s. ", c.TargetBranch)
+		if c.BaseRef != "" {
+			fmt.Fprintf(&w, "Completion records the task branch revision; it does not move %s. ", c.BaseRef)
+		}
 		switch v.Status {
 		case task.StatusComplete:
 			fmt.Fprintf(&w, "This task is complete (revision %s); nothing is left to do.\n", short(v.CompletedRevision))
@@ -313,10 +319,10 @@ func renderContext(c Context) string {
 			renderState(&w, c)
 		}
 	}
-	if c.Worktrunk {
-		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk is installed: `wt step diff` shows all changes since branching, `wt step squash` folds commits; on BASE_CONFLICT use `wt step rebase %s`).\n", c.TargetBranch)
-	} else {
-		fmt.Fprintf(&w, "Commit with git; on BASE_CONFLICT use `git merge %s`.\n", c.TargetBranch)
+	if c.BaseRef != "" && c.Worktrunk {
+		fmt.Fprintf(&w, "Commit with `wt step commit` (Worktrunk is installed: `wt step diff` shows all changes since branching, `wt step squash` folds commits; on BASE_CONFLICT use `wt step rebase %s`).\n", c.BaseRef)
+	} else if c.BaseRef != "" {
+		fmt.Fprintf(&w, "Commit with git; on BASE_CONFLICT use `git merge %s`.\n", c.BaseRef)
 	}
 	return w.String()
 }

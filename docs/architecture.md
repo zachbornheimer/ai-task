@@ -79,19 +79,26 @@ a fact written only by the finalising transaction.
 
 ## Workspaces
 
-Every project is a Git repository (`atask init` runs `git init` and makes an
-initial commit when the directory is not one). Every task has one
-worktree on branch `atask/<task-id>`, created at the first claim from the target branch plus a merge of every required task's completed revision (`BASE_CONFLICT` when those merges conflict) and reused by every later attempt, so retries continue from
-the previous attempt's commits. The claim stores the session token in
+A project is a planning scope and holds no repository. Each task records the
+repository its work runs in (`repo_root`) and the branch it starts from
+(`base_ref`), taken from the directory it was filed in or `--repo`; nothing
+has to be registered first, and a task filed outside a Git repository has
+neither, so its checks run where it is claimed. Every repository-backed task
+has one worktree on branch `atask/<task-id>`, created at the first claim
+from its base ref plus a merge of every required task's completed revision in
+the same repository (`BASE_CONFLICT` when those merges conflict) and reused
+by every later attempt, so retries continue from
+the previous attempt's commits. A requirement in another repository cannot be
+merged; the edge orders the work only. The claim stores the session token in
 the worktree's private Git directory, so `atask` commands run there need no
 `ATASK_SESSION`. When the previous attempt never ended cleanly, the claim
 first moves its worktree to `<path>.stale-<seq>` with HEAD detached and
 creates a fresh one on the branch: a stale process keeps only its own
-expired token and cannot reach the branch or the new files. `atask init`
-writes no Git hooks; it installs the agent instruction files (AGENTS.md
-block, CLAUDE.md import).
+expired token and cannot reach the branch or the new files. `atask init` is
+optional and writes no Git hooks; it installs the agent instruction files
+(AGENTS.md block, CLAUDE.md import) and registers nothing.
 Final proofs run in a detached snapshot of the submitted commit, never in
-the editable worktree. Completion records the revision and never moves the target branch; an
+the editable worktree. Completion records the revision and never moves the base branch; an
 `on_complete` action does that (for example `run: wt merge main`).
 Concurrent `git worktree add` calls retry briefly on Git's lock files.
 Worktrees are never deleted by `at`; prune them with your worktree

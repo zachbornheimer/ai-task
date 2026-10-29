@@ -25,21 +25,22 @@ func TestEpicReportsUnresolvableTarget(t *testing.T) {
 		t.Fatalf("epic should be pending while the target resolves: %+v", v.GroupVerification)
 	}
 
-	f.git(f.repo, "update-ref", "-d", "refs/heads/"+f.proj.TargetBranch)
+	const base = "main" // the fixture repository's default branch
+	f.git(f.repo, "update-ref", "-d", "refs/heads/"+base)
 
 	ran, err := f.e.RunPendingGroups(f.ctx, f.proj.ID, "")
 	if ran || err == nil {
 		t.Fatalf("claiming an epic without a target must fail: ran=%v err=%v", ran, err)
 	}
 	gv := f.show(string(g)).GroupVerification
-	if gv.Status == "pending" || gv.Status == "" || !strings.Contains(gv.Summary, f.proj.TargetBranch) {
+	if gv.Status == "pending" || gv.Status == "" || !strings.Contains(gv.Summary, base) {
 		t.Fatalf("status must say the target cannot be resolved, not pending: %+v", gv)
 	}
 	sum, err := f.e.Summary(f.ctx, f.proj.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum.Done || !sum.Stalled || len(sum.Reasons) == 0 || !strings.Contains(strings.Join(sum.Reasons, " "), f.proj.TargetBranch) {
+	if sum.Done || !sum.Stalled || len(sum.Reasons) == 0 || !strings.Contains(strings.Join(sum.Reasons, " "), base) {
 		t.Fatalf("summary must stall on the unresolvable target: %+v", sum)
 	}
 }

@@ -133,7 +133,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 	}
 	opCtx, stop := e.heartbeatWithPulse(ctx, token, p.attempt.Lease, runID)
 	fence := func(tx *sqlite.Tx) error { _, err := e.authorize(tx, token, e.now()); return err }
-	changed, _ := workspace.ChangedFiles(ctx, p.dir, "refs/heads/"+p.proj.TargetBranch)
+	changed, _ := workspace.ChangedFiles(ctx, p.dir, "refs/heads/"+p.rec.Task.BaseRef)
 	if st, err := workspace.Inspect(ctx, p.dir); err == nil {
 		for _, line := range st.Dirty {
 			if len(line) > 3 {
@@ -141,7 +141,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 			}
 		}
 	}
-	taskOpts, regOpts := e.suiteOpts(p.rec.Task, p.proj, changed)
+	taskOpts, regOpts := e.suiteOpts(p.rec.Task, changed)
 	logDir := e.runLogDir(p.proj.ID, runID)
 	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	opts := taskOpts
@@ -190,12 +190,12 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // leaves behind can be the reason a regression check passes.
 func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project, workDir string) ([]verification.Evidence, error) {
 	var out []verification.Evidence
-	inPlace := proj.Rootless()
+	inPlace := !t.Worktree()
 	var changed []string
 	if !inPlace {
-		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+proj.TargetBranch, revision)
+		changed, _ = workspace.ChangedBetween(ctx, mgr.Repo, "refs/heads/"+t.BaseRef, revision)
 	}
-	taskOpts, regOpts := e.suiteOpts(t, proj, changed)
+	taskOpts, regOpts := e.suiteOpts(t, changed)
 	logDir := e.runLogDir(proj.ID, runID)
 	taskOpts.logDir, regOpts.logDir = logDir, logDir
 	taskPolicy := verification.Policy{TaskChecks: policy.TaskChecks}
@@ -286,11 +286,11 @@ type runOpts struct {
 
 // suiteOpts derives the task-check and regression allowances for a task
 // from its size and its regression proof's size.
-func (e *Engine) suiteOpts(t task.Task, proj project.Project, changed []string) (taskOpts, regOpts runOpts) {
+func (e *Engine) suiteOpts(t task.Task, changed []string) (taskOpts, regOpts runOpts) {
 	size, regSize := checkSizes(t)
-	unrestricted := proj.Rootless()
-	taskOpts = runOpts{budget: e.sizeBudget(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: proj.TargetBranch, size: size, unrestricted: unrestricted}
-	regOpts = runOpts{budget: e.sizeBudget(regSize), budgetName: "the regression budget", changed: changed, target: proj.TargetBranch, size: regSize, unrestricted: unrestricted}
+	unrestricted := !t.Worktree()
+	taskOpts = runOpts{budget: e.sizeBudget(size), budgetName: fmt.Sprintf("the %s task-check budget", size), changed: changed, target: t.BaseRef, size: size, unrestricted: unrestricted}
+	regOpts = runOpts{budget: e.sizeBudget(regSize), budgetName: "the regression budget", changed: changed, target: t.BaseRef, size: regSize, unrestricted: unrestricted}
 	return taskOpts, regOpts
 }
 
@@ -425,7 +425,7 @@ func (e *Engine) verifyComplete(ctx context.Context, token execution.Token) (Ver
 		return VerifyResult{}, fault.New(fault.CodeNotReady, "%s cannot complete: %d prerequisite(s) are not complete", p.rec.Task.ID, p.rec.UnmetRequires)
 	}
 	revision := "general"
-	if !p.proj.Rootless() {
+	if p.rec.Task.Worktree() {
 		st, err := workspace.RequireClean(ctx, p.dir)
 		if err != nil {
 			return VerifyResult{}, err
@@ -525,7 +525,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	failTimeout := func(summary string, evidence []verification.Evidence) (VerifyResult, error) {
 		return failAs(classEnvironment, sqlite.RunFailed, fault.CodeCheckFailed, summary, evidence)
 	}
-	mgr := e.manager(fr.proj)
+	mgr := e.manager(fr.rec.Task.RepoRoot)
 	checkCtx := fr.checkCtx
 	if checkCtx == nil {
 		checkCtx = ctx

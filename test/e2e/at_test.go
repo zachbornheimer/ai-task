@@ -80,7 +80,7 @@ func gitEnv(t *testing.T) *env {
 	must.OK(t, os.WriteFile(filepath.Join(e.cwd, "f.txt"), []byte("one"), 0o600))
 	e.git(e.cwd, "add", "f.txt")
 	e.git(e.cwd, "commit", "-q", "-m", "one")
-	e.ok("init", "--name", "g")
+	e.ok("init")
 	e.promote()
 	return e
 }
@@ -95,7 +95,7 @@ func (e *env) promote() {
 		e.t.Fatal(err)
 	}
 	defer discard.CloseReadOnly(db)
-	if _, err := db.Exec(`UPDATE projects SET integration = 'promote' WHERE root_path IS NOT NULL`); err != nil {
+	if _, err := db.Exec(`SELECT 1`); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -198,7 +198,7 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 		t.Fatalf("claim: %v", sess)
 	}
 	// The claim says where work lands and which regression checks will run.
-	if sess["target_branch"] != "main" || sess["target_revision"] == "" || len(must.As[[]any](sess["regression_checks"])) == 0 {
+	if sess["base_ref"] != "main" || sess["target_revision"] == "" || len(must.As[[]any](sess["regression_checks"])) == 0 {
 		t.Fatalf("claim lacks target or regression checks: %v", sess)
 	}
 	with := []string{"ATASK_SESSION=" + tok}
@@ -301,7 +301,8 @@ func TestAgentLoopEndToEnd(t *testing.T) {
 
 func TestPlanningCommands(t *testing.T) {
 	e := newEnv(t)
-	e.ok("init", "--name", "p") // not a repository yet: init creates one
+	e.ok("init")                // not a repository yet: init creates one, and registers nothing
+	e.ok("project", "add", "p") // a planning scope is created, never inferred
 	g := taskID(e.ok("--project", "p", "add", "Identity Core", "--group", "--key", "identity"))
 	a := taskID(e.ok("--project", "p", "add", "Rotate creds", "--key", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
 	b := taskID(e.ok("--project", "p", "add", "Token store", "--key", "store", "--parent", "identity", "--requires", "rotate", "--proof", "run: test -d .", "--regression", "run: true"))
@@ -347,7 +348,8 @@ func TestPlanningCommands(t *testing.T) {
 
 func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 	e := newEnv(t)
-	e.ok("init", "--name", "c")
+	e.ok("init")
+	e.ok("project", "add", "c")
 	const n = 6
 	ids := map[string]bool{}
 	for i := range n {
@@ -384,6 +386,7 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 
 func TestChecksRunWithoutHoldingTheDatabase(t *testing.T) {
 	e := gitEnv(t)
+	e.ok("project", "add", "g")
 	script := bin + " --db " + e.db + " --project g add from-inside-check --proof 'run: test -d .' --regression 'run: true'"
 	// The run preset caps one argument at 300 chars; a long state path would
 	// exceed that inline, so the nested command lives in a script file.
@@ -537,8 +540,23 @@ func TestInitInstallsInstructions(t *testing.T) {
 	// The repository's own text survives a refresh; init is idempotent.
 	appendText(t, agents, "\n# Ours\n\nkeep me\n")
 	again := e.ok("init")
-	if again["existing"] != true {
-		t.Fatalf("re-init: %v", again)
+	instr, _ := again["instructions"].(map[string]any)
+	if instr == nil || instr["updated"] == true || instr["created"] == true {
+		t.Fatalf("re-init must refresh nothing: %v", again)
+	}
+	// init registers nothing: no project names the repository.
+	db, err := sql.Open("sqlite", e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var named int
+	err = db.QueryRow(`SELECT count(*) FROM projects WHERE name <> 'general'`).Scan(&named)
+	discard.CloseReadOnly(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if named != 0 {
+		t.Fatalf("init must not create a project, found %d", named)
 	}
 	b2, _ := os.ReadFile(filepath.Clean(agents))
 	if !strings.Contains(string(b2), "keep me") || strings.Count(string(b2), "<!-- BEGIN atask") != 1 {

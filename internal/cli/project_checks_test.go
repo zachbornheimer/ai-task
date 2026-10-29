@@ -34,20 +34,21 @@ func TestProjectHoldsNoChecks(t *testing.T) {
 		t.Fatalf("new project attempts = %v, want 3", fresh["attempts"])
 	}
 
-	if code, _, errOut := h.run("project", "--target-branch", "main", "--attempts", "4"); code != ExitOK {
-		t.Fatalf("project --target-branch --attempts: %d %s", code, errOut)
+	h.failsWith([]string{"--target-branch"}, "project", "--target-branch", "main")
+	if code, _, errOut := h.run("project", "--attempts", "4"); code != ExitOK {
+		t.Fatalf("project --attempts: %d %s", code, errOut)
 	}
 	_, out, _ = h.run("--json", "project")
 	fields := projectJSON(t, out)
-	if len(fields) != 5 {
-		t.Fatalf("project json keys = %v, want exactly name, id, path, target_branch, attempts", fields)
+	if len(fields) != 4 {
+		t.Fatalf("project json keys = %v, want exactly name, id, attempts, plan_rev", fields)
 	}
-	for _, k := range []string{"name", "id", "path", "target_branch", "attempts"} {
+	for _, k := range []string{"name", "id", "attempts", "plan_rev"} {
 		if _, ok := fields[k]; !ok {
 			t.Fatalf("project json lacks %q: %v", k, fields)
 		}
 	}
-	if fields["target_branch"] != "main" || fields["attempts"] != float64(4) {
+	if fields["attempts"] != float64(4) {
 		t.Fatalf("project json = %v", fields)
 	}
 

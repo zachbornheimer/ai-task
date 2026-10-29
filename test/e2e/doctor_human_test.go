@@ -7,18 +7,18 @@ import (
 
 // TestDoctorHumanReportOnFailure: without ATASK_OUTPUT=json an unhealthy
 // `atask doctor` prints the whole report (every check, the fix for the
-// failing one, ) on stderr, not only the one-line
-// error; the JSON envelope is unchanged.
+// failing one) on stderr, not only the one-line error; the JSON envelope is
+// unchanged.
 func TestDoctorHumanReportOnFailure(t *testing.T) {
-	e := gitEnv(t)
-	// A target branch that does not exist: nothing can be promoted, so the project is not ready.
-	e.ok("project", "--target-branch", "no-such-branch")
+	// A directory that is not a Git work tree: no task filed here can get a
+	// worktree, so the repository is not ready.
+	e := newEnv(t)
 
 	r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "doctor")
 	if r.code == 0 {
-		t.Fatalf("doctor succeeded on a missing target branch: %s", r.stdout)
+		t.Fatalf("doctor succeeded outside a repository: %s", r.stdout)
 	}
-	for _, want := range []string{"error [NOT_READY]", "target_branch", "fix:", "○ not ready"} {
+	for _, want := range []string{"error [NOT_READY]", "repository", "fix:", "○ not ready"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, r.stderr)
 		}

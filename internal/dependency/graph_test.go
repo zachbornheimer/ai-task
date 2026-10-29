@@ -41,18 +41,16 @@ func TestValidate(t *testing.T) {
 	cases := []struct {
 		name string
 		e    Edge
-		same bool
 		code fault.Code
 	}{
-		{"self", Edge{a, a}, true, fault.CodeInvalidInput},
-		{"cross project", Edge{a, c}, false, fault.CodeInvalidInput},
-		{"duplicate", Edge{b, a}, true, fault.CodeInvalidInput},
-		{"direct cycle", Edge{a, b}, true, fault.CodeInvalidInput},
-		{"transitive cycle a->b->c->a", Edge{a, c}, true, fault.CodeInvalidInput},
-		{"ok diamond", Edge{c, a}, true, ""},
+		{"self", Edge{a, a}, fault.CodeInvalidInput},
+		{"duplicate", Edge{b, a}, fault.CodeInvalidInput},
+		{"direct cycle", Edge{a, b}, fault.CodeInvalidInput},
+		{"transitive cycle a->b->c->a", Edge{a, c}, fault.CodeInvalidInput},
+		{"ok diamond", Edge{c, a}, ""},
 	}
 	for _, tc := range cases {
-		err := Validate(ctx, tc.e, tc.same, m)
+		err := Validate(ctx, tc.e, m)
 		if fault.CodeOf(err) != tc.code {
 			t.Errorf("%s: got %v want %q", tc.name, err, tc.code)
 		}

@@ -7,6 +7,7 @@ package task
 import (
 	"crypto/rand"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -102,11 +103,18 @@ type AcceptanceCriterion struct {
 
 // Spec is the input to task creation.
 type Spec struct {
-	ProjectID    project.ID   // home
-	AlsoIn       []project.ID // memberships after the home
-	Kind         Kind
-	Key          string
-	ParentID     ID // organizational group, optional
+	ProjectID project.ID   // home
+	AlsoIn    []project.ID // memberships after the home
+	Kind      Kind
+	Key       string
+	ParentID  ID // organizational group, optional
+	// RepoRoot is the repository the task's work runs in, canonical main
+	// worktree root; "" means no repository. The engine fills it from the
+	// filing directory unless the caller names another.
+	RepoRoot string
+	// BaseRef is the branch a task branch starts from; "" when there is no
+	// repository.
+	BaseRef      string
 	Description  string
 	Outcome      string
 	Constraints  []string
@@ -116,12 +124,19 @@ type Spec struct {
 
 // Task is the stored contract.
 type Task struct {
-	ID            ID                    `json:"id"`
-	ProjectID     project.ID            `json:"project_id"`         // home
-	Projects      []project.ID          `json:"projects,omitempty"` // ordered; [0] is the home
-	Kind          Kind                  `json:"kind"`
-	Key           string                `json:"key,omitempty"`
-	ParentID      ID                    `json:"parent_id,omitempty"`
+	ID        ID           `json:"id"`
+	ProjectID project.ID   `json:"project_id"`         // home
+	Projects  []project.ID `json:"projects,omitempty"` // ordered; [0] is the home
+	Kind      Kind         `json:"kind"`
+	Key       string       `json:"key,omitempty"`
+	ParentID  ID           `json:"parent_id,omitempty"`
+	// RepoRoot is the canonical main-worktree root of the repository the
+	// task's work runs in; "" means the task has no repository, so it has
+	// no worktree and its checks run where it was claimed.
+	RepoRoot string `json:"repo_root,omitempty"`
+	// BaseRef is the branch a task branch starts from. "" when RepoRoot
+	// is "".
+	BaseRef       string                `json:"base_ref,omitempty"`
 	Description   string                `json:"title"`
 	Outcome       string                `json:"outcome"`
 	Constraints   []string              `json:"constraints,omitempty"`
@@ -138,6 +153,10 @@ type Task struct {
 
 // Archived reports whether the task has been soft-deleted.
 func (t Task) Archived() bool { return t.ArchivedAt != nil }
+
+// Worktree reports whether the task has a repository and therefore a
+// worktree; a task without one runs its checks where it was claimed.
+func (t Task) Worktree() bool { return t.RepoRoot != "" }
 
 const (
 	maxDescription = 4000
@@ -159,6 +178,12 @@ func (s *Spec) Validate() error {
 	}
 	if err := ValidateKey(s.Key); err != nil {
 		return err
+	}
+	if s.BaseRef != "" && s.RepoRoot == "" {
+		return fault.New(fault.CodeInvalidInput, "a base ref needs a repository")
+	}
+	if s.RepoRoot != "" && !filepath.IsAbs(s.RepoRoot) {
+		return fault.New(fault.CodeInvalidInput, "repository root must be absolute: %q", s.RepoRoot)
 	}
 	s.Description = strings.TrimSpace(s.Description)
 	if s.Description == "" {

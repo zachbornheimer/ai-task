@@ -23,10 +23,10 @@ func TestListAllProjectsThenOne(t *testing.T) {
 		code := Main(Env{Args: args, Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
 		return code, out.String(), errb.String()
 	}
-	if code, _, errOut := run(alpha, "init", "--name", "alpha"); code != ExitOK {
+	if code, _, errOut := run(alpha, "init"); code != ExitOK {
 		t.Fatalf("init alpha: %d %s", code, errOut)
 	}
-	if code, _, errOut := run(beta, "init", "--name", "beta"); code != ExitOK {
+	if code, _, errOut := run(beta, "init"); code != ExitOK {
 		t.Fatalf("init beta: %d %s", code, errOut)
 	}
 	code, out, errOut := run(alpha, "projects")
@@ -166,10 +166,13 @@ func TestListHonorsProjectFlag(t *testing.T) {
 		return code, out.String(), errb.String()
 	}
 	for name, dir := range map[string]string{"alpha": alpha, "beta": beta} {
-		if code, _, e := run(dir, "init", "--name", name); code != ExitOK {
+		if code, _, e := run(dir, "init"); code != ExitOK {
 			t.Fatalf("init %s: %d %s", name, code, e)
 		}
-		if code, _, e := run(dir, "add", "task-in-"+name, "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
+		if code, _, e := run(dir, "project", "add", name); code != ExitOK {
+			t.Fatalf("project add %s: %d %s", name, code, e)
+		}
+		if code, _, e := run(dir, "--project", name, "add", "task-in-"+name, "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
 			t.Fatalf("add %s: %d %s", name, code, e)
 		}
 	}
@@ -225,29 +228,31 @@ func TestListResolvesNormalizedProjectName(t *testing.T) {
 	}
 
 	left, right := t.TempDir(), t.TempDir()
-	if code, _, e := run(left, "init", "--name", "Case Fold"); code != ExitOK {
-		t.Fatalf("init left: %d %s", code, e)
-	}
-	if code, _, e := run(right, "init", "--name", "case-fold"); code != ExitOK {
-		t.Fatalf("init right: %d %s", code, e)
+	for dir, name := range map[string]string{left: "Case Fold", right: "case-fold"} {
+		if code, _, e := run(dir, "init"); code != ExitOK {
+			t.Fatalf("init %s: %d %s", dir, code, e)
+		}
+		if code, _, e := run(dir, "project", "add", name); code != ExitOK {
+			t.Fatalf("project add %s: %d %s", name, code, e)
+		}
 	}
 	code, out, e := run(cwd, "list", "--project", "casefold")
 	if code == ExitOK || !strings.Contains(out+e, "INVALID_INPUT") || !strings.Contains(out+e, "ambiguous") {
 		t.Fatalf("colliding names must be ambiguous: %d %s %s", code, out, e)
 	}
-	// Each match is listed as "ID (root)"; the listed ID must work as a
-	// retry selector with no further lookup.
-	for _, dir := range []string{left, right} {
-		root, err := filepath.EvalSymlinks(dir)
-		if err != nil {
-			t.Fatal(err)
+	// Every match is listed by id; each listed id must work as a retry
+	// selector with no further lookup.
+	seen := map[string]bool{}
+	for _, id := range regexp.MustCompile(`proj-[0-9a-z]+`).FindAllString(out+e, -1) {
+		if seen[id] {
+			continue
 		}
-		m := regexp.MustCompile(`(\S+) \(` + regexp.QuoteMeta(root) + `\)`).FindStringSubmatch(out + e)
-		if m == nil {
-			t.Fatalf("ambiguous error must list the project at %s with its id: %s %s", root, out, e)
+		seen[id] = true
+		if code, _, e := run(cwd, "list", "--project", id); code != ExitOK {
+			t.Fatalf("retry with listed id %s: %d %s", id, code, e)
 		}
-		if code, _, e := run(cwd, "list", "--project", m[1]); code != ExitOK {
-			t.Fatalf("retry with listed id %s: %d %s", m[1], code, e)
-		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("ambiguous error must list both projects by id: %v\n%s", seen, out+e)
 	}
 }

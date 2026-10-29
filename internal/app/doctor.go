@@ -30,48 +30,48 @@ type DoctorCheck struct {
 	Evidence []verification.Evidence `json:"evidence,omitempty"`
 }
 
-// DoctorReport is the project health report. Healthy is false when any
-// error-severity check failed.
+// DoctorReport is the health report for one repository and the project's
+// plan. Healthy is false when any error-severity check failed.
 type DoctorReport struct {
 	Project        project.ID    `json:"project"`
-	Root           string        `json:"root"`
-	Target         string        `json:"target_branch"`
-	TargetRevision string        `json:"target_revision,omitempty"`
+	Repo           string        `json:"repo,omitempty"`
+	BaseRef        string        `json:"base_ref,omitempty"`
+	TargetRevision string        `json:"base_revision,omitempty"`
 	Healthy        bool          `json:"healthy"`
 	Checks         []DoctorCheck `json:"checks"`
 	Summary        *Summary      `json:"summary,omitempty"`
 }
 
-// Doctor inspects a project the way a planner should before adding tasks
-// and a host should before starting workers: the repository and target
-// branch resolve, a Git identity exists for the agents' commits, the
-// regression suite is defined and passes on the target branch, the
-// workspace root is writable, and no task is waiting on a planner.
-// Nothing is written to the database or the repository.
-func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, error) {
+// Doctor inspects a repository the way a worker should before claiming work
+// in it: the checkout is a Git work tree, its base branch resolves, a Git
+// identity exists for the agents' commits, the workspace root is writable,
+// and no task of the project is waiting on a planner. An empty repo checks
+// only the plan. Nothing is written to the database or the repository.
+func (e *Engine) Doctor(ctx context.Context, pid project.ID, repo string) (DoctorReport, error) {
 	p, err := e.Project(ctx, pid)
 	if err != nil {
 		return DoctorReport{}, err
 	}
-	rep := DoctorReport{Project: p.ID, Root: p.RootPath, Target: p.TargetBranch, Healthy: true}
+	rep := DoctorReport{Project: p.ID, Repo: repo, Healthy: true}
 	add := func(id string, ok bool, severity, msg, remedy string) {
 		rep.Checks = append(rep.Checks, DoctorCheck{ID: id, OK: ok, Severity: severity, Message: msg, Remedy: remedy})
 		if !ok && severity == "error" {
 			rep.Healthy = false
 		}
 	}
-	mgr := e.manager(p)
 
-	// Repository.
-	if !isDirectory(p.RootPath) {
-		add("repository", false, "error", fmt.Sprintf("project root %s is not a directory", p.RootPath), "restore the checkout or re-register the project with `atask init --path`")
+	// Repository and its base branch.
+	if repo == "" {
+		add("repository", false, "warning", "no repository here: tasks filed from this directory run their checks in place", "run `atask doctor` inside a Git work tree, or `atask add --repo <path>` to file work against one")
+	} else if !isDirectory(repo) {
+		add("repository", false, "error", fmt.Sprintf("repository root %s is not a directory", repo), "restore the checkout")
 		return rep, nil
-	}
-	if !workspace.InsideWorkTree(ctx, p.RootPath) {
-		add("repository", false, "error", fmt.Sprintf("%s is not a Git work tree", p.RootPath), "run `git init` there or point the project at the repository")
+	} else if !workspace.InsideWorkTree(ctx, repo) {
+		add("repository", false, "error", fmt.Sprintf("%s is not a Git work tree", repo), "run `git init` there")
 		return rep, nil
+	} else {
+		add("repository", true, "info", fmt.Sprintf("Git repository at %s", repo), "")
 	}
-	add("repository", true, "info", fmt.Sprintf("Git repository at %s", p.RootPath), "")
 
 	if _, err := exec.LookPath("wt"); err != nil {
 		add("worktrunk", false, "error", "Worktrunk (wt) is not on PATH; task worktrees cannot be created", "install Worktrunk from https://worktrunk.dev and put `wt` on PATH")
@@ -79,37 +79,39 @@ func (e *Engine) Doctor(ctx context.Context, pid project.ID) (DoctorReport, erro
 		add("worktrunk", true, "info", "Worktrunk (wt) is on PATH; task worktrees follow worktree-path", "")
 	}
 
-	// Target branch.
-	rev, err := mgr.Revision(ctx, "refs/heads/"+p.TargetBranch)
-	if err != nil {
-		add("target_branch", false, "error", fmt.Sprintf("target branch %s does not exist", p.TargetBranch), fmt.Sprintf("create it (`git branch %s`) or set another with `atask project --target-branch`", p.TargetBranch))
-	} else {
-		rep.TargetRevision = rev
-		add("target_branch", true, "info", fmt.Sprintf("target %s at %s", p.TargetBranch, short(rev)), "")
-	}
-
-	// Uncommitted work in the target checkout is invisible to the
-	// baseline and to every task worktree, which start from the commit.
-	if files, err := workspace.UncommittedFiles(ctx, p.RootPath); err == nil {
-		if len(files) > 0 {
-			add("uncommitted_files", false, "warning", fmt.Sprintf("the target checkout has %d uncommitted or untracked file(s): %s; checks and task worktrees run on the committed revision and do not see them", len(files), listFiles(files, 5)), fmt.Sprintf("commit them (git -C %s add -A && git -C %s commit) or remove them", p.RootPath, p.RootPath))
+	if repo != "" {
+		rep.BaseRef = BaseRef(ctx, repo)
+		rev, err := e.manager(repo).Revision(ctx, "refs/heads/"+rep.BaseRef)
+		if err != nil {
+			add("base_ref", false, "error", fmt.Sprintf("base branch %s does not exist", rep.BaseRef), fmt.Sprintf("create it (`git branch %s`) or check out the repository's default branch", rep.BaseRef))
 		} else {
-			add("uncommitted_files", true, "info", "the target checkout is clean", "")
+			rep.TargetRevision = rev
+			add("base_ref", true, "info", fmt.Sprintf("base %s at %s", rep.BaseRef, short(rev)), "")
+		}
+
+		// Uncommitted work in the base checkout is invisible to the
+		// baseline and to every task worktree, which start from the commit.
+		if files, err := workspace.UncommittedFiles(ctx, repo); err == nil {
+			if len(files) > 0 {
+				add("uncommitted_files", false, "warning", fmt.Sprintf("the base checkout has %d uncommitted or untracked file(s): %s; checks and task worktrees run on the committed revision and do not see them", len(files), listFiles(files, 5)), fmt.Sprintf("commit them (git -C %s add -A && git -C %s commit) or remove them", repo, repo))
+			} else {
+				add("uncommitted_files", true, "info", "the base checkout is clean", "")
+			}
+		}
+
+		// Git identity: agents commit in the task worktrees, and at records
+		// integration merges as the same identity; Git refuses both without one.
+		if ident, err := workspace.Identity(ctx, repo); err != nil {
+			add("git_identity", false, "error", "no Git identity for the repository: agents cannot commit and at cannot record the merges that build a dependent's base", fmt.Sprintf("git -C %s config user.name <name> && git -C %s config user.email <email>", repo, repo))
+		} else {
+			add("git_identity", true, "info", "commits and merges as "+ident, "")
 		}
 	}
 
-	// Git identity: agents commit in the task worktrees, and at records
-	// integration merges as the same identity; Git refuses both without one.
-	if ident, err := workspace.Identity(ctx, p.RootPath); err != nil {
-		add("git_identity", false, "error", "no Git identity for the repository: agents cannot commit and at cannot record the merges that build a dependent's base", fmt.Sprintf("git -C %s config user.name <name> && git -C %s config user.email <email>", p.RootPath, p.RootPath))
-	} else {
-		add("git_identity", true, "info", "commits and merges as "+ident, "")
-	}
-
 	// Workspace root writable.
-	root := mgr.Root
+	root := e.wsRoot
 	if err := os.MkdirAll(root, 0o750); err != nil {
-		add("workspace_root", false, "error", fmt.Sprintf("cannot create workspace root %s: %v", root, err), "make the directory writable or set the project's workspace root")
+		add("workspace_root", false, "error", fmt.Sprintf("cannot create workspace root %s: %v", root, err), "make the directory writable or set the engine's workspace root")
 	} else if f, err := os.CreateTemp(root, ".doctor-*"); err != nil {
 		add("workspace_root", false, "error", fmt.Sprintf("workspace root %s is not writable: %v", root, err), "fix the permissions on the directory")
 	} else {

@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -11,32 +10,25 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/project"
 )
 
-const projectColumns = `id, name, root_path, plan_rev, target_branch, workspace_root, max_attempts, retry_cooldown_ms, created_at, updated_at`
+const projectColumns = `id, name, plan_rev, max_attempts, retry_cooldown_ms, created_at, updated_at`
 
 func scanProject(sc interface{ Scan(...any) error }) (project.Project, error) {
 	var p project.Project
-	var root sql.NullString
 	var created, updated, cooldown int64
-	if err := sc.Scan(&p.ID, &p.Name, &root, &p.PlanRev, &p.TargetBranch, &p.WorkspaceRoot, &p.MaxAttempts, &cooldown, &created, &updated); err != nil {
+	if err := sc.Scan(&p.ID, &p.Name, &p.PlanRev, &p.MaxAttempts, &cooldown, &created, &updated); err != nil {
 		return p, err
 	}
-	p.RootPath = root.String
 	p.RetryCooldown = time.Duration(cooldown) * time.Millisecond
 	p.CreatedAt, p.UpdatedAt = fromMS(created), fromMS(updated)
 	return p, nil
 }
 
-// InsertProject stores a new project. A UNIQUE violation on root_path means
-// the directory is already registered.
+// InsertProject stores a new project.
 func (t *Tx) InsertProject(p project.Project) error {
-	var root any
-	if p.RootPath != "" {
-		root = p.RootPath
-	}
-	_, err := t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, root, p.PlanRev, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(p.CreatedAt), ms(p.UpdatedAt))
+	_, err := t.tx.ExecContext(t.ctx, `INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.PlanRev, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(p.CreatedAt), ms(p.UpdatedAt))
 	if IsUniqueViolation(err) {
-		return fault.Wrap(err, fault.CodeInvalidInput, "project id or root path already registered")
+		return fault.Wrap(err, fault.CodeInvalidInput, "project id already registered")
 	}
 	return wrapInternal(err, "insert project")
 }
@@ -51,21 +43,11 @@ func (t *Tx) GetProject(id project.ID) (project.Project, error) {
 	return p, wrapInternal(err, "get project")
 }
 
-// GetProjectByRoot loads the project registered at exactly root.
-func (t *Tx) GetProjectByRoot(root string) (project.Project, bool, error) {
-	row := t.tx.QueryRowContext(t.ctx, `SELECT `+projectColumns+` FROM projects WHERE root_path = ?`, root)
-	p, err := scanProject(row)
-	if isNoRows(err) {
-		return p, false, nil
-	}
-	return p, err == nil, wrapInternal(err, "get project by root")
-}
-
 // GetProjectByName loads a project by display name. Names match when
 // project.NameKey is equal, so case and punctuation do not distinguish
 // them. Ambiguity is a CodeInvalidInput error that lists each matching
-// project's id and root path, so the caller can retry with an id. A name
-// that strips to an empty key matches nothing.
+// project's id, so the caller can retry with an id. A name that strips to
+// an empty key matches nothing.
 func (t *Tx) GetProjectByName(name string) (project.Project, bool, error) {
 	key := project.NameKey(name)
 	if key == "" {
@@ -89,11 +71,7 @@ func (t *Tx) GetProjectByName(name string) (project.Project, bool, error) {
 	}
 	matches := make([]string, len(found))
 	for i := range found {
-		where := found[i].RootPath
-		if where == "" {
-			where = "no directory"
-		}
-		matches[i] = fmt.Sprintf("%s (%s)", found[i].ID, where)
+		matches[i] = fmt.Sprintf("%s (%s)", found[i].ID, found[i].Name)
 	}
 	return project.Project{}, false, fault.New(fault.CodeInvalidInput, "project name %q is ambiguous; use its id: %s", name, strings.Join(matches, ", "))
 }
@@ -116,36 +94,10 @@ func (t *Tx) ListProjects() ([]project.Project, error) {
 	return out, rows.Err()
 }
 
-// ProjectRoots returns every registered root path for prefix matching.
-func (t *Tx) ProjectRoots() (map[string]project.ID, error) {
-	rows, err := t.tx.QueryContext(t.ctx, `SELECT root_path, id FROM projects WHERE root_path IS NOT NULL`)
-	if err != nil {
-		return nil, wrapInternal(err, "list project roots")
-	}
-	defer discard.CloseReadOnly(rows)
-	out := map[string]project.ID{}
-	for rows.Next() {
-		var root string
-		var id project.ID
-		if err := rows.Scan(&root, &id); err != nil {
-			return nil, wrapInternal(err, "scan root")
-		}
-		out[root] = id
-	}
-	return out, rows.Err()
-}
-
 // UpdateProject rewrites the mutable fields of a project.
 func (t *Tx) UpdateProject(p project.Project, now time.Time) error {
-	var root any
-	if p.RootPath != "" {
-		root = p.RootPath
-	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, root_path = ?, target_branch = ?, workspace_root = ?, max_attempts = ?, retry_cooldown_ms = ?, updated_at = ? WHERE id = ?`,
-		p.Name, root, p.TargetBranch, p.WorkspaceRoot, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(now), p.ID)
-	if IsUniqueViolation(err) {
-		return fault.Wrap(err, fault.CodeInvalidInput, "root path already registered to another project")
-	}
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE projects SET name = ?, max_attempts = ?, retry_cooldown_ms = ?, updated_at = ? WHERE id = ?`,
+		p.Name, p.MaxAttempts, p.RetryCooldown.Milliseconds(), ms(now), p.ID)
 	if err != nil {
 		return wrapInternal(err, "update project")
 	}

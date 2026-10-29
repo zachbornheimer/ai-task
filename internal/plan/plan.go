@@ -122,7 +122,12 @@ type ChangeSet struct {
 	// Session is the caller's token, if any. Planner authority is its
 	// absence for the task being edited; a task's own token may not
 	// rewrite that task's contract.
-	Session    string
+	Session string
+	// Repo, when set, is the directory whose repository new tasks are
+	// filed in. Empty means the process's working directory, and a
+	// working directory outside a Git repository files tasks with no
+	// repository (their checks run where they are claimed).
+	Repo       string
 	Operations []Change
 }
 
@@ -152,8 +157,9 @@ func (cs ChangeSet) Digest() string {
 	}
 	b, err := json.Marshal(struct {
 		Project project.ID `json:"project"`
+		Repo    string     `json:"repo,omitempty"`
 		Ops     []tagged   `json:"ops"`
-	}{cs.ProjectID, ops})
+	}{cs.ProjectID, cs.Repo, ops})
 	if err != nil {
 		panic(err) // plain values; cannot fail
 	}

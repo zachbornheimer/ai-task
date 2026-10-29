@@ -35,10 +35,10 @@ merges it makes when building a task branch as the same identity, with an
 
 ```sh
 export ATASK_OUTPUT=json
-cd my-repo && atask init                                  # register the repo, install the AGENTS.md block and the CLAUDE.md import
+cd my-repo && atask init                                  # optional: install the AGENTS.md block and the CLAUDE.md import (registers nothing)
 git add AGENTS.md CLAUDE.md .claude/settings.json && git commit -m "Install atask"   # worktrees and checks see only committed files
-atask project --target-branch main --attempts 3           # a project holds a target branch and attempt budget, no checks
-atask doctor                                              # repository, target, identity, worktrees
+atask project add work && atask --project work add ...    # a project is a planning scope: a board, not a repository
+atask doctor                                              # work tree, base branch, identity, worktrees
 atask add -f plan.yaml                                    # a whole plan (JSON or YAML) as one atomic revision
 atask add "Fix the typo" --proof "run: go test ./..." --regression "run: go test ./..."   # one small change ...
 atask claim                                               # ... then claim it
@@ -90,7 +90,7 @@ workers.
 
 ## Using it from your AI systems
 
-`atask init` installs the project instruction block into AGENTS.md (read by
+`atask init` (optional) installs the project instruction block into AGENTS.md (read by
 Codex, OpenCode and current Claude Code) and a CLAUDE.md that imports it,
 so every request an agent receives in that repository is routed through
 `at`: plan with proofs, claim, work in the task worktree, `atask verify

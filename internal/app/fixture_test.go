@@ -81,7 +81,7 @@ func newGitFixture(t *testing.T) *fixture {
 	f.git(f.repo, "config", "user.email", "t@t")
 	f.commit(f.repo, "f.txt", "one")
 	var err error
-	f.proj, err = f.e.InitProject(f.ctx, "gitproj", f.repo)
+	f.proj, err = f.e.AddProject(f.ctx, "gitproj")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,9 @@ func newGitFixture(t *testing.T) *fixture {
 // open opens another engine on the same database, simulating a separate
 // process (separate connection pool, same file).
 func (f *fixture) open() *app.Engine {
-	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, PollInterval: 50 * time.Millisecond, ProofBudget: f.proofBudget, Switch: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")}})
+	// Cwd is the fixture's repository, so a change set filed without an
+	// explicit Repo records it, exactly as a command run there does.
+	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, Cwd: f.repo, PollInterval: 50 * time.Millisecond, ProofBudget: f.proofBudget, Switch: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")}})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -268,7 +270,10 @@ type addSwitcher struct {
 	root string
 }
 
-func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create bool) (string, error) {
+func (a addSwitcher) Ensure(ctx context.Context, repo, branch, base string, create bool) (string, error) {
+	if repo == "" {
+		repo = a.repo
+	}
 	if err := os.MkdirAll(a.root, 0o750); err != nil {
 		return "", err
 	}
@@ -278,7 +283,7 @@ func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 	}
 	path := filepath.Join(root, strings.ReplaceAll(branch, "/", "-"))
 	if create {
-		cmd := testgit.CommandContext(ctx, a.t, a.repo, "branch", branch, base)
+		cmd := testgit.CommandContext(ctx, a.t, repo, "branch", branch, base)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("branch: %w\n%s", err, out)
 		}
@@ -286,7 +291,7 @@ func (a addSwitcher) Ensure(ctx context.Context, _, branch, base string, create 
 	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 		return path, nil
 	}
-	cmd := testgit.CommandContext(ctx, a.t, a.repo, "worktree", "add", path, branch)
+	cmd := testgit.CommandContext(ctx, a.t, repo, "worktree", "add", path, branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("worktree add: %w\n%s", err, out)
 	}

@@ -28,7 +28,7 @@ atask verify proof
 atask verify regression
 atask verify complete [TASK_ID] [--reverify]
 
-atask init [--name NAME] [--path PATH]
+atask init [--path PATH]
 atask project add NAME
 atask projects
 atask project [FLAGS]
@@ -60,7 +60,6 @@ atask prune
 ### Project flags (`project`, human-configured; a project holds no checks)
 
 ```text
---target-branch NAME
 --attempts N
 ```
 
@@ -68,6 +67,7 @@ atask prune
 
 ```text
 --project NAME|ID      default: general; names match ignoring case and punctuation; repeatable on add and update, the first is the home
+--repo PATH            directory whose repository new tasks run in; default: the working directory, and a directory outside a Git repository files tasks with no repository
 --db PATH
 --json                 also ATASK_OUTPUT=json
 ```
@@ -352,7 +352,7 @@ const (
   proofs, and `on_complete` configuration. A task filed without both proofs is a draft: listed under its own glyph, never claimable, no attempt budget. Giving it both proofs makes it ready. Vacuity rules apply once proofs are supplied. A task missing any required field is a draft; the required fields are proof and regression (the title is required at add). Adding an open title that already exists
   returns the existing task.
 - `List` / `Show`: task state, hierarchy, history, every `RunResult`, and
-  action results. When the proof, regression, or on-complete actions of a task that has ever been claimed change, the change is recorded, never refused: `Show` returns `check_history` (time, field, old and new spec, actor, cwd; the actor is `attempt:<id>` for a session token and `planner` otherwise), and `atask show` prints it under CHECK HISTORY. `List` marks such a task with `△` right after its status glyph (a draft is `◌`). `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed outside a registered repo. The list is board-wide by default. A task belongs to one or more projects: the first is its home, which decides its repo, worktree, target branch and base and is fixed after the first claim, and the rest are memberships; `list --project X` includes every task naming X, `--requires` needs one shared project, and a group's children share the group's home.
+  action results. When the proof, regression, or on-complete actions of a task that has ever been claimed change, the change is recorded, never refused: `Show` returns `check_history` (time, field, old and new spec, actor, cwd; the actor is `attempt:<id>` for a session token and `planner` otherwise), and `atask show` prints it under CHECK HISTORY. `List` marks such a task with `△` right after its status glyph (a draft is `◌`). `List` without `--project` shows every project's non-archived tasks with the project name on each row (the board); `--project NAME` scopes to one project. `general` is the project for tasks filed with no project named. The list is board-wide by default. A task belongs to one or more projects: the first is its home, which is fixed after the first claim and decides only its board and attempt policy; the rest are memberships. `list --project X` includes every task naming X, `--requires` accepts any edge, and a group's children share the group's home and repository.
 - `Claim`: atomic eligibility and exclusive leased assignment; isolated
   worktree for Git tasks. The token is discoverable from the task worktree;
   a rootless claim's token is also stored under the state dir keyed by the claim directory, so log, verify, renew and release work from that directory;
@@ -386,15 +386,27 @@ const (
   integrated and changed it) counts as landed when its own proof passes on the
   target tip; otherwise the group fails `CHECK_FAILED` naming the child.
   Parents own no integration branch.
-- Projects: `general` exists by default and holds tasks filed outside a
-  registered repo. `init` registers a repo (it refuses the home directory and its ancestors). `project` sets target branch and
-  attempt budget only; a project holds no checks. Agents do not run it.
-  `project add NAME` creates a project with no repository, stored like
-  `general` (no root, no target branch, so `project --target-branch` on it is
-  `INVALID_INPUT`); adding a name that matches an existing project (same
+- Projects: a project is a planning scope — a board of related tasks and the
+  boundary for dependency edges. It names no directory, no repository and no
+  branch. `general` exists by default. `project` sets the attempt budget
+  only; a project holds no checks. Agents do not run it. `project add NAME`
+  creates a project; adding a name that matches an existing project (same
   letters and digits, ignoring case and punctuation) returns it. A name
   lookup that matches more than one project is `INVALID_INPUT`; use the id.
-  Its tasks have no
-  worktree, and their checks run in the directory the task was claimed from.
+- Repository binding: a task records the repository its work runs in
+  (`repo_root`, the canonical main-worktree root) and the branch it starts
+  from (`base_ref`), taken from the filing directory or `--repo`. Nothing
+  has to be registered first. A task filed outside a Git repository records
+  neither: it has no worktree, and its checks run in the directory it was
+  claimed from. Binding is fixed at creation; a group's children share the
+  group's repository so its proof can run on the merge of their revisions.
+- Dependencies: an edge may join tasks in different projects and different
+  repositories. A requirement in the same repository has its completed
+  revision merged into the dependent's base; a requirement in another
+  repository only orders the work, because there is no common history to
+  merge.
+- `init` is optional: it creates the Git repository when the directory is not
+  one and installs the agent instructions (`AGENTS.md` block, `CLAUDE.md`
+  import). It registers nothing, and no command requires it.
 - Agent execution, worker pools, planning loops, and model calls stay outside
   atask.

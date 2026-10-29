@@ -132,8 +132,8 @@ history.
 - **Worktree cleanup.** A task's quarantined directories are removed when
   it completes; `atask prune` removes worktrees of complete and archived
   tasks and idle tasks' quarantines. `atask/<id>` branches are kept.
-- **Git only.** Non-Git projects were removed; `atask init` creates a
-  repository when needed.
+- **Git for worktrees.** A task records the repository it runs in or none;
+  `atask init` can create the repository but registers nothing.
 - **Single host.** SQLite on a local filesystem.
 - **Platforms.** Linux is tested (CI and the pilots); macOS and Windows
   cross-compile but are not exercised.

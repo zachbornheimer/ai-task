@@ -34,12 +34,13 @@ func (e *Engine) PruneWorkspaces(ctx context.Context, pid project.ID) (PruneResu
 	}); err != nil {
 		return res, err
 	}
-	mgr := e.manager(proj)
 	for i := range records {
 		r := &records[i]
-		if r.Task.Kind != task.KindTask {
+		// A task without a repository has no worktree to prune.
+		if r.Task.Kind != task.KindTask || !r.Task.Worktree() {
 			continue
 		}
+		mgr := e.manager(r.Task.RepoRoot)
 		st := r.Status(now, proj.MaxAttempts)
 		keepLive := st != task.StatusComplete && st != task.StatusArchived
 		if keepLive && st.Active() {

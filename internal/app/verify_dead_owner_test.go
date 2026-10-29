@@ -196,7 +196,7 @@ func TestVerifyStaleOwnerPidIsAbandoned(t *testing.T) {
 func TestVerifyOrphanRunIsReportedByDoctor(t *testing.T) {
 	r := killedVerify(t, newGitFixture(t))
 	report := func() app.DoctorCheck {
-		rep, err := r.e.Doctor(r.f.ctx, r.f.proj.ID)
+		rep, err := r.e.Doctor(r.f.ctx, r.f.proj.ID, r.f.repo)
 		if err != nil {
 			t.Fatal(err)
 		}

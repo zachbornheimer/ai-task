@@ -27,24 +27,32 @@ func openBoard(t *testing.T) (*app.Engine, context.Context) {
 
 func TestResolveProjectFallsBackToGeneral(t *testing.T) {
 	e, ctx := openBoard(t)
-	p, err := e.ResolveProject(ctx, "", t.TempDir())
+	p, err := e.ResolveProject(ctx, "")
 	if err != nil {
 		t.Fatalf("unregistered dir: %v", err)
 	}
 	if !p.IsGeneral() {
 		t.Fatalf("want general, got %+v", p)
 	}
-	again, err := e.ResolveProject(ctx, "", t.TempDir())
+	again, err := e.ResolveProject(ctx, "")
 	if err != nil || again.ID != p.ID {
 		t.Fatalf("general must be stable: %v %+v", err, again)
 	}
 }
 
-func TestResolveProjectKeepsRegisteredRepo(t *testing.T) {
+// A project is a planning scope: the working directory never selects it,
+// even when that directory is a repository. Only a name or id does.
+func TestResolveProjectIgnoresWorkingDirectory(t *testing.T) {
 	f := newGitFixture(t)
-	p, err := f.e.ResolveProject(f.ctx, "", f.repo)
-	if err != nil || p.ID != f.proj.ID {
-		t.Fatalf("registered repo: %v %+v want %s", err, p, f.proj.ID)
+	p, err := f.e.ResolveProject(f.ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.IsGeneral() {
+		t.Fatalf("an unnamed scope is general, got %+v", p)
+	}
+	if got, err := f.e.ResolveProject(f.ctx, "gitproj"); err != nil || got.ID != f.proj.ID {
+		t.Fatalf("named scope: %v %+v want %s", err, got, f.proj.ID)
 	}
 }
 
@@ -73,7 +81,7 @@ func TestAddSameOpenTitleReusesTask(t *testing.T) {
 
 func TestGeneralAddRequiresCheck(t *testing.T) {
 	e, ctx := openBoard(t)
-	p, err := e.ResolveProject(ctx, "", t.TempDir())
+	p, err := e.ResolveProject(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +97,7 @@ func TestGeneralAddRequiresCheck(t *testing.T) {
 
 func TestGeneralAddStampsOrigin(t *testing.T) {
 	e, ctx := openBoard(t)
-	p, err := e.ResolveProject(ctx, "", t.TempDir())
+	p, err := e.ResolveProject(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}

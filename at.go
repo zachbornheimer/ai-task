@@ -125,7 +125,7 @@ func (s *Store) verifyGroup(ctx context.Context, q VerifyRequest) (VerifyResult,
 	if v.Kind != KindGroup {
 		return VerifyResult{}, fault.New(fault.CodeInvalidSession, "%s is a task: a session token is required", q.TaskID)
 	}
-	proj, err := s.ResolveProject(ctx, v.Project, "")
+	proj, err := s.ResolveProject(ctx, v.Project)
 	if err != nil {
 		return VerifyResult{}, err
 	}

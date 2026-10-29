@@ -28,8 +28,8 @@ stdout (an envelope in JSON mode) and exits `0`.
 
 | Code                   | Meaning |
 | ---------------------- | ------- |
-| `INVALID_INPUT`        | malformed argument, reference, spec, or dependency edge (cycle, self, duplicate, cross-project); `atask verify` without a mode; a proof the preset grammar or the vacuity rules reject; a `--project` selector that matches no registered project by id or name (the message names it and lists the registered names) |
-| `NOT_FOUND`            | unknown task, key, or stored project id, or no project for this directory (`atask init`) |
+| `INVALID_INPUT`        | malformed argument, reference, spec, or dependency edge (cycle, self, duplicate); a task that names a base ref without a repository; a group child in a different repository from its group; `atask verify` without a mode; a proof the preset grammar or the vacuity rules reject; a `--project` selector that matches no project by id or name (the message names it and lists the existing names) |
+| `NOT_FOUND`            | unknown task, key, or stored project id |
 | `CONFLICT`             | the request clashes with current state: stale `ChangeSet.ExpectedPlanRev` (Go API), edit to a completed or claimed contract, illegal archive, key reused with a different definition, task already claimed (live lease) or complete, `verify complete` still running for this attempt |
 | `INVALID_SESSION`      | the token is unknown, expired, superseded, or finished: stop editing and `atask claim <task>` again |
 | `NOT_READY`            | not possible right now: prerequisites incomplete, task awaiting verification, nothing claimable (non-waiting claim, cooldown), uncommitted changes or missing worktree, a cancelled call, a failed doctor check, or an I/O failure; the message says which |
@@ -64,9 +64,9 @@ and `regression` are `"PRESET: SUBJECT [key=value ...]"` strings). A bad
 item rejects the whole file. A new change is `atask add` then `atask claim
 ID`.
 
-`atask doctor` checks a project before planning or
-starting workers: repository and target branch resolve, the target
-checkout has no uncommitted or untracked files (a warning: checks and
+`atask doctor` checks a repository before working in it: the checkout is a
+Git work tree, its base branch resolves, the checkout has no uncommitted or
+untracked files (a warning: checks and
 worktrees run on the committed revision), a Git identity
 exists for commits and for the merges that build a dependent's base (an error without one), the
 workspace root is writable, quarantined worktrees, tasks needing
@@ -119,8 +119,10 @@ replay returns the committed result (even with a stale
   candidate changed against the target) and `ATASK_TARGET_BRANCH`, so a
   regression check can run only affected tests.
 - `B --requires A` means B cannot be claimed until A is complete. Hard
-  edges form a DAG; cycles, self-edges, and cross-project edges are
-  rejected and nothing is written.
+  edges form a DAG; cycles and self-edges are rejected and nothing is
+  written. An edge may cross projects and repositories: when A and B share
+  a repository, A's completed revision is merged into B's base; across
+  repositories it only orders the work.
 - Groups (`--group`, `--parent`) are organizational: membership never
   implies an edge, a group itself cannot be claimed (`claim --group` takes its next ready member), and group progress is derived.
   A group may carry its own proofs (`--group --proof ... --regression ...`,
@@ -204,13 +206,14 @@ runs only the proofs inside this group.
 
 The claim result carries the task view, the token (the only place it is
 ever printed), `attempt`, `lease_until`, `workspace` and `branch`,
-`target_branch` with its head `target_revision` at claim time (the base
-the worktree was created from on a first attempt), `regression_checks`
+`base_ref` with its head `target_revision` at claim time (the branch the
+worktree was created from on a first attempt), `regression_checks`
 (the task's own regression, which `verify complete` runs after its proof), and
 the `handoff`.
 
 Every claim gets the task's own worktree on branch `atask/<task-id>`, created
-from the project's target branch on the first attempt and reused by every
+from the task's own base ref (its repository's default branch unless another
+was recorded) on the first attempt and reused by every
 later attempt, so the next attempt starts from the previous one's commits
 (and sees its uncommitted edits: the claim reports `workspace_dirty`).
 Worktrees are not deleted by `at`; prune them with your worktree tooling
@@ -251,8 +254,9 @@ completion is decided. A completed task's handoff reports that it is
 done and issues no new work. Discover work with `atask list`; inspect a
 task with `atask show` (no argument: the current claim).
 
-**Installing the instructions.** `atask init` registers the repository and
-installs the project instruction block (`app.Instructions`: one paragraph
+**Installing the instructions.** `atask init` is optional: it creates the
+Git repository when the directory is not one and installs the project
+instruction block (`app.Instructions`: one paragraph
 that points agents at `atask context`, the eight verbs, and "Do not use
 markdown TODO lists for task tracking.") into `AGENTS.md` between
 `<!-- BEGIN atask v:1 hash:... -->` and `<!-- END atask -->` (the hash covers
@@ -268,7 +272,8 @@ block, the `CLAUDE.md` import, and one Claude Code `SessionStart` hook
 (SessionStart fires again after compaction, so there is no Stop or
 PreCompact hook); it never rewrites personal `AGENTS.md`/`CLAUDE.md` or
 global host settings, and it only
-writes under the registered repository root.
+writes under the repository root. It registers nothing: a task records its
+own repository when it is filed.
 
 **Prompt layers.** An agent runs under three layers and `atask` supplies
 the third: (1) a bootstrap system prompt, set by the host where the
@@ -347,7 +352,7 @@ in any read view. A `--project` name matches when lowercasing both and
 removing every character that is not a letter or digit leaves the same
 key: `ai-tooling` resolves `AI Tooling`. Two projects that collapse to
 one key are ambiguous: the `INVALID_INPUT` error lists each matching
-project as `id (root path)`; retry with the id. The exact selector
+project as `id (name)`; retry with the id. The exact selector
 `general` is still the default project.
 
 ## Token transport

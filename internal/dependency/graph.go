@@ -30,15 +30,14 @@ type Checker interface {
 	Reaches(ctx context.Context, from, to task.ID) (bool, error)
 }
 
-// Validate applies the DAG invariants to a proposed edge. sameProject is
-// supplied by the caller because the store, not this package, knows task
-// ownership. The rejection order is cheapest-first.
-func Validate(ctx context.Context, e Edge, sameProject bool, c Checker) error {
+// Validate applies the DAG invariants to a proposed edge. An edge may join
+// tasks in different projects and different repositories: it orders the
+// work. Only a shared repository lets the requirement's revision be merged
+// into the dependent's base; that is decided at claim time from the tasks'
+// bindings. The rejection order is cheapest-first.
+func Validate(ctx context.Context, e Edge, c Checker) error {
 	if e.Task == e.Requires {
 		return fault.New(fault.CodeInvalidInput, "task %s cannot require itself", e.Task)
-	}
-	if !sameProject {
-		return fault.New(fault.CodeInvalidInput, "tasks %s and %s belong to different projects", e.Task, e.Requires)
 	}
 	dup, err := c.Exists(ctx, e)
 	if err != nil {

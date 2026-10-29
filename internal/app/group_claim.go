@@ -56,9 +56,9 @@ func (e *Engine) groupSummary(ctx context.Context, id task.ID) (Summary, bool, e
 	if err := e.reconcile(ctx); err != nil {
 		return Summary{}, false, err
 	}
-	// Group proofs compare against the target head of their own project,
+	// Group proofs compare against the base head of their own repository,
 	// resolved before the read opens: Git never runs inside a transaction.
-	var homes []project.ID
+	var keys []headKey
 	if err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
 		root, err := tx.GetRecord(id)
 		if err != nil {
@@ -68,20 +68,20 @@ func (e *Engine) groupSummary(ctx context.Context, id task.ID) (Summary, bool, e
 		if err != nil {
 			return err
 		}
-		seen := map[project.ID]bool{}
+		groups := make([]sqlite.Record, 0, len(below)+1)
 		for _, r := range append([]*sqlite.Record{&root}, pointers(below)...) {
-			if r.Task.Kind == task.KindGroup && !seen[r.Task.ProjectID] {
-				seen[r.Task.ProjectID] = true
-				homes = append(homes, r.Task.ProjectID)
+			if r.Task.Kind == task.KindGroup {
+				groups = append(groups, *r)
 			}
 		}
+		keys = keysOf(groups)
 		return nil
 	}); err != nil {
 		return Summary{}, false, err
 	}
-	heads := map[project.ID]targetHead{}
-	for _, h := range homes {
-		heads[h] = e.resolveTargetHead(ctx, h)
+	heads := map[headKey]targetHead{}
+	for _, k := range keys {
+		heads[k] = e.resolveHead(ctx, k)
 	}
 	var s Summary
 	var scope *groupScope

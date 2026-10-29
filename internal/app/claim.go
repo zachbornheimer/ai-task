@@ -150,6 +150,9 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	var sess Session
 	var proj project.Project
 	var attempt execution.Attempt
+	// repo and baseRef are the claimed task's execution binding, read
+	// inside the transaction and used after it releases the store.
+	var repo, baseRef string
 	quarantineSeq := 0
 	var required []workspace.Requirement
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
@@ -198,10 +201,11 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				return fault.WrapInternal(err, "candidate selection disagreed with status rules")
 			}
 		}
-		// A rootless attempt runs in the claiming directory, and its checks
-		// get <dir>.tmp as TMPDIR: refuse the claim now rather than let
-		// every check that makes a temp file fail later.
-		if proj.Rootless() {
+		repo, baseRef = r.Task.RepoRoot, r.Task.BaseRef
+		// A task without a repository runs in the claiming directory, and
+		// its checks get <dir>.tmp as TMPDIR: refuse the claim now rather
+		// than let every check that makes a temp file fail later.
+		if !r.Task.Worktree() {
 			if err := ensureCheckTmp(e.cwd); err != nil {
 				return err
 			}
@@ -211,7 +215,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		if prev := r.Attempt; prev != nil && prev.EndedAt == nil {
 			quarantineSeq = prev.Seq
 		}
-		if required, err = completedRequirements(tx, r.Task.ID); err != nil {
+		if required, err = completedRequirements(tx, r.Task.ID, repo); err != nil {
 			return err
 		}
 		attempt, err = tx.StartAttempt(r.Task.ID, r.Attempt, token.Digest(), now, lease)
@@ -238,8 +242,8 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
-	if proj.Rootless() {
-		// A rootless attempt runs in place where it was claimed: its checks
+	if repo == "" {
+		// An attempt without a repository runs in place where it was claimed: its checks
 		// and on-complete actions use the claiming directory, the same
 		// directory its session token is stored under.
 		dir := e.cwd
@@ -266,12 +270,12 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	// When the previous attempt did not end cleanly its worktree is
 	// quarantined first, so a stale process keeps only its own expired
 	// token and can never reach this attempt's files or branch.
-	mgr := e.manager(proj)
-	base, werr := proj.TargetBranch, error(nil)
+	mgr := e.manager(repo)
+	base, werr := baseRef, error(nil)
 	var baseNotes []string
 	if !mgr.BranchExists(ctx, workspace.TaskBranch(string(sess.Task.ID))) {
 		var resolved workspace.BaseResult
-		resolved, werr = mgr.ResolveBase(ctx, proj.TargetBranch, required)
+		resolved, werr = mgr.ResolveBase(ctx, baseRef, required)
 		base, baseNotes = resolved.Revision, resolved.Explain()
 	}
 	var info workspace.Info
@@ -313,8 +317,8 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	sess.Workspace, sess.Branch, sess.WorkspaceDirty, sess.QuarantinedWorkspace = info.Path, info.Branch, info.Dirty, info.Quarantined
-	sess.TargetBranch, sess.Regression = proj.TargetBranch, regressionChecks(sess.Task.Regression)
-	if rev, err := mgr.Revision(ctx, "refs/heads/"+proj.TargetBranch); err == nil {
+	sess.BaseRef, sess.Regression = baseRef, regressionChecks(sess.Task.Regression)
+	if rev, err := mgr.Revision(ctx, "refs/heads/"+baseRef); err == nil {
 		sess.TargetRevision = rev
 	}
 	if sess.Task.Attempt != nil {
@@ -325,7 +329,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 
 // completedRequirements lists the completed revisions of the tasks id
 // requires, in requirement order.
-func completedRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, error) {
+func completedRequirements(tx *sqlite.Tx, id task.ID, repo string) ([]workspace.Requirement, error) {
 	recs, err := tx.Requirements(id)
 	if err != nil {
 		return nil, err
@@ -333,7 +337,10 @@ func completedRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, 
 	var out []workspace.Requirement
 	for i := range recs {
 		r := &recs[i]
-		if r.CompletedRevision != "" {
+		// A requirement in another repository cannot be merged into this
+		// base; the edge still orders the work, so it stays a hard
+		// dependency and simply contributes no revision.
+		if r.Task.RepoRoot == repo && r.CompletedRevision != "" {
 			out = append(out, workspace.Requirement{Task: string(r.Task.ID), Revision: r.CompletedRevision})
 		}
 	}
@@ -451,12 +458,8 @@ func (e *Engine) withStaleWorktreeHint(tx *sqlite.Tx, a execution.Attempt, refus
 	if err != nil {
 		return refusal
 	}
-	proj, err := tx.GetProject(r.Task.ProjectID)
-	if err != nil {
-		return refusal
-	}
 	stale := workspace.QuarantinedPath(a.WorkspacePath, a.Seq)
-	tip, head, err := e.manager(proj).StaleDivergence(context.Background(), string(a.TaskID), stale)
+	tip, head, err := e.manager(r.Task.RepoRoot).StaleDivergence(context.Background(), string(a.TaskID), stale)
 	if err != nil {
 		return refusal
 	}

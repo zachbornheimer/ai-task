@@ -10,7 +10,8 @@ Verbs: `atask context`, `atask list`, `atask show`, `atask add`, `atask update`,
 
 ## Engineering guidelines
 
-Edit this section for the repository; the block above is owned by `atask init`.
+Edit this section for the repository; the block above is owned by
+`atask init`, which only installs it (it registers nothing).
 
 - Prefer the smallest complete change that satisfies the task; follow the
   existing architecture and conventions; avoid unrelated refactoring,
@@ -27,7 +28,8 @@ Edit this section for the repository; the block above is owned by `atask init`.
 ## This repository
 
 `atask` is developed here; the block above is what `atask init` installs into
-any repository. Planning verbs (`atask add`, `atask update`, `atask show`,
+any repository (it is optional, and every project, task and claim works
+without it). Planning verbs (`atask add`, `atask update`, `atask show`,
 `atask list`) are the planner's; `docs/agent-contract.md` is the full
 reference, `docs/integrations.md` says how each harness is wired, and
 `examples/embedded_runner` shows the host loop. Run `go test ./...`

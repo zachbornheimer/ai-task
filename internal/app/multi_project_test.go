@@ -132,7 +132,10 @@ func TestTaskBelongsToMultipleProjects(t *testing.T) {
 	}
 }
 
-func TestRequiresNeedsASharedProject(t *testing.T) {
+// A requirement may join tasks in projects that share nothing: the edge
+// orders the work, and only a shared repository lets the requirement's
+// revision be merged into the dependent's base.
+func TestRequiresAcrossProjects(t *testing.T) {
 	b := newMultiProjectBoard(t)
 	a, bb, c := b.project("A"), b.project("B"), b.project("C")
 	x, _ := b.add("x", a, bb)
@@ -141,7 +144,7 @@ func TestRequiresNeedsASharedProject(t *testing.T) {
 	if err := b.require(x, y, a); err != nil {
 		t.Fatalf("requires across a shared project: %v", err)
 	}
-	if err := b.require(x, z, a); fault.CodeOf(err) != fault.CodeInvalidInput {
-		t.Fatalf("requires across disjoint projects: want INVALID_INPUT, got %v", err)
+	if err := b.require(x, z, a); err != nil {
+		t.Fatalf("requires across disjoint projects: %v", err)
 	}
 }

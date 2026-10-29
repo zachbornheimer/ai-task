@@ -38,7 +38,6 @@ func TestGeneralProjectIsDefault(t *testing.T) {
 	var rows []struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
-		Path string `json:"root_path"`
 	}
 	if err := json.Unmarshal([]byte(unwrapResult(out)), &rows); err != nil {
 		t.Fatalf("decode projects: %v\n%s", err, out)
@@ -50,9 +49,6 @@ func TestGeneralProjectIsDefault(t *testing.T) {
 		}
 		if r.Name == "general" {
 			sawGeneral = true
-			if r.Path != "" {
-				t.Fatalf("general must have no path: %+v", r)
-			}
 		}
 	}
 	if !sawGeneral {

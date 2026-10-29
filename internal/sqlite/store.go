@@ -163,46 +163,108 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)`); err != nil {
 		return fault.WrapInternal(err, "create schema_migrations")
 	}
-	return s.Write(ctx, func(tx *Tx) error {
-		applied := map[int64]string{}
+	applied := map[int64]string{}
+	if err := s.Read(ctx, func(tx *Tx) error {
 		rows, err := tx.tx.QueryContext(ctx, `SELECT version, name FROM schema_migrations`)
 		if err != nil {
 			return fault.WrapInternal(err, "read schema_migrations")
 		}
+		defer discard.CloseReadOnly(rows)
 		for rows.Next() {
 			var v int64
 			var recorded string
 			if err := rows.Scan(&v, &recorded); err != nil {
-				discard.CloseReadOnly(rows)
 				return err
 			}
 			applied[v] = recorded
 		}
-		discard.CloseReadOnly(rows)
-		for _, name := range names {
-			version, err := strconv.ParseInt(strings.SplitN(name, "_", 2)[0], 10, 64)
-			if err != nil {
-				return fmt.Errorf("migration %q: bad version prefix", name)
+		return rows.Err()
+	}); err != nil {
+		return err
+	}
+	for _, name := range names {
+		version, err := strconv.ParseInt(strings.SplitN(name, "_", 2)[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("migration %q: bad version prefix", name)
+		}
+		if recorded, done := applied[version]; done {
+			if recorded != name {
+				return fault.New(fault.CodeInvalidInput, "migration ledger in %s records version %d as %s but this build embeds %s; the database was migrated by a different build", s.path, version, recorded, name)
 			}
-			if recorded, done := applied[version]; done {
-				if recorded != name {
-					return fault.New(fault.CodeInvalidInput, "migration ledger in %s records version %d as %s but this build embeds %s; the database was migrated by a different build", s.path, version, recorded, name)
-				}
-				continue
-			}
-			body, err := migrationFS.ReadFile("migrations/" + name)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.tx.ExecContext(ctx, string(body)); err != nil {
+			continue
+		}
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return err
+		}
+		// Each migration commits with its own ledger row, so a failure
+		// leaves the database at the last successfully applied version.
+		if err := s.applyMigration(ctx, version, name, string(body)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rebuildMarker starts a migration that rebuilds a referenced table.
+const rebuildMarker = "-- rebuild\n"
+
+// applyMigration applies one migration and records it in the same
+// transaction.
+//
+// A migration whose body starts with rebuildMarker runs in its own
+// transaction with foreign keys disabled. SQLite's documented table-rebuild
+// procedure cannot drop a table that other tables reference while
+// enforcement is on, and the pragma is a no-op inside a running transaction.
+func (s *Store) applyMigration(ctx context.Context, version int64, name, body string) error {
+	if !strings.HasPrefix(body, rebuildMarker) {
+		return s.Write(ctx, func(tx *Tx) error {
+			if _, err := tx.tx.ExecContext(ctx, body); err != nil {
 				return fault.WrapInternal(err, "apply migration %s", name)
 			}
-			if _, err := tx.tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`, version, name, time.Now().UnixMilli()); err != nil {
-				return fault.WrapInternal(err, "record migration %s", name)
-			}
-		}
-		return nil
-	})
+			return recordMigration(ctx, tx.tx, version, name)
+		})
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fault.WrapInternal(err, "acquire connection for migration %s", name)
+	}
+	defer discard.CloseReadOnly(conn)
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return fault.WrapInternal(err, "disable foreign keys for migration %s", name)
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA foreign_keys = ON")
+	}()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fault.WrapInternal(err, "begin migration %s", name)
+	}
+	if _, err := conn.ExecContext(ctx, strings.TrimPrefix(body, rebuildMarker)); err != nil {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		return fault.WrapInternal(err, "apply migration %s", name)
+	}
+	if err := recordMigration(ctx, conn, version, name); err != nil {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fault.WrapInternal(err, "commit migration %s", name)
+	}
+	return nil
+}
+
+// execer is what recording a migration needs: both a store transaction and a
+// dedicated connection satisfy it.
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func recordMigration(ctx context.Context, e execer, version int64, name string) error {
+	_, err := e.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`, version, name, time.Now().UnixMilli())
+	if err != nil {
+		return fault.WrapInternal(err, "record migration %s", name)
+	}
+	return nil
 }
 
 // --- small conversion helpers shared by the query files ---

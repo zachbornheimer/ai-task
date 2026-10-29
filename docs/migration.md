@@ -62,7 +62,8 @@ Current codes are listed in `docs/contract.md`.
   gone). Each task gets one worktree on branch `atask/<task-id>`, reused by
   every attempt; `verify complete` snapshots the committed revision and
   runs there. Completion records the revision and never moves the target
-  branch.
+  branch. _(Superseded: a project is a planning scope and each task records
+  its own repository and base ref; see ADR 0028.)_
 - Leases are a fixed 30 minutes; every authenticated command renews them.
   The token is never stored on disk; hosts inject it as `ATASK_SESSION`.
 - `--archive` needs `--reason`.

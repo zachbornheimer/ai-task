@@ -16,16 +16,16 @@ import (
 
 func benchEngine(b *testing.B) (*app.Engine, project.Project) {
 	b.Helper()
-	e, err := app.Open(context.Background(), app.Config{Path: filepath.Join(b.TempDir(), "bench.db")})
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.Cleanup(func() { must.OK(b, e.Close()) })
 	repo := filepath.Join(b.TempDir(), "repo")
 	if _, err := exec.LookPath("git"); err != nil {
 		b.Skip("git not installed")
 	}
-	p, err := e.InitProject(context.Background(), "bench", repo)
+	e, err := app.Open(context.Background(), app.Config{Path: filepath.Join(b.TempDir(), "bench.db"), Cwd: repo})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { must.OK(b, e.Close()) })
+	p, err := e.AddProject(context.Background(), "bench")
 	if err != nil {
 		b.Fatal(err)
 	}

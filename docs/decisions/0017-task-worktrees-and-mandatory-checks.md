@@ -1,6 +1,6 @@
 # ADR 0017: One worktree per task, worktree-resident tokens, mandatory checks
 
-**Status:** accepted (supersedes the per-attempt branches of ADR 0016; refines ADR 0006 and ADR 0010). Amended by ADR 0018: the post-commit hook was withdrawn, and a takeover now quarantines the unended attempt's worktree so the worktree-resident token can never be borrowed by a stale process.
+**Status:** accepted (supersedes the per-attempt branches of ADR 0016; refines ADR 0006 and ADR 0010). Amended by ADR 0018: the post-commit hook was withdrawn, and a takeover now quarantines the unended attempt's worktree so the worktree-resident token can never be borrowed by a stale process. The "every project is a Git repository" clause is superseded by ADR 0028: a project is a planning scope and each task records its own repository and base ref.
 
 **Decision.**
 
