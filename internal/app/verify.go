@@ -318,21 +318,29 @@ func checkEnv(dir string) []string {
 			kept = append(kept, kv)
 		}
 	}
-	tmp := dir + ".tmp"
+	return append(kept, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+checkTmpDir(dir))
+}
+
+// checkTmpDir is the TMPDIR for checks running in dir, created. Without a
+// dir (a rootless project) or when the private directory cannot be made
+// (ensureCheckTmp says why at claim), it is the system temp dir.
+func checkTmpDir(dir string) string {
 	if dir == "" {
-		tmp = os.TempDir()
-	} else {
-		_ = os.MkdirAll(tmp, 0o700)
+		return os.TempDir()
 	}
-	return append(kept, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+tmp)
+	tmp, err := workspace.EnsureCheckTmp(dir)
+	if err != nil {
+		return os.TempDir()
+	}
+	return tmp
 }
 
 // ensureCheckTmp creates the TMPDIR checkEnv gives checks running in dir
 // and proves it writable.
 func ensureCheckTmp(dir string) error {
-	tmp := dir + ".tmp"
-	if err := os.MkdirAll(tmp, 0o700); err != nil {
-		return fault.Wrap(err, fault.CodeInvalidInput, "checks run here get %s as TMPDIR and it cannot be created; claim from a directory whose parent is writable", tmp)
+	tmp, err := workspace.EnsureCheckTmp(dir)
+	if err != nil {
+		return fault.Wrap(err, fault.CodeInvalidInput, "checks run here get %s as TMPDIR and it cannot be created; make its parent a private directory you own", workspace.CheckTmp(dir))
 	}
 	f, err := os.CreateTemp(tmp, ".atask-probe-")
 	if err != nil {
@@ -343,16 +351,12 @@ func ensureCheckTmp(dir string) error {
 	return os.Remove(name)
 }
 
-// changedFilesEnv writes the candidate's changed paths next to the
-// snapshot and names the file and the target branch for the checks.
+// changedFilesEnv writes the candidate's changed paths into the checks'
+// TMPDIR and names the file and the target branch for the checks.
 // Always non-nil so execStep can tell a spent budget from "no budget".
 func changedFilesEnv(dir string, opts runOpts) []string {
 	env := []string{"ATASK_TARGET_BRANCH=" + opts.target}
-	tmp := os.TempDir()
-	if dir != "" {
-		tmp = dir + ".tmp"
-		_ = os.MkdirAll(tmp, 0o700)
-	}
+	tmp := checkTmpDir(dir)
 	path := filepath.Join(tmp, "at-changed-files")
 	if err := os.WriteFile(path, []byte(strings.Join(opts.changed, "\n")+"\n"), 0o600); err == nil {
 		env = append(env, "ATASK_CHANGED_FILES="+path)

@@ -10,6 +10,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/process"
 	"github.com/zachbornheimer/ai-task/internal/proof"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 // Home-relative locations a check may write: tool caches and the state of
@@ -48,10 +49,14 @@ func sandboxPolicy(cfg proof.SandboxConfig) proof.SandboxPolicy {
 		return func(string, []string) *process.Sandbox { return &process.Sandbox{Mode: cfg.Mode} }
 	}
 	return func(dir string, env []string) *process.Sandbox {
+		var tmp string // the check's private TMPDIR, when it has a dir
+		if dir != "" {
+			tmp = workspace.CheckTmp(dir)
+		}
 		writable := []string{systemTempRoot, os.TempDir()}
 		writable = append(writable, underHome(home, writableUnderHome)...)
 		writable = append(writable, goCaches()...)
-		writable = append(writable, dir, dir+".tmp", gitCommonDir(dir))
+		writable = append(writable, dir, tmp, gitCommonDir(dir))
 		writable = append(writable, envValues(env, "TMPDIR", "ATASK_CHECK_DIR")...)
 		for _, extra := range cfg.ExtraWrite {
 			writable = append(writable, expandHome(home, extra))
@@ -60,7 +65,7 @@ func sandboxPolicy(cfg proof.SandboxConfig) proof.SandboxPolicy {
 			Mode: cfg.Mode, Home: home,
 			Writable: withoutEmpty(writable), Unreadable: underHome(home, unreadableUnderHome),
 			UnreadablePrefixes: underHome(home, unreadablePrefixesUnderHome),
-			Readable:           withoutEmpty([]string{dir, dir + ".tmp"}),
+			Readable:           withoutEmpty([]string{dir, tmp}),
 		}
 	}
 }

@@ -405,15 +405,36 @@ func TestPruneRemovesTmp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Checks get a private TMPDIR beside the worktree.
-	must.OK(t, os.MkdirAll(w.Path+".tmp", 0o700))
-	must.OK(t, os.WriteFile(filepath.Join(w.Path+".tmp", "at-changed-files"), []byte("x\n"), 0o600))
+	// Checks get a private TMPDIR, named by the worktree path.
+	tmp, err := EnsureCheckTmp(w.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	must.OK(t, os.WriteFile(filepath.Join(tmp, "at-changed-files"), []byte("x\n"), 0o600))
 	if _, err := r.mgr.Prune(r.ctx, "at-bbbbbb", false); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{w.Path, w.Path + ".tmp"} {
+	for _, p := range []string{w.Path, tmp} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Fatalf("%s left behind after prune", p)
+		}
+	}
+}
+
+func TestSnapshotCleanupRemovesTmp(t *testing.T) {
+	r := newRepo(t)
+	path, cleanup, err := r.mgr.Snapshot(r.ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp, err := EnsureCheckTmp(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	for _, p := range []string{path, tmp} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s left behind after snapshot cleanup", p)
 		}
 	}
 }

@@ -55,6 +55,10 @@ func Overrides(home string) ([]string, error) {
 		ceilingVar + "=" + discoveryCeilings(),
 		acrossFSVar + "=0",
 		homeVar + "=" + home,
+		// workspace.CheckTmpRootEnv (testgit cannot import workspace: its
+		// tests import testgit): checks' TMPDIRs go under the test's own
+		// home, so no test leaves directories in the shared /tmp.
+		"ATASK_CHECK_TMP_ROOT=" + filepath.Join(home, "check-tmp"),
 		"GIT_CONFIG_GLOBAL=" + empty,
 		"GIT_CONFIG_SYSTEM=" + empty,
 		"GIT_CONFIG_NOSYSTEM=1",

@@ -70,6 +70,20 @@ work on the target branch is an `on_complete` action (for example
 
 No SQLite transaction is ever held across a Git command or a proof process.
 
+## Check TMPDIR
+
+Checks and actions run with a `TMPDIR` private to the directory they run
+in, so one suite's temporary files never reach another. It is
+`/tmp/atask-<uid>/<16 hex characters>`, the hex being a SHA-256 prefix of
+the directory's path, never a path beside the worktree: its length does not
+depend on the worktree's, so a unix socket made inside it (OpenTofu's
+provider plugin socket, `$TMPDIR/plugin<10 digits>`) stays under the
+104-byte `sun_path` limit of macOS however deep the worktree is.
+`ATASK_CHECK_TMP_ROOT` replaces `/tmp/atask-<uid>`; the root must be a
+directory only its owner can enter, or checks get the system temp dir
+instead. The directory is removed with its snapshot or worktree (`atask
+prune`, snapshot cleanup).
+
 ## Groups
 
 A group's proofs run on the merge of every child's completed revision, built in a scratch worktree; the group completes only after every child is complete and no integration branch exists. `verify complete GROUP` fails with `NOT_READY` until then, and with `BASE_CONFLICT` when the children cannot be merged.

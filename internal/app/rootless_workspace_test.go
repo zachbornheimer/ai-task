@@ -13,6 +13,7 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/task"
 	"github.com/zachbornheimer/ai-task/internal/verification"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 // TestRootlessClaimWorkspaceIsClaimDir files a rootless task from one
@@ -78,11 +79,15 @@ func TestRootlessClaimWorkspaceIsClaimDir(t *testing.T) {
 		return s
 	}
 
-	// A directory whose <dir>.tmp cannot be created (here a file already
-	// holds that name) is refused up front instead of every check failing
-	// later.
+	// A directory whose private TMPDIR cannot be created (here a file
+	// already holds that name) is refused up front instead of every check
+	// failing later.
 	stuck := t.TempDir()
-	if err := os.WriteFile(stuck+".tmp", nil, 0o600); err != nil {
+	stuckTmp := workspace.CheckTmp(stuck)
+	if err := os.MkdirAll(filepath.Dir(stuckTmp), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stuckTmp, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	e = open(stuck)
@@ -101,8 +106,8 @@ func TestRootlessClaimWorkspaceIsClaimDir(t *testing.T) {
 		}
 	}
 	for _, prefix := range []string{"proof.", "regression."} {
-		if m, _ := filepath.Glob(filepath.Join(first+".tmp", prefix+"*")); len(m) != 1 {
-			t.Fatalf("checks must mktemp under %s.tmp: %s* matched %v", first, prefix, m)
+		if m, _ := filepath.Glob(filepath.Join(workspace.CheckTmp(first), prefix+"*")); len(m) != 1 {
+			t.Fatalf("checks must mktemp under %s: %s* matched %v", workspace.CheckTmp(first), prefix, m)
 		}
 	}
 	if err := e.Release(ctx, app.ReleaseRequest{Token: s.Token}); err != nil {

@@ -170,12 +170,12 @@ func (m Manager) Prune(ctx context.Context, taskID string, keepLive bool) ([]str
 		if err := os.RemoveAll(path); err != nil {
 			return removed, fault.Wrap(err, fault.CodeNotReady, "remove %s", path)
 		}
-		// The checks' private TMPDIR beside the worktree goes with it.
-		_ = os.RemoveAll(path + ".tmp")
+		// The checks' private TMPDIR goes with the worktree.
+		RemoveCheckTmp(path)
 		removed = append(removed, path)
 	}
 	if !keepLive {
-		_ = os.RemoveAll(live + ".tmp")
+		RemoveCheckTmp(live)
 	}
 	_, _ = git(ctx, m.Repo, "worktree", "prune")
 	return removed, nil
@@ -225,7 +225,7 @@ func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cl
 	cleanup = func() {
 		_, _ = git(context.Background(), m.Repo, "worktree", "remove", "--force", path)
 		_ = os.RemoveAll(path)
-		_ = os.RemoveAll(path + ".tmp")
+		RemoveCheckTmp(path)
 	}
 	return path, cleanup, nil
 }

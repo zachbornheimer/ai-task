@@ -12,6 +12,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/process"
 	"github.com/zachbornheimer/ai-task/internal/proof"
+	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
 func TestSandboxedCheckCanUseSnapshotTmp(t *testing.T) {
@@ -30,11 +31,12 @@ func TestSandboxedCheckCanUseSnapshotTmp(t *testing.T) {
 	t.Setenv("HOME", home)
 	state := filepath.Join(home, ".local", "state", "atask")
 	snapshot := filepath.Join(state, "workspaces", "proj", "snap")
-	tmp := snapshot + ".tmp"
-	for _, d := range []string{snapshot, tmp} {
-		if err := os.MkdirAll(d, 0o750); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.MkdirAll(snapshot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	tmp, err := workspace.EnsureCheckTmp(snapshot)
+	if err != nil {
+		t.Fatal(err)
 	}
 	database := filepath.Join(state, "atask.db")
 	if err := os.WriteFile(database, []byte("dummy"), 0o600); err != nil {
