@@ -10,15 +10,16 @@ import (
 // failing one) on stderr, not only the one-line error; the JSON envelope is
 // unchanged.
 func TestDoctorHumanReportOnFailure(t *testing.T) {
-	// A directory that is not a Git work tree: no task filed here can get a
-	// worktree, so the repository is not ready.
-	e := newEnv(t)
+	e := gitEnv(t)
+	// A base branch that does not exist: no worktree can start from it, so
+	// the repository is not ready.
+	e.git(e.cwd, "update-ref", "-d", "refs/heads/main")
 
 	r := e.runIn(e.cwd, "", []string{"ATASK_OUTPUT="}, "doctor")
 	if r.code == 0 {
-		t.Fatalf("doctor succeeded outside a repository: %s", r.stdout)
+		t.Fatalf("doctor succeeded on a missing base branch: %s", r.stdout)
 	}
-	for _, want := range []string{"error [NOT_READY]", "repository", "fix:", "○ not ready"} {
+	for _, want := range []string{"error [NOT_READY]", "base_ref", "fix:", "○ not ready"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, r.stderr)
 		}

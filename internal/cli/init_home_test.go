@@ -36,7 +36,7 @@ func TestInitRefusesHomeDirectory(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			code, out := runInitAt(t, tc.cwd, tc.args...)
-			want := "refusing to register " + tc.dir + ": use a project directory or atask project add NAME for work without a repository"
+			want := "refusing to create a repository in " + tc.dir
 			if code == ExitOK || !strings.Contains(out, "INVALID_INPUT") || !strings.Contains(out, want) {
 				t.Fatalf("exit %d, want INVALID_INPUT %q\n%s", code, want, out)
 			}

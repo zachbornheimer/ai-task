@@ -2,10 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"database/sql"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestListAllProjectsThenOne(t *testing.T) {
@@ -29,6 +32,11 @@ func TestListAllProjectsThenOne(t *testing.T) {
 	if code, _, errOut := run(beta, "init"); code != ExitOK {
 		t.Fatalf("init beta: %d %s", code, errOut)
 	}
+	for dir, name := range map[string]string{alpha: "alpha", beta: "beta"} {
+		if code, _, errOut := run(dir, "project", "add", name); code != ExitOK {
+			t.Fatalf("project add %s: %d %s", name, code, errOut)
+		}
+	}
 	code, out, errOut := run(alpha, "projects")
 	if code != ExitOK {
 		t.Fatalf("projects: %d %s", code, errOut)
@@ -36,7 +44,7 @@ func TestListAllProjectsThenOne(t *testing.T) {
 	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
 		t.Fatalf("projects should name every project:\n%s", out)
 	}
-	if code, _, errOut := run(alpha, "add", "from-alpha", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
+	if code, _, errOut := run(alpha, "--project", "alpha", "add", "from-alpha", "--proof", "run: test -d .", "--regression", "run: test -d ."); code != ExitOK {
 		t.Fatalf("add: %d %s", code, errOut)
 	}
 	code, out, errOut = run(alpha, "list")
@@ -228,13 +236,27 @@ func TestListResolvesNormalizedProjectName(t *testing.T) {
 	}
 
 	left, right := t.TempDir(), t.TempDir()
-	for dir, name := range map[string]string{left: "Case Fold", right: "case-fold"} {
+	for _, dir := range []string{left, right} {
 		if code, _, e := run(dir, "init"); code != ExitOK {
 			t.Fatalf("init %s: %d %s", dir, code, e)
 		}
-		if code, _, e := run(dir, "project", "add", name); code != ExitOK {
+	}
+	// project add refuses a second name that collapses to the same key, so
+	// the collision a pre-existing board can still hold is built directly.
+	for _, name := range []string{"Case Fold", "Placeholder"} {
+		if code, _, e := run(left, "project", "add", name); code != ExitOK {
 			t.Fatalf("project add %s: %d %s", name, code, e)
 		}
+	}
+	handler, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.Exec(`UPDATE projects SET name = 'case-fold' WHERE name = 'Placeholder'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.Close(); err != nil {
+		t.Fatal(err)
 	}
 	code, out, e := run(cwd, "list", "--project", "casefold")
 	if code == ExitOK || !strings.Contains(out+e, "INVALID_INPUT") || !strings.Contains(out+e, "ambiguous") {

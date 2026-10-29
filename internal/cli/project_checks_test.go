@@ -34,7 +34,7 @@ func TestProjectHoldsNoChecks(t *testing.T) {
 		t.Fatalf("new project attempts = %v, want 3", fresh["attempts"])
 	}
 
-	h.failsWith([]string{"--target-branch"}, "project", "--target-branch", "main")
+	h.failsWith([]string{"target-branch"}, "project", "--target-branch", "main")
 	if code, _, errOut := h.run("project", "--attempts", "4"); code != ExitOK {
 		t.Fatalf("project --attempts: %d %s", code, errOut)
 	}
