@@ -139,15 +139,24 @@ func TestClaimSkipsRequirementFromAnotherRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var notes string
+	var notes strings.Builder
 	if view.Handoff != nil {
-		var notesSb144 strings.Builder
 		for _, entry := range view.Handoff.RecentLogs {
-			notesSb144.WriteString(entry.Note + "\n")
+			notes.WriteString(entry.Note)
+			notes.WriteByte('\n')
 		}
-		notes += notesSb144.String()
 	}
-	if !strings.Contains(notes, "completed in another repository") {
-		t.Fatalf("claim log lacks the foreign-revision note: %q", notes)
+	if !strings.Contains(notes.String(), "completed in another repository") {
+		t.Fatalf("claim log lacks the foreign-revision note: %q", notes.String())
+	}
+	prompt, err := e.Context(ctx, isaProj.ID, string(downstream), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(prompt.Prompt, "on the target branch") {
+		t.Fatal("context says the other repository's work is on the target branch")
+	}
+	if !strings.Contains(prompt.Prompt, "completed in another repository") {
+		t.Fatalf("context lacks the foreign-revision note: %s", prompt.Prompt)
 	}
 }

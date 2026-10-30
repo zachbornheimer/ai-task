@@ -64,9 +64,10 @@ after a committed completion returns the stored result and runs nothing.
    actions.
 
 Completion never moves the target branch. Dependents start from the target
-branch plus a merge of every required task's completed revision. Putting
-work on the target branch is an `on_complete` action (for example
-`run: wt merge main`).
+branch plus a merge of every required task's completed revision in this
+repository. A requirement completed in another repository is sequencing
+only and is not merged. Putting work on the target branch is an
+`on_complete` action (for example `run: wt merge main`).
 
 No SQLite transaction is ever held across a Git command or a proof process.
 
