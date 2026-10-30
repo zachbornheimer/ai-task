@@ -393,6 +393,8 @@ const (
 - Dependencies: a task is ready when every required task is complete. At claim
   its branch starts at the target tip with every required task's branch tip
   merged in (a requirement already contained in the target adds nothing). A
+  requirement completed in another repository is sequencing only: its revision
+  is not an object here, so it is not merged, and the claim records that. A
   conflicting merge fails the claim with `BASE_CONFLICT` and the task stays
   blocked with the conflict named.
 - Groups: a group's proofs run on the merge of every child's completed
