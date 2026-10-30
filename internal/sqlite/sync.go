@@ -148,11 +148,11 @@ func restartIdentity(ctx context.Context, tx *Tx, t syncTable) error {
 	if t.identity == "" || !tx.d.isPostgres() {
 		return nil
 	}
-	var max int64
-	if err := tx.tx.QueryRowContext(ctx, `SELECT COALESCE(max(`+t.identity+`), 0) FROM `+t.name).Scan(&max); err != nil {
+	var maxID int64
+	if err := tx.tx.QueryRowContext(ctx, `SELECT COALESCE(max(`+t.identity+`), 0) FROM `+t.name).Scan(&maxID); err != nil {
 		return wrapInternal(err, "read max id of "+t.name)
 	}
-	_, err := tx.tx.ExecContext(ctx, `ALTER TABLE `+t.name+` ALTER COLUMN `+t.identity+` RESTART WITH `+strconv.FormatInt(max+1, 10))
+	_, err := tx.tx.ExecContext(ctx, `ALTER TABLE `+t.name+` ALTER COLUMN `+t.identity+` RESTART WITH `+strconv.FormatInt(maxID+1, 10))
 	return wrapInternal(err, "restart id of "+t.name)
 }
 

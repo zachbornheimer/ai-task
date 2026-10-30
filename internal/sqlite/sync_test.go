@@ -19,7 +19,7 @@ func TestSyncCopiesEveryBusinessTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { must.OK(t, src.Close()) }()
-	seedSyncSource(t, ctx, src)
+	seedSyncSource(ctx, t, src)
 
 	dst, err := Open(ctx, filepath.Join(t.TempDir(), "dst.db"))
 	if err != nil {
@@ -106,7 +106,7 @@ func TestSyncIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { must.OK(t, src.Close()) }()
-	seedSyncSource(t, ctx, src)
+	seedSyncSource(ctx, t, src)
 	dst, err := Open(ctx, filepath.Join(t.TempDir(), "dst.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestSyncDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { must.OK(t, src.Close()) }()
-	seedSyncSource(t, ctx, src)
+	seedSyncSource(ctx, t, src)
 	dst, err := Open(ctx, filepath.Join(t.TempDir(), "dst.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestSyncDryRunWritesNothing(t *testing.T) {
 // a project, a task with acceptance and projects membership, a check
 // change, two attempts (one ended, one live), a log entry, a submission,
 // a passed run, its evidence, the run result, an action, and a job.
-func seedSyncSource(t *testing.T, ctx context.Context, s *Store) {
+func seedSyncSource(ctx context.Context, t *testing.T, s *Store) {
 	t.Helper()
 	at := int64(1_700_000_000_000)
 	exec := func(q string, args ...any) {
