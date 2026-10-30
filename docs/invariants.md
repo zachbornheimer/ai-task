@@ -134,6 +134,8 @@ claimed and verifying.
 - A committed completion is acknowledged idempotently to the same token
   without a new run. (`TestFinalSuccessIsAtomicAndStacksDependents`)
 - Completion never moves the target branch; dependents start from the
-  target branch plus every required task's completed revision.
+  target branch plus every required task's completed revision in this
+  repository. A revision from another repository is not merged.
+  (`TestClaimSkipsRequirementFromAnotherRepository`)
 - Groups: a group's proofs run on the merge of every child's completed
   revision, and the group completes only after every child is complete.
