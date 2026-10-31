@@ -124,6 +124,9 @@ func InstallInstructionsText(root, text string) (InstallResult, error) {
 	if err := installClaudeHook(root); err != nil {
 		return res, err
 	}
+	if sameFileUnder(root, "AGENTS.md", "CLAUDE.md") {
+		return res, nil
+	}
 	claude := filepath.Join(root, "CLAUDE.md")
 	cb, err := readUnder(root, "CLAUDE.md")
 	switch {
@@ -173,6 +176,23 @@ func readUnder(root, name string) ([]byte, error) {
 	}
 	defer func() { _ = f.Close() }()
 	return io.ReadAll(f)
+}
+
+func sameFileUnder(root, a, b string) bool {
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = dir.Close() }()
+	ia, err := dir.Stat(a)
+	if err != nil {
+		return false
+	}
+	ib, err := dir.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ia, ib)
 }
 
 // dropMarkerLines removes lines that are only a block marker.
