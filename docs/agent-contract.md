@@ -259,7 +259,9 @@ markdown TODO lists for task tracking.") into `AGENTS.md` between
 the block text, so a changed template rewrites it), creating the file with a
 default engineering-guidelines section when absent and refreshing only
 the block on re-runs; it also makes sure `CLAUDE.md` imports it
-(`@AGENTS.md`). When `init` creates the repository in a directory that
+(`@AGENTS.md`), except when `CLAUDE.md` is a symlink to `AGENTS.md` —
+there the import would be self-referential, so it is skipped and the
+symlink left untouched. When `init` creates the repository in a directory that
 already has files, they stay untracked (init never commits them); the
 result carries `untracked_files` and a `warning` that they must be
 committed before the baseline can pass. Init installs the `AGENTS.md`

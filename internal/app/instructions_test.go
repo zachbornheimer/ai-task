@@ -89,3 +89,40 @@ func TestInstallInstructionsIsIdempotent(t *testing.T) {
 		t.Fatalf("not stable after orphan repair: %+v %v", r, err)
 	}
 }
+
+func TestInitSymlinkedClaudeMDDoesNotSelfImport(t *testing.T) {
+	root := t.TempDir()
+	agentsPath := filepath.Join(root, "AGENTS.md")
+	claudePath := filepath.Join(root, "CLAUDE.md")
+	if err := os.WriteFile(agentsPath, []byte("# Existing repo rules\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("AGENTS.md", claudePath); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := app.InstallInstructions(root)
+	if err != nil || !first.Updated {
+		t.Fatalf("first InstallInstructions: %+v %v", first, err)
+	}
+	gotBytes, err := os.ReadFile(filepath.Clean(agentsPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotBytes)
+	if strings.Contains(got, "@AGENTS.md") {
+		t.Fatalf("AGENTS.md contains self-referential @AGENTS.md import:\n%s", got)
+	}
+	if !strings.Contains(got, "# Existing repo rules") || !strings.Contains(got, app.InstructionsBegin()) {
+		t.Fatalf("AGENTS.md missing expected content:\n%s", got)
+	}
+	info, err := os.Lstat(claudePath)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("CLAUDE.md should remain a symlink, got mode=%v err=%v", info.Mode(), err)
+	}
+
+	second, err := app.InstallInstructions(root)
+	if err != nil || second.Updated || second.ClaudeMD != "" {
+		t.Fatalf("second InstallInstructions should be no-op: %+v %v", second, err)
+	}
+}
