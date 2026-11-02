@@ -639,8 +639,13 @@ func (t *Tx) ClearComplete(id task.ID, now time.Time) error {
 	return wrapInternal(err, "clear complete")
 }
 
-// Children returns the direct members of a group (live only), oldest first.
+// Children returns the direct members of a group (live only), oldest
+// first. A listing that preloaded them answers from memory; see
+// PreloadChildren.
 func (t *Tx) Children(id task.ID) ([]Record, error) {
+	if kids, ok := t.childrenByParent[id]; ok {
+		return kids, nil
+	}
 	rows, err := t.tx.QueryContext(t.ctx, t.recordSelect()+` WHERE t.parent_id = ? AND t.archived_at IS NULL ORDER BY t.created_at, t.id`, id)
 	if err != nil {
 		return nil, wrapInternal(err, "list children")
@@ -655,6 +660,48 @@ func (t *Tx) Children(id task.ID) ([]Record, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// PreloadChildren loads the live children of every given parent in one
+// query, so a listing pays once for its groups instead of once per group.
+// Every given parent gets an entry, empty when it has none.
+func (t *Tx) PreloadChildren(parents []task.ID) error {
+	t.childrenByParent = make(map[task.ID][]Record, len(parents))
+	for _, id := range parents {
+		t.childrenByParent[id] = nil
+	}
+	if len(parents) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(parents)
+	if err != nil {
+		return wrapInternal(err, "encode parent ids")
+	}
+	rows, err := t.tx.QueryContext(t.ctx, t.childrenForQuery(), string(payload))
+	if err != nil {
+		return wrapInternal(err, "list children")
+	}
+	for rows.Next() {
+		r, err := scanRecord(rows)
+		if err != nil {
+			discard.CloseReadOnly(rows)
+			return wrapInternal(err, "scan child")
+		}
+		t.childrenByParent[r.Task.ParentID] = append(t.childrenByParent[r.Task.ParentID], r)
+	}
+	err = wrapInternal(rows.Err(), "read children")
+	discard.CloseReadOnly(rows)
+	return err
+}
+
+// childrenForQuery returns the children query for this engine: the record
+// select narrowed to the live children of the listed parents, who travel
+// as one bound JSON array.
+func (t *Tx) childrenForQuery() string {
+	if t.d.isPostgres() {
+		return t.recordSelect() + ` WHERE t.parent_id IN (SELECT value FROM jsonb_array_elements_text(?::jsonb)) AND t.archived_at IS NULL ORDER BY t.created_at, t.id`
+	}
+	return t.recordSelect() + ` WHERE t.parent_id IN (SELECT value FROM json_each(?)) AND t.archived_at IS NULL ORDER BY t.created_at, t.id`
 }
 
 // ParentChainContains reports whether `ancestor` is `id` or one of its

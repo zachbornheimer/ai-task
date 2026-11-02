@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/dependency"
@@ -78,6 +79,54 @@ func (t *Tx) RequirementIDs(id task.ID) ([]task.ID, error) {
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// requirementIDsForQuery is the set-based requirement load: the listed ids
+// travel as one bound JSON array, so the query is one constant per engine
+// and every value is a bound parameter. SQLite reads the array with
+// json_each, PostgreSQL with jsonb_array_elements_text.
+func (t *Tx) requirementIDsForQuery() string {
+	if t.d.isPostgres() {
+		return `SELECT task_id, requires_id FROM task_dependencies WHERE task_id IN (SELECT value FROM jsonb_array_elements_text(?::jsonb)) ORDER BY created_at, requires_id`
+	}
+	return `SELECT task_id, requires_id FROM task_dependencies WHERE task_id IN (SELECT value FROM json_each(?)) ORDER BY created_at, requires_id`
+}
+
+// RequirementIDsFor lists the requirement IDs of every given task, in
+// creation order, in one query instead of one query per task. A listing
+// loads its whole board this way; RequirementIDs stays the single-task
+// path. Every given task maps to a slice, empty (nil) when it requires
+// nothing.
+func (t *Tx) RequirementIDsFor(ids []task.ID) (map[task.ID][]task.ID, error) {
+	out := make(map[task.ID][]task.ID, len(ids))
+	for _, id := range ids {
+		out[id] = nil
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	payload, err := json.Marshal(ids)
+	if err != nil {
+		return nil, wrapInternal(err, "encode listed ids")
+	}
+	rows, err := t.tx.QueryContext(t.ctx, t.requirementIDsForQuery(), string(payload))
+	if err != nil {
+		return nil, wrapInternal(err, "list requirements")
+	}
+	for rows.Next() {
+		var id, requires task.ID
+		if err := rows.Scan(&id, &requires); err != nil {
+			discard.CloseReadOnly(rows)
+			return nil, wrapInternal(err, "scan requirement")
+		}
+		out[id] = append(out[id], requires)
+	}
+	err = wrapInternal(rows.Err(), "read requirements")
+	discard.CloseReadOnly(rows)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Requirements returns the tasks `id` requires, with their status facts.

@@ -102,7 +102,12 @@ func (e *Engine) groupSummary(ctx context.Context, id task.ID) (Summary, bool, e
 		for i := range below {
 			scope.inside[below[i].Task.ID] = true
 		}
-		s, err = e.summarize(tx, proj, append([]sqlite.Record{root}, below...), heads, nil, scope)
+		records := append([]sqlite.Record{root}, below...)
+		b, err := newBoard(tx, records, nil)
+		if err != nil {
+			return err
+		}
+		s, err = e.summarize(b, proj, records, heads, nil, scope)
 		return err
 	})
 	if err != nil {
