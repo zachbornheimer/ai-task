@@ -105,7 +105,7 @@ func TestInitSymlinkedClaudeMDDoesNotSelfImport(t *testing.T) {
 	if err != nil || !first.Updated {
 		t.Fatalf("first InstallInstructions: %+v %v", first, err)
 	}
-	gotBytes, err := os.ReadFile(agentsPath)
+	gotBytes, err := os.ReadFile(filepath.Clean(agentsPath))
 	if err != nil {
 		t.Fatal(err)
 	}
