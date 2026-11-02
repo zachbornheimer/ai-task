@@ -311,18 +311,21 @@ const (
 	viewFull
 )
 
-// buildView assembles a TaskView inside a transaction.
+// buildView assembles a TaskView inside a transaction, resolving every
+// relation with a query: the single-task paths list nothing and so preload
+// nothing.
 func (e *Engine) buildView(tx *sqlite.Tx, r sqlite.Record, p project.Project, now time.Time, full bool, head targetHead) (TaskView, error) {
 	depth := viewShow
 	if full {
 		depth = viewFull
 	}
-	return e.buildViewDepth(tx, r, p, now, depth, head)
+	return e.buildViewDepth(emptyBoard(tx), r, p, now, depth, head)
 }
 
-// relFor loads the light relation row for a neighbor.
-func relFor(tx *sqlite.Tx, id task.ID, p project.Project, now time.Time) (Rel, bool, error) {
-	n, err := tx.GetRecord(id)
+// relFor loads the light relation row for a neighbor, from the listing's
+// board when it holds the row.
+func relFor(b *board, id task.ID, p project.Project, now time.Time) (Rel, bool, error) {
+	n, err := b.record(id)
 	if err != nil {
 		return Rel{}, false, err
 	}
@@ -332,10 +335,11 @@ func relFor(tx *sqlite.Tx, id task.ID, p project.Project, now time.Time) (Rel, b
 	return rel(n, n.Status(now, p.MaxAttempts)), true, nil
 }
 
-func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Project, now time.Time, depth viewDepth, head targetHead) (TaskView, error) {
+func (e *Engine) buildViewDepth(b *board, r sqlite.Record, p project.Project, now time.Time, depth viewDepth, head targetHead) (TaskView, error) {
+	tx := b.tx
 	st := r.Status(now, p.MaxAttempts)
 	t := r.Task
-	names, err := projectNames(tx, t, p)
+	names, err := projectNames(b, t, p)
 	if err != nil {
 		return TaskView{}, err
 	}
@@ -360,13 +364,13 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 		v.NextEligibleAt = &ne
 	}
 	if t.ParentID != "" {
-		if g, err := tx.GetRecord(t.ParentID); err == nil {
+		if g, err := b.record(t.ParentID); err == nil {
 			gr := rel(g, task.StatusGroup)
 			v.Group = &gr
 		}
 	}
 	if r.Attempt != nil {
-		changes, err := tx.CheckChanges(t.ID, time.Time{})
+		changes, err := b.changes(t.ID, time.Time{})
 		if err != nil {
 			return v, err
 		}
@@ -376,12 +380,12 @@ func (e *Engine) buildViewDepth(tx *sqlite.Tx, r sqlite.Record, p project.Projec
 	}
 	if depth == viewList {
 		if t.Kind == task.KindTask && st == task.StatusBlocked {
-			ids, err := tx.RequirementIDs(t.ID)
+			ids, err := b.requirementIDs(t.ID)
 			if err != nil {
 				return v, err
 			}
 			for _, id := range ids {
-				rr, ok, err := relFor(tx, id, p, now)
+				rr, ok, err := relFor(b, id, p, now)
 				if err != nil {
 					return v, err
 				}
@@ -550,15 +554,15 @@ func (e *Engine) groupProgress(tx *sqlite.Tx, id task.ID, p project.Project, now
 }
 
 // projectNames lists a task's project names in order, reusing the already
-// loaded home.
-func projectNames(tx *sqlite.Tx, t task.Task, home project.Project) ([]string, error) {
+// loaded home and the board's project cache.
+func projectNames(b *board, t task.Task, home project.Project) ([]string, error) {
 	names := make([]string, 0, len(t.Projects))
 	for _, id := range t.Projects {
 		if id == home.ID {
 			names = append(names, home.Name)
 			continue
 		}
-		p, err := tx.GetProject(id)
+		p, err := b.project(id)
 		if err != nil {
 			return nil, err
 		}

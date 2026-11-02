@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -176,8 +177,12 @@ func (t *Tx) Submissions(id task.ID) ([]Submission, error) {
 }
 
 // RunsForTask lists every run of a task (diagnostic and final), oldest
-// first.
+// first. A listing that preloaded them answers from memory; see
+// PreloadRuns.
 func (t *Tx) RunsForTask(id task.ID) ([]Run, error) {
+	if runs, ok := t.runsByTask[id]; ok {
+		return runs, nil
+	}
 	rows, err := t.tx.QueryContext(t.ctx, `SELECT `+runColumns+` FROM verification_runs WHERE task_id = ? ORDER BY id`, id)
 	if err != nil {
 		return nil, wrapInternal(err, "list runs")
@@ -192,6 +197,47 @@ func (t *Tx) RunsForTask(id task.ID) ([]Run, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// PreloadRuns loads every run of the given tasks in one query, so a
+// listing pays once for its groups instead of once per group. Every given
+// task gets an entry, empty (nil) when it has no runs.
+func (t *Tx) PreloadRuns(ids []task.ID) error {
+	t.runsByTask = make(map[task.ID][]Run, len(ids))
+	for _, id := range ids {
+		t.runsByTask[id] = nil
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(ids)
+	if err != nil {
+		return wrapInternal(err, "encode listed ids")
+	}
+	rows, err := t.tx.QueryContext(t.ctx, t.runsForQuery(), string(payload))
+	if err != nil {
+		return wrapInternal(err, "list runs")
+	}
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			discard.CloseReadOnly(rows)
+			return wrapInternal(err, "scan run")
+		}
+		t.runsByTask[r.TaskID] = append(t.runsByTask[r.TaskID], r)
+	}
+	err = wrapInternal(rows.Err(), "read runs")
+	discard.CloseReadOnly(rows)
+	return err
+}
+
+// runsForQuery returns the set-based runs query for this engine: every run
+// of the listed tasks, whose ids travel as one bound JSON array.
+func (t *Tx) runsForQuery() string {
+	if t.d.isPostgres() {
+		return `SELECT ` + runColumns + ` FROM verification_runs WHERE task_id IN (SELECT value FROM jsonb_array_elements_text(?::jsonb)) ORDER BY id`
+	}
+	return `SELECT ` + runColumns + ` FROM verification_runs WHERE task_id IN (SELECT value FROM json_each(?)) ORDER BY id`
 }
 
 // InsertEvidence records one check result.

@@ -89,6 +89,12 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		if err != nil {
 			return err
 		}
+		// The board loads the listed rows' relations set-based, so the loop
+		// below pays no per-row round trip.
+		b, err := newBoard(tx, records, byID)
+		if err != nil {
+			return err
+		}
 		snap.Tasks, snap.Groups = []TaskView{}, []GroupView{}
 		for i := range records {
 			r := &records[i]
@@ -101,7 +107,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					rp.MaxAttempts = project.DefaultMaxAttempts
 				}
 			} else if r.Task.ProjectID != q.ProjectID {
-				if rp, err = homeOf(tx, byID, r.Task.ProjectID); err != nil {
+				if rp, err = b.project(r.Task.ProjectID); err != nil {
 					return err
 				}
 			}
@@ -158,7 +164,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					continue
 				}
 			}
-			v, err := e.buildViewDepth(tx, *r, rp, now, viewList, heads[rp.ID])
+			v, err := e.buildViewDepth(b, *r, rp, now, viewList, heads[rp.ID])
 			if err != nil {
 				return err
 			}
@@ -264,18 +270,6 @@ func (e *Engine) Summary(ctx context.Context, pid project.ID) (Summary, error) {
 	return s, err
 }
 
-// homeOf loads a task's home project once per listing.
-func homeOf(tx *sqlite.Tx, cache map[project.ID]project.Project, id project.ID) (project.Project, error) {
-	if p, ok := cache[id]; ok {
-		return p, nil
-	}
-	p, err := tx.GetProject(id)
-	if err == nil {
-		cache[id] = p
-	}
-	return p, err
-}
-
 // foreignHomes lists the home projects, other than pid, of tasks naming pid;
 // a failed read yields none and the listing's own read reports the error.
 func (e *Engine) foreignHomes(ctx context.Context, pid project.ID) []project.ID {
@@ -289,7 +283,11 @@ func (e *Engine) summaryIn(tx *sqlite.Tx, proj project.Project, heads map[projec
 	if err != nil {
 		return Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}, err
 	}
-	return e.summarize(tx, proj, records, heads, byID, nil)
+	b, err := newBoard(tx, records, byID)
+	if err != nil {
+		return Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}, err
+	}
+	return e.summarize(b, proj, records, heads, byID, nil)
 }
 
 // groupScope narrows a summary to the subtree of one group.
@@ -304,7 +302,8 @@ type groupScope struct {
 // summarize derives the summary of records. With a scope, a task blocked
 // by a requirement outside the group is stalled by name: the run does not
 // pull in work beyond its group.
-func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite.Record, heads map[project.ID]targetHead, byID map[project.ID]project.Project, scope *groupScope) (Summary, error) {
+func (e *Engine) summarize(b *board, proj project.Project, records []sqlite.Record, heads map[project.ID]targetHead, byID map[project.ID]project.Project, scope *groupScope) (Summary, error) {
+	tx := b.tx
 	n := e.now()
 	s := Summary{ProjectID: proj.ID, PlanRev: proj.PlanRev, Counts: map[task.Status]int{}}
 	var err error
@@ -318,7 +317,7 @@ func (e *Engine) summarize(tx *sqlite.Tx, proj project.Project, records []sqlite
 			if p, ok := byID[r.Task.ProjectID]; ok {
 				rp = p
 			} else if r.Task.ProjectID != proj.ID {
-				if rp, err = homeOf(tx, map[project.ID]project.Project{}, r.Task.ProjectID); err != nil {
+				if rp, err = b.project(r.Task.ProjectID); err != nil {
 					return s, err
 				}
 			}

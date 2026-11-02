@@ -24,13 +24,13 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver for ATASK_DB_URL
-	_ "modernc.org/sqlite"             // pure-Go SQLite driver; see docs/decisions/0002-sqlite.md
+	_ "modernc.org/sqlite" // pure-Go SQLite driver; see docs/decisions/0002-sqlite.md
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
 //go:embed migrations/*.sql
@@ -75,11 +75,11 @@ const DefaultDriver = "sqlite"
 // issues. A PostgreSQL URL ignores driver.
 func OpenWithDriver(ctx context.Context, path, driver string) (*Store, error) {
 	if IsPostgresURL(path) {
-		db, err := openPostgres(path)
+		db, d, err := openPostgres(path)
 		if err != nil {
 			return nil, err
 		}
-		s := &Store{db: db, path: path, d: postgresDialect{}}
+		s := &Store{db: db, path: path, d: d}
 		if err := s.migrate(ctx); err != nil {
 			return nil, errors.Join(err, db.Close())
 		}
@@ -153,6 +153,13 @@ type Tx struct {
 	tx  rebindTx
 	ctx context.Context
 	d   dialect
+	// childrenByParent and runsByTask are the reads a listing preloaded
+	// (see PreloadChildren and PreloadRuns): a listing asks for the
+	// relations of every row it will view in one query each, instead of
+	// one query per row. A transaction that preloads must not also change
+	// what it loaded.
+	childrenByParent map[task.ID][]Record
+	runsByTask       map[task.ID][]Run
 }
 
 // Read runs fn in a read-only (deferred) transaction so that a multi-query
@@ -178,6 +185,16 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 			panic(p)
 		}
 	}()
+	// Arm the engine's wait bounds for this transaction before any of its
+	// statements: a remote statement that stalls then fails loudly instead
+	// of hanging, and the server abandons the transaction if the client
+	// stops driving it.
+	if bounds := s.d.txBounds(); bounds != "" {
+		if _, err := tx.ExecContext(ctx, bounds); err != nil {
+			_ = tx.Rollback()
+			return fault.WrapInternal(err, "arm transaction bounds")
+		}
+	}
 	if err := fn(&Tx{tx: rebindTx{tx: tx, d: s.d}, ctx: ctx, d: s.d}); err != nil {
 		_ = tx.Rollback()
 		if cerr := ctx.Err(); cerr != nil && fault.IsInternal(err) {
