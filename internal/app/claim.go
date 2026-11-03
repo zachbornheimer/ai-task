@@ -63,7 +63,7 @@ func (e *Engine) Claim(ctx context.Context, req ClaimRequest) (Session, error) {
 	}
 	if !req.Wait {
 		s, err := e.claimOnce(ctx, req, lease)
-		if err == errNoClaimable && req.GroupID != "" { //nolint:errorlint // the sentinel is returned as is; errors.Is matches by code
+		if errors.Is(err, errNoClaimable) && req.GroupID != "" {
 			return Session{}, e.groupIdle(ctx, req.GroupID)
 		}
 		return s, err
@@ -186,7 +186,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 				return err
 			}
 			if !ok {
-				return errNoClaimable
+				return noClaimableFault()
 			}
 			r = cand
 			if proj, err = tx.GetProject(r.Task.ProjectID); err != nil {

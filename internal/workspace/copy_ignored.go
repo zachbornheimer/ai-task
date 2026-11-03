@@ -107,7 +107,7 @@ func copyFile(from, to string) error {
 	if err := os.MkdirAll(filepath.Dir(to), 0o750); err != nil {
 		return err
 	}
-	in, err := os.Open(from)
+	in, err := os.Open(filepath.Clean(from))
 	if err != nil {
 		// A file the walk listed can disappear while a dev server rewrites
 		// build output; that is a race, not a broken copy.
@@ -116,17 +116,17 @@ func copyFile(from, to string) error {
 		}
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	info, err := in.Stat()
 	if err != nil {
 		return err
 	}
-	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	out, err := os.OpenFile(filepath.Clean(to), os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
 		return err
 	}
 	return out.Close()

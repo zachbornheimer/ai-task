@@ -1,8 +1,8 @@
 package process
 
 import (
+	"context"
 	"os"
-	"os/exec"
 	"testing"
 )
 
@@ -13,7 +13,12 @@ func TestOwnerOfLiveProcessIsNotGone(t *testing.T) {
 }
 
 func TestOwnerOfExitedProcessIsGone(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^$") //nolint:gosec // re-executes this test binary, no external input // nosemgrep
+	// os.Executable, not os.Args[0]: the running test binary's own path.
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := Command(context.Background(), "", exe, "-test.run=^$")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

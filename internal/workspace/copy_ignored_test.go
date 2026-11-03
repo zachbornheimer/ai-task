@@ -25,20 +25,20 @@ func newCopyFixture(t *testing.T) (src, dst string) {
 	dst = filepath.Join(base, "dst")
 	must.OK(t, os.MkdirAll(src, 0o750))
 	must.OK(t, os.MkdirAll(dst, 0o750))
-	g := func(args ...string) string { return testgit.Run(t, src, args...) }
+	g := func(args ...string) { testgit.Run(t, src, args...) }
 	g("init", "-q", "-b", "main")
-	must.OK(t, os.WriteFile(filepath.Join(src, ".gitignore"), []byte("node_modules/\ndist/\n.worktrees/\n"), 0o644))
-	must.OK(t, os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(src, ".gitignore"), []byte("node_modules/\ndist/\n.worktrees/\n"), 0o600))
+	must.OK(t, os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n"), 0o600))
 	// The ignored dependency tree, including a built native addon.
 	must.OK(t, os.MkdirAll(filepath.Join(src, "node_modules", "pi_natives", "build"), 0o750))
-	must.OK(t, os.WriteFile(filepath.Join(src, "node_modules", "pi_natives", "build", "Release.node"), []byte("native"), 0o644))
-	must.OK(t, os.WriteFile(filepath.Join(src, "node_modules", "pi_natives", "index.js"), []byte("module.exports = 1\n"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(src, "node_modules", "pi_natives", "build", "Release.node"), []byte("native"), 0o600))
+	must.OK(t, os.WriteFile(filepath.Join(src, "node_modules", "pi_natives", "index.js"), []byte("module.exports = 1\n"), 0o600))
 	// A nested ignored artifact outside node_modules.
 	must.OK(t, os.MkdirAll(filepath.Join(src, "dist", "sub"), 0o750))
-	must.OK(t, os.WriteFile(filepath.Join(src, "dist", "sub", "out.bin"), []byte("artifact"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(src, "dist", "sub", "out.bin"), []byte("artifact"), 0o600))
 	// Worktree state that must never be copied.
 	must.OK(t, os.MkdirAll(filepath.Join(src, ".worktrees", "other"), 0o750))
-	must.OK(t, os.WriteFile(filepath.Join(src, ".worktrees", "other", "HEAD"), []byte("state"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(src, ".worktrees", "other", "HEAD"), []byte("state"), 0o600))
 	g("add", ".")
 	g("commit", "-q", "-m", "init")
 	// A git worktree at dst so copied state stays out of VCS.
@@ -75,11 +75,11 @@ func TestCopyIgnoredIsIdempotentAndSkipsExisting(t *testing.T) {
 		t.Fatalf("first CopyIgnored: %v", err)
 	}
 	marker := filepath.Join(dst, "node_modules", "pi_natives", "index.js")
-	must.OK(t, os.WriteFile(marker, []byte("edited in destination"), 0o644))
+	must.OK(t, os.WriteFile(marker, []byte("edited in destination"), 0o600))
 	if err := CopyIgnored(context.Background(), src, dst); err != nil {
 		t.Fatalf("second CopyIgnored: %v", err)
 	}
-	got, err := os.ReadFile(marker)
+	got, err := os.ReadFile(filepath.Clean(marker))
 	if err != nil {
 		t.Fatalf("read marker: %v", err)
 	}
@@ -93,9 +93,9 @@ func TestCopyIgnoredNoIgnoresIsNoOp(t *testing.T) {
 	src := filepath.Join(base, "src")
 	dst := filepath.Join(base, "dst")
 	must.OK(t, os.MkdirAll(src, 0o750))
-	g := func(args ...string) string { return testgit.Run(t, src, args...) }
+	g := func(args ...string) { testgit.Run(t, src, args...) }
 	g("init", "-q", "-b", "main")
-	must.OK(t, os.WriteFile(filepath.Join(src, "tracked.txt"), []byte("x"), 0o644))
+	must.OK(t, os.WriteFile(filepath.Join(src, "tracked.txt"), []byte("x"), 0o600))
 	g("add", ".")
 	g("commit", "-q", "-m", "init")
 	testgit.Run(t, src, "worktree", "add", "--detach", dst, "HEAD")

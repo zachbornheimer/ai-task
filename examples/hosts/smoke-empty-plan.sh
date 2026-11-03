@@ -13,14 +13,13 @@ git -C "$d" add -A && git -C "$d" -c user.name=atask -c user.email=atask@localho
 ATASK_DB="$d/db" atask project --db "$d/db" --project empty-host >/dev/null
 unset ATASK_SESSION
 export ATASK_DB="$d/db" ATASK_PROJECT=empty-host
-TIMEOUT="timeout"
+# GNU timeout --foreground keeps the host loop in the terminal's process
+# group so it still reads EOF; BSD timeout has no such flag.
 if timeout --foreground 1 true >/dev/null 2>&1; then
-	TIMEOUT="timeout --foreground"
+	run() { timeout --foreground 10 "$@"; }
+else
+	run() { timeout 10 "$@"; }
 fi
-run() {
-	# shellcheck disable=SC2086
-	$TIMEOUT 10 "$@"
-}
 cd "$root"
 run sh examples/hosts/codex.sh
 run sh examples/hosts/opencode.sh

@@ -8,6 +8,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/must"
+	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
 // branchAdding commits file on a new branch off main and returns the
@@ -27,7 +28,7 @@ func failingCommitHooks(r *repo) {
 	r.t.Helper()
 	hooks := filepath.Join(r.t.TempDir(), "hooks")
 	must.OK(r.t, os.MkdirAll(hooks, 0o750))
-	must.OK(r.t, os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte("#!/bin/sh\necho 'commit-msg: command not found' >&2\nexit 1\n"), 0o700)) //nolint:gosec // test hook must be executable
+	testgit.WriteExecutable(r.t, filepath.Join(hooks, "commit-msg"), "#!/bin/sh\necho 'commit-msg: command not found' >&2\nexit 1\n")
 	r.git(r.dir, "config", "core.hooksPath", hooks)
 }
 

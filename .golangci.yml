@@ -1,4 +1,5 @@
-# Shared dev-profile golangci config plus one repo-local exclusion (below).
+# Shared dev-profile golangci config, with no repo-local exclusions: a finding
+# is fixed at its source, never filtered.
 version: "2"
 run:
   timeout: 5m
@@ -77,16 +78,6 @@ linters:
     nolintlint:
       require-explanation: true
       require-specific: true
-  exclusions:
-    generated: lax
-    warn-unused: true
-    rules:
-      # G204 describes the product: running the user's declared proof command.
-      # The open design question of what limits a proof runs under (sandbox,
-      # env scrubbing, provenance) is deferred; see docs.
-      - linters: [gosec]
-        text: "^G204:"
-        path: "^(internal/process/|test/e2e/)"
   default: none
 formatters:
   enable:

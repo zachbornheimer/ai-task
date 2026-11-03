@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
@@ -10,10 +11,17 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
-// errNoClaimable is claimOnce's answer when no candidate exists. It is
-// returned as is so a group claim can tell it from other NOT_READY causes
-// by identity and say what the group is waiting for.
-var errNoClaimable = fault.New(fault.CodeNotReady, "no claimable task")
+// errNoClaimable identifies claimOnce's answer when no candidate exists. It is
+// a plain value, never a fault: fault.Error.Is matches every error carrying the
+// same code, so a NOT_READY sentinel would also read a failed workspace or a
+// busy store as an empty board. Callers match it with errors.Is;
+// noClaimableFault carries the same answer to the wire as NOT_READY.
+var errNoClaimable = errors.New("no claimable candidate")
+
+// noClaimableFault is errNoClaimable as the coded answer callers receive.
+func noClaimableFault() error {
+	return fault.Wrap(errNoClaimable, fault.CodeNotReady, "no claimable task")
+}
 
 // GroupNotReady is the detail of a NOT_READY group claim: nothing is
 // claimable now, yet the group is neither done nor stalled.

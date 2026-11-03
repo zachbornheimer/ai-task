@@ -87,7 +87,9 @@ func TestSandboxAllowsToolchainAndGitCommit(t *testing.T) {
 	isolatedGit := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	git := func(dir string, args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
+		cmd := exec.Command("git")
+		cmd.Args = append(cmd.Args, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false")
+		cmd.Args = append(cmd.Args, args...)
 		cmd.Dir, cmd.Env = dir, isolatedGit
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)

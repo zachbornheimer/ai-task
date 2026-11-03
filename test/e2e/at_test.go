@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	_ "github.com/zachbornheimer/ai-task/internal/cli"
 	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/must"
+	"github.com/zachbornheimer/ai-task/internal/process"
 	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
@@ -126,8 +128,7 @@ type result struct {
 
 func (e *env) runIn(dir string, stdin string, extraEnv []string, args ...string) result {
 	e.t.Helper()
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = dir
+	cmd := process.Command(context.Background(), dir, bin, args...)
 	cmd.Env = append(append([]string{}, e.env...), extraEnv...)
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
