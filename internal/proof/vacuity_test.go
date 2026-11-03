@@ -8,7 +8,11 @@ import (
 )
 
 func TestVacuousProofRejected(t *testing.T) {
-	long := "run: echo " + strings.Repeat("a", 301)
+	long := "run: echo " + strings.Repeat("a", maxRunArgLen+1)
+	// A long but legitimate check is accepted: a shell pipeline travels through
+	// one `sh -c` argument, and the webmaster security checks are longer than the
+	// old 300-char cap. Only a subject over the cap is refused.
+	longCheck := "run: grep -q " + strings.Repeat("a", 350) + " file.txt"
 	cases := []struct {
 		proof string
 		size  Size
@@ -27,6 +31,7 @@ func TestVacuousProofRejected(t *testing.T) {
 		{"run: go test ./... -run TestX", SizeSmall, ""},
 		{"run: echo aGk= | base64 -d | sh", SizeSmall, "encoded payload"},
 		{long, SizeSmall, "too long"},
+		{longCheck, SizeSmall, ""},
 		{"run: grep -q foo file.txt", SizeSmall, ""},
 	}
 	for _, c := range cases {

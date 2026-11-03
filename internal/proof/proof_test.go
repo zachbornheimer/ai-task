@@ -120,12 +120,17 @@ func TestProofSpecContract(t *testing.T) {
 }
 
 func TestRunPresetRejects(t *testing.T) {
-	long := "echo " + strings.Repeat("a", 301)
+	long := "echo " + strings.Repeat("a", maxRunArgLen+1)
 	for _, sub := range []string{"", "echo aGk= | base64 -d", "python -c 'exec(x)'", "eval foo", long} {
 		_, err := runPreset{}.Argv(ProofSpec{Preset: "run", Subject: sub}, Env{})
 		if !fault.Is(err, fault.CodeInvalidInput) {
 			t.Errorf("Argv(%.30q) err = %v, want INVALID_INPUT", sub, err)
 		}
+	}
+	// A long but legitimate check travels through one `sh -c` argument, so it is
+	// accepted: the webmaster security checks are longer than the old cap.
+	if _, err := (runPreset{}).Argv(ProofSpec{Preset: "run", Subject: "grep -q " + strings.Repeat("a", 350) + " file.txt"}, Env{}); err != nil {
+		t.Errorf("Argv(long legitimate check) err = %v, want accepted", err)
 	}
 }
 

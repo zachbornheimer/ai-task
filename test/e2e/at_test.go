@@ -385,7 +385,7 @@ func TestConcurrentProcessesClaimDistinctTasks(t *testing.T) {
 func TestChecksRunWithoutHoldingTheDatabase(t *testing.T) {
 	e := gitEnv(t)
 	script := bin + " --db " + e.db + " --project g add from-inside-check --proof 'run: test -d .' --regression 'run: true'"
-	// The run preset caps one argument at 300 chars; a long state path would
+	// The run preset caps one argument at maxRunArgLen chars; a long state path would
 	// exceed that inline, so the nested command lives in a script file.
 	scriptFile, err := os.CreateTemp("", "nested-*.sh")
 	if err != nil {

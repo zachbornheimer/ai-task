@@ -7,8 +7,11 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
-// maxRunArgLen caps one argument of a raw command; longer ones smuggle code.
-const maxRunArgLen = 300
+// maxRunArgLen caps one argument of a raw command. A self-contained check that
+// uses shell syntax travels through one `sh -c` argument, so the cap admits a
+// whole pipeline; the encodedPayload rule below is the sharper guard against
+// code smuggled in a check.
+const maxRunArgLen = 4096
 
 const shellSyntax = "|;>$"
 
