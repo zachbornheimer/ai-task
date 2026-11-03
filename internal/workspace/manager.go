@@ -138,6 +138,14 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 			info.Dirty = !st.Clean()
 		}
 	}
+	// Provision the source checkout's ignored dependencies (node_modules,
+	// built artifacts) into the worktree; Worktrunk's post-start hook that
+	// would do this is skipped for task worktrees. Advisory: a check
+	// environment must never fail because provisioning did, but the failure
+	// has to be visible in the log.
+	if err := CopyIgnored(ctx, m.Repo, info.Path); err != nil {
+		fmt.Fprintf(os.Stderr, "atask: ignored dependencies were not provisioned in %s: %v\n", info.Path, err)
+	}
 	return info, nil
 }
 
@@ -221,6 +229,12 @@ func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cl
 	}
 	if err := gitRetry(ctx, m.Repo, "worktree", "add", "--detach", path, revision); err != nil {
 		return "", nil, fault.Wrap(err, fault.CodeNotReady, "snapshot %s", revision)
+	}
+	// Same provisioning as EnsureTask: snapshots are created outside
+	// Worktrunk, so nothing else would give checks the source's installed
+	// dependencies. Advisory, for the same reason.
+	if err := CopyIgnored(ctx, m.Repo, path); err != nil {
+		fmt.Fprintf(os.Stderr, "atask: ignored dependencies were not provisioned in snapshot %s: %v\n", path, err)
 	}
 	cleanup = func() {
 		_, _ = git(context.Background(), m.Repo, "worktree", "remove", "--force", path)

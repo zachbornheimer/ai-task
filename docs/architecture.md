@@ -96,6 +96,11 @@ the editable worktree. Completion records the revision and never moves the targe
 Concurrent `git worktree add` calls retry briefly on Git's lock files.
 Worktrees are never deleted by `at`; prune them with your worktree
 tooling.
+Task worktrees and verify snapshots copy the source checkout's gitignored
+files (installed dependencies, built artifacts) at creation, so checks do
+not fail on a freshly created tree; the copy is idempotent, excludes VCS and
+worktree state, and is advisory — a provisioning failure is logged and
+never fails a claim or a check run.
 
 ## State location
 
