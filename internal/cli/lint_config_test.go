@@ -14,7 +14,6 @@ import (
 const (
 	repoLintConfigPath      = "../../.golangci.yml"
 	sharedLintConfigRelPath = ".local/share/dev-profile/golangci.yml"
-	execBoundaryRuleText    = "^G204:"
 )
 
 type lintConfig struct {
@@ -58,11 +57,9 @@ func TestRepoLintConfigKeepsSharedRules(t *testing.T) {
 		t.Errorf("enabled linters drifted from shared config:\nrepo   %v\nshared %v",
 			repo.Linters.Enable, shared.Linters.Enable)
 	}
-	rules := repo.Linters.Exclusions.Rules
-	if len(rules) != 1 {
-		t.Fatalf("want exactly one exclusion rule, got %d", len(rules))
-	}
-	if !reflect.DeepEqual(rules[0].Linters, []string{"gosec"}) || rules[0].Text != execBoundaryRuleText {
-		t.Errorf("exclusion must target gosec G204 only, got %+v", rules[0])
+	// A finding is fixed at its source, never filtered: this repo carries no
+	// exclusion rule of its own.
+	if rules := repo.Linters.Exclusions.Rules; len(rules) != 0 {
+		t.Errorf("repo lint config must carry no exclusion rules, got %+v", rules)
 	}
 }

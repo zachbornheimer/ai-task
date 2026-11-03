@@ -33,7 +33,11 @@ func TestHelpNamesDefaults(t *testing.T) {
 	if !strings.Contains(out, "--attempts") {
 		t.Fatalf("at help does not name --attempts:\n%s", out)
 	}
-	// With ATASK_DB unset, --db's help names where the database lives.
+	// With no database configured, --db's help names where the database
+	// lives. The injected Getenv covers the CLI; DefaultPath reads the
+	// process environment, so clear that too.
+	t.Setenv("ATASK_DB_URL", "")
+	t.Setenv("ATASK_DB", "")
 	var o, e bytes.Buffer
 	Main(Env{Args: []string{"status", "--help"}, Stdout: &o, Stderr: &e, Cwd: t.TempDir(), Getenv: func(string) string { return "" }})
 	def, err := app.DefaultPath()
