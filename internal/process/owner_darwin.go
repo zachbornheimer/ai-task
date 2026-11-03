@@ -16,5 +16,5 @@ func startTime(pid int) (string, bool) {
 		return "", false
 	}
 	t := k.Proc.P_starttime
-	return strconv.FormatInt(int64(t.Sec), 10) + "." + strconv.FormatInt(int64(t.Usec), 10), true
+	return strconv.FormatInt(t.Sec, 10) + "." + strconv.FormatInt(int64(t.Usec), 10), true
 }

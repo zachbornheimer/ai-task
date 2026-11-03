@@ -13,7 +13,7 @@ func TestOwnerOfLiveProcessIsNotGone(t *testing.T) {
 }
 
 func TestOwnerOfExitedProcessIsGone(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	cmd := exec.Command(os.Args[0], "-test.run=^$") //nolint:gosec // re-executes this test binary, no external input // nosemgrep
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
