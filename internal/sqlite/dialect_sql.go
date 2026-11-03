@@ -44,9 +44,12 @@ const (
 	// claimableProofExpr rejects a draft: a task that declared a proof
 	// spec but no regression spec cannot be claimed. SQLite reports a
 	// JSON path's type as NULL when the path is absent; PostgreSQL
-	// answers key presence with ?.
+	// answers key presence with jsonb_exists, the function form of its
+	// ? operator. The operator form is forbidden here: rebindPlaceholders
+	// rewrites every ? into a $n placeholder, so an operator ? would be
+	// read as an argument the caller never bound.
 	claimableProofExpr   = `AND NOT (json_type(t.policy_json, '$.proof') IS NOT NULL AND json_type(t.policy_json, '$.regression_proof') IS NULL)`
-	pgClaimableProofExpr = `AND NOT (t.policy_json::jsonb ? 'proof' AND NOT t.policy_json::jsonb ? 'regression_proof')`
+	pgClaimableProofExpr = `AND NOT (jsonb_exists(t.policy_json::jsonb, 'proof') AND NOT jsonb_exists(t.policy_json::jsonb, 'regression_proof'))`
 )
 
 // claimableWhereTemplate is claimableWhere with placeholders for the two
