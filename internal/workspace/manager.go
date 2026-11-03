@@ -205,6 +205,15 @@ func (m Manager) Revision(ctx context.Context, ref string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// HasCommit reports whether revision names a commit in this repository.
+// A missing object is false, not an error: callers that must merge the
+// revision still fail later, and a revision from another repository is
+// not one of those.
+func (m Manager) HasCommit(ctx context.Context, revision string) bool {
+	_, err := git(ctx, m.Repo, "rev-parse", "--verify", "--quiet", revision+"^{commit}")
+	return err == nil
+}
+
 // Snapshot checks out revision into a detached, disposable worktree so
 // checks run against immutable inputs. The caller must call cleanup.
 func (m Manager) Snapshot(ctx context.Context, revision string) (path string, cleanup func(), err error) {

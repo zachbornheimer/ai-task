@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -151,7 +152,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	var proj project.Project
 	var attempt execution.Attempt
 	quarantineSeq := 0
-	var required []workspace.Requirement
+	var recorded []recordedRequirement
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		var r sqlite.Record
 		var err error
@@ -211,7 +212,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		if prev := r.Attempt; prev != nil && prev.EndedAt == nil {
 			quarantineSeq = prev.Seq
 		}
-		if required, err = completedRequirements(tx, r.Task.ID); err != nil {
+		if recorded, err = recordedRequirements(tx, r.Task.ID); err != nil {
 			return err
 		}
 		attempt, err = tx.StartAttempt(r.Task.ID, r.Attempt, token.Digest(), now, lease)
@@ -267,6 +268,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	// quarantined first, so a stale process keeps only its own expired
 	// token and can never reach this attempt's files or branch.
 	mgr := e.manager(proj)
+	required, foreignNotes := mergeableRequirements(ctx, mgr, proj.RootPath, recorded)
 	base, werr := proj.TargetBranch, error(nil)
 	var baseNotes []string
 	if !mgr.BranchExists(ctx, workspace.TaskBranch(string(sess.Task.ID))) {
@@ -274,6 +276,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		resolved, werr = mgr.ResolveBase(ctx, proj.TargetBranch, required)
 		base, baseNotes = resolved.Revision, resolved.Explain()
 	}
+	baseNotes = append(baseNotes, foreignNotes...)
 	var info workspace.Info
 	if werr == nil {
 		info, werr = mgr.EnsureTask(ctx, string(sess.Task.ID), base, quarantineSeq)
@@ -323,21 +326,55 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	return sess, nil
 }
 
-// completedRequirements lists the completed revisions of the tasks id
-// requires, in requirement order.
-func completedRequirements(tx *sqlite.Tx, id task.ID) ([]workspace.Requirement, error) {
+// recordedRequirement is a completed prerequisite plus the root of the
+// repository its completion was recorded in.
+type recordedRequirement struct {
+	workspace.Requirement
+	Root string
+}
+
+// recordedRequirements lists the completed revisions of the tasks id
+// requires, in requirement order, with each task's home repository.
+func recordedRequirements(tx *sqlite.Tx, id task.ID) ([]recordedRequirement, error) {
 	recs, err := tx.Requirements(id)
 	if err != nil {
 		return nil, err
 	}
-	var out []workspace.Requirement
+	var out []recordedRequirement
 	for i := range recs {
 		r := &recs[i]
-		if r.CompletedRevision != "" {
-			out = append(out, workspace.Requirement{Task: string(r.Task.ID), Revision: r.CompletedRevision})
+		if r.CompletedRevision == "" {
+			continue
 		}
+		home, err := tx.GetProject(r.Task.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, recordedRequirement{
+			Requirement: workspace.Requirement{Task: string(r.Task.ID), Revision: r.CompletedRevision},
+			Root:        home.RootPath,
+		})
 	}
 	return out, nil
+}
+
+// mergeableRequirements drops a prerequisite whose revision belongs to
+// another repository and is not an object here. Sequencing still holds:
+// the prerequisite is complete. Merging its commit into this repository
+// cannot, and treating the missing object as a compare failure blocks the
+// claim. A missing object in this repository is left in place so the
+// compare reports it.
+func mergeableRequirements(ctx context.Context, mgr workspace.Manager, homeRoot string, recs []recordedRequirement) ([]workspace.Requirement, []string) {
+	var out []workspace.Requirement
+	var notes []string
+	for _, r := range recs {
+		if r.Root != homeRoot && !mgr.HasCommit(ctx, r.Revision) {
+			notes = append(notes, fmt.Sprintf("base: %s completed in another repository; not merged", r.Task))
+			continue
+		}
+		out = append(out, r.Requirement)
+	}
+	return out, notes
 }
 
 // inheritContext adds prerequisite learnings and the last failure to a
