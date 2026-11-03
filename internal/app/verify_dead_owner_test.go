@@ -25,7 +25,7 @@ import (
 // unless the parent set its environment.
 const (
 	helperDBEnv    = "ATASK_TEST_VERIFY_DB"
-	helperTokenEnv = "ATASK_TEST_VERIFY_TOKEN" //nolint:gosec // an environment variable name, not a credential
+	helperTokenEnv = "ATASK_TEST_VERIFY_TOKEN"
 )
 
 func TestHelperVerifyProcess(t *testing.T) {
@@ -71,7 +71,7 @@ func killedVerify(t *testing.T, f *fixture) deadOwnerRun {
 	}
 	f.commit(s.Workspace, "d.txt", "d")
 
-	child := exec.Command(os.Args[0], "-test.run=^TestHelperVerifyProcess$") //nolint:gosec // re-executes this test binary, no external input // nosemgrep
+	child := exec.Command(os.Args[0], "-test.run=^TestHelperVerifyProcess$")
 	child.Env = append(os.Environ(), helperDBEnv+"="+f.path, helperTokenEnv+"="+string(s.Token))
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func killedVerify(t *testing.T, f *fixture) deadOwnerRun {
 	t.Cleanup(func() {
 		_ = child.Process.Kill()
 		_ = child.Wait()
-		if b, err := os.ReadFile(pidFile); err == nil { //nolint:gosec // pidFile is a test temp path
+		if b, err := os.ReadFile(pidFile); err == nil {
 			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
 				_ = syscall.Kill(pid, syscall.SIGKILL) // the check outlives its killed parent
 			}
@@ -98,7 +98,7 @@ func killedVerify(t *testing.T, f *fixture) deadOwnerRun {
 	// Verifying is recorded before the check starts: kill only once the
 	// check is running, or the marker the later runs rely on is missing.
 	for {
-		if b, err := os.ReadFile(pidFile); err == nil && strings.TrimSpace(string(b)) != "" { //nolint:gosec // pidFile is a test temp path
+		if b, err := os.ReadFile(pidFile); err == nil && strings.TrimSpace(string(b)) != "" {
 			break
 		}
 		if time.Now().After(deadline) {
