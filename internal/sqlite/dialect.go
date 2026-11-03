@@ -99,9 +99,14 @@ func b2i(b bool) int64 {
 	return 0
 }
 
-// rebindPlaceholders rewrites each ? marker into $1, $2, ... in order. No
-// query in this package puts a ? inside a string literal, so a positional
-// scan is exact.
+// rebindPlaceholders rewrites each ? marker into $1, $2, ... in order. The
+// scan is positional and literal-blind: every ? in a statement is a
+// placeholder, so no query in this package may put a ? inside a string
+// literal, and no PostgreSQL fragment may spell an operator ? (use the
+// operator's function form instead: jsonb_exists for jsonb's ?). A
+// TestScopeClaimableBindsOneArgumentPerPlaceholder pins that invariant: it
+// renders the claimable statement for both engines and fails when the
+// placeholder count and the argument count disagree.
 func rebindPlaceholders(q string) string {
 	var b strings.Builder
 	n := 0

@@ -114,4 +114,8 @@ project. Network filesystems are unsupported.
 `RETURNING id` for allocated ids, and the two engine-specific query
 fragments) so the rest of the engine runs unchanged. Local SQLite files
 keep today's DSN pragmas exactly. `atask sync` copies the local state into
-the remote database; it is the only writer of the remote one.
+the remote database; it is the only writer of the remote one. Placeholder
+rebinding reads every `?` in a statement as an argument marker, so an
+engine fragment that wants an operator spelled `?` (PostgreSQL's `jsonb ?`)
+must use the operator's function form (`jsonb_exists`); otherwise the
+operator becomes a `$n` no argument fills and the statement fails to parse.
