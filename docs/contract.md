@@ -116,6 +116,11 @@ proofs verbatim.
 | `http_ok: URL [status=CODE body=REGEX]`          | GET returns the status (default 2xx) and body matches                                                                  | small  |
 | `pr_merged: NUMBER\|URL`                         | the PR is merged into the target branch                                                                                | small  |
 
+The `file_exists`, `file_absent`, `file_blake3`, and `grep` subjects name
+paths or globs inside the claim worktree: an absolute or `..`-escaping
+subject is `INVALID_INPUT` at `add`, because no worktree can satisfy it.
+Check a path outside the worktree with `run:` instead (e.g.
+`run: test -f /other/repo/file`).
 Custom presets live in `~/.config/atask/config.toml` and are listed by
 `atask help add` beside the built-ins. `{subject}` and `{option}` substitute
 into the argv; a missing required option is `INVALID_INPUT` at add.

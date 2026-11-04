@@ -13,7 +13,10 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
-var _ Evaluator = grepPreset{}
+var (
+	_ Evaluator = grepPreset{}
+	_ Validator = grepPreset{}
+)
 
 func init() { registerBuiltin(func() Preset { return grepPreset{} }) }
 
@@ -26,6 +29,13 @@ func (grepPreset) DefaultSize() Size { return SizeSmall }
 
 func (grepPreset) Argv(ProofSpec, Env) ([]string, error) {
 	return nil, fault.New(fault.CodeInvalidInput, "grep is evaluated in-process")
+}
+
+// Validate rejects a path no claim worktree can satisfy, so it fails at add
+// with the run: escape named instead of at verify; an empty subject reads as
+// the worktree itself and is allowed.
+func (grepPreset) Validate(spec ProofSpec) error {
+	return validateInsideWorktree("grep", spec.Subject, true)
 }
 
 func (grepPreset) Evaluate(spec ProofSpec, workdir string) (bool, string, error) {

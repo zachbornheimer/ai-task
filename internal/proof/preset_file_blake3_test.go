@@ -35,7 +35,6 @@ func TestPresetFileBlake3(t *testing.T) {
 		{"missing hash", "file_blake3: empty", false, "hash"},
 		{"short hash", "file_blake3: empty hash=abc", false, "64"},
 		{"non-hex hash", "file_blake3: empty hash=" + strings.Repeat("z", 64), false, "hex"},
-		{"escape", "file_blake3: ../empty hash=" + emptyBlake3, false, "outside"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

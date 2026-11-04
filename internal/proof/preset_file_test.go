@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zachbornheimer/ai-task/internal/fault"
 )
 
 func TestPresetFileExistsAbsent(t *testing.T) {
@@ -37,18 +39,18 @@ func TestPresetFileExistsAbsent(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			spec, err := Parse(c.in)
+			if c.invalid {
+				if !fault.Is(err, fault.CodeInvalidInput) {
+					t.Fatalf("Parse(%q) err = %v, want INVALID_INPUT", c.in, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
 			res := r.Run(context.Background(), CheckProof, spec, dir)
 			if res.Passed != c.pass {
 				t.Fatalf("passed=%v want %v: %s", res.Passed, c.pass, res.Output)
-			}
-			if c.invalid {
-				if res.ReturnCode != nil || res.Output == "" {
-					t.Fatalf("want rejection with no return code, got %+v", res)
-				}
-				return
 			}
 			if res.Output == "" || res.StartedAt.IsZero() || res.Preset != spec.Preset {
 				t.Fatalf("bad RunResult shape: %+v", res)
