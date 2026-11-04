@@ -15,6 +15,8 @@ import (
 
 const blake3HexLen = 64
 
+var _ Validator = fileBlake3Preset{}
+
 func init() { registerBuiltin(func() Preset { return fileBlake3Preset{} }) }
 
 // fileBlake3Preset passes when the blake3 digest of PATH equals hash=HEX.
@@ -26,6 +28,12 @@ func (fileBlake3Preset) DefaultSize() Size { return SizeSmall }
 
 func (fileBlake3Preset) Argv(ProofSpec, Env) ([]string, error) {
 	return nil, fault.New(fault.CodeInvalidInput, "file_blake3 evaluates in-process and has no argv")
+}
+
+// Validate rejects a path no claim worktree can satisfy, so it fails at add
+// with the run: escape named instead of at verify.
+func (fileBlake3Preset) Validate(spec ProofSpec) error {
+	return validateInsideWorktree("file_blake3", spec.Subject, false)
 }
 
 func (fileBlake3Preset) Evaluate(spec ProofSpec, workdir string) (bool, string, error) {

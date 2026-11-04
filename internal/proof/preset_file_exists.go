@@ -13,6 +13,7 @@ import (
 var (
 	_ = Preset(fileExistsPreset{})
 	_ = Evaluator(fileExistsPreset{})
+	_ = Validator(fileExistsPreset{})
 )
 
 func init() { registerBuiltin(func() Preset { return fileExistsPreset{} }) }
@@ -25,6 +26,12 @@ func (fileExistsPreset) Options() []string { return nil }
 func (fileExistsPreset) DefaultSize() Size { return SizeSmall }
 
 func (fileExistsPreset) Argv(ProofSpec, Env) ([]string, error) { return nil, nil }
+
+// Validate rejects a subject no claim worktree can satisfy, so it fails at
+// add with the run: escape named instead of at verify.
+func (fileExistsPreset) Validate(spec ProofSpec) error {
+	return validateInsideWorktree("file_exists", spec.Subject, false)
+}
 
 func (fileExistsPreset) Evaluate(spec ProofSpec, workdir string) (bool, string, error) {
 	rel, err := insideWorktree(spec.Subject)
@@ -46,9 +53,8 @@ func (fileExistsPreset) Evaluate(spec ProofSpec, workdir string) (bool, string, 
 // paths and any ".." escape.
 func insideWorktree(p string) (string, error) {
 	p = strings.TrimSpace(p)
-	clean := filepath.Clean(p)
-	if p == "" || filepath.IsAbs(p) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if p == "" || escapesWorktree(p) {
 		return "", fault.New(fault.CodeInvalidInput, "path %q must be relative and stay inside the worktree", p)
 	}
-	return clean, nil
+	return filepath.Clean(p), nil
 }

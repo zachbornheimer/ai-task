@@ -13,6 +13,7 @@ import (
 var (
 	_ = Preset(fileAbsentPreset{})
 	_ = Evaluator(fileAbsentPreset{})
+	_ = Validator(fileAbsentPreset{})
 )
 
 func init() { registerBuiltin(func() Preset { return fileAbsentPreset{} }) }
@@ -26,6 +27,12 @@ func (fileAbsentPreset) Options() []string { return []string{"depth"} }
 func (fileAbsentPreset) DefaultSize() Size { return SizeSmall }
 
 func (fileAbsentPreset) Argv(ProofSpec, Env) ([]string, error) { return nil, nil }
+
+// Validate rejects a glob no claim worktree can satisfy, so it fails at add
+// with the run: escape named instead of at verify.
+func (fileAbsentPreset) Validate(spec ProofSpec) error {
+	return validateInsideWorktree("file_absent", spec.Subject, false)
+}
 
 func (fileAbsentPreset) Evaluate(spec ProofSpec, workdir string) (bool, string, error) {
 	pattern, err := insideWorktree(spec.Subject)
