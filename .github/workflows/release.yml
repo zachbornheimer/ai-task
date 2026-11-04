@@ -1,0 +1,92 @@
+name: release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release per commit: a queued run for the same sha waits for the run in
+# flight, and a newer run never cancels a publish already underway.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      # A failed target must not cancel its siblings. The release job is what
+      # refuses to publish a partial set, because it needs every build.
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            goos: linux
+            goarch: amd64
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      # mise installs these assets by the OS/arch token in the archive name, so
+      # each archive holds one executable named `atask` at its root, with no
+      # leading directory, and nothing else.
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          go build -trimpath -o dist/atask ./cmd/atask
+          tar -C dist -czf "atask-${{ matrix.target }}.tar.gz" atask
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: atask-${{ matrix.target }}
+          path: atask-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: assets
+          merge-multiple: true
+      # Written next to the archives, so the release carries checksums a
+      # consumer verifies without a second download host.
+      - name: checksums
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          sha256sum atask-*.tar.gz > SHA256SUMS
+      # A rolling tag, so mise's `version = "latest"` resolves to this build and
+      # the commit it came from is readable off the tag itself.
+      - name: tag
+        id: tag
+        run: |
+          set -euo pipefail
+          echo "tag=build-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          files: assets/*
+          fail_on_unmatched_files: true
+          make_latest: true
