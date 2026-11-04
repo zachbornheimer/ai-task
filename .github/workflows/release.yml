@@ -83,10 +83,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "tag=build-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.tag }}
-          files: assets/*
-          fail_on_unmatched_files: true
-          make_latest: true
+      # gh is already on the runner, and --latest is what mise's `version =
+      # "latest"` reads: no third-party release action to pin or trust.
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ls assets/atask-*.tar.gz >/dev/null
+          gh release create "$TAG" --title "$TAG" --latest assets/*
