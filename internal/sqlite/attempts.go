@@ -45,9 +45,11 @@ func (t *Tx) AttemptByDigest(digest string) (AttemptAuth, error) {
 
 // StartAttempt atomically advances the task's generation, ends the previous
 // attempt if it was still open, and records the new attempt. It returns the
-// new attempt.
+// new attempt. The attempt is recorded with the claim window, not the whole
+// lease: until its worktree exists the task is freed inside that window rather
+// than held for the lease by a claim that cannot be worked on or released.
 func (t *Tx) StartAttempt(id task.ID, prev *execution.Attempt, digest string, now time.Time, lease time.Duration) (execution.Attempt, error) {
-	expires := now.Add(lease)
+	expires := execution.ClaimExpiry(now, lease)
 	seq := 1
 	if prev != nil {
 		seq = prev.Seq + 1

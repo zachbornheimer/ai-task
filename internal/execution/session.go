@@ -49,6 +49,25 @@ func (t Token) Digest() string {
 // (the next attempt reuses the task worktree), a stuck task is not.
 const DefaultLease = 30 * time.Minute
 
+// ClaimWindow is how long an attempt that has not stored its worktree yet
+// holds the task. A claim records its attempt, builds the worktree, and stores
+// the token in that worktree last, so a process killed in between leaves a
+// claim nobody can work on and nobody holds a token to release: this window is
+// the whole recovery time. It matches the caller-side bound on one claim (the
+// start_atask_task capability gives up on a claim after five minutes), so a
+// claim that outlives it has already failed its caller.
+const ClaimWindow = 5 * time.Minute
+
+// ClaimExpiry is the expiry an attempt is recorded with: at most the claim
+// window, until its worktree exists and the claim can be worked on. The claim
+// grants itself the attempt's whole lease when it stores the worktree.
+func ClaimExpiry(now time.Time, lease time.Duration) time.Time {
+	if lease <= 0 || lease > ClaimWindow {
+		lease = ClaimWindow
+	}
+	return now.Add(lease)
+}
+
 // HeartbeatInterval is how often a long operation renews its lease.
 const HeartbeatInterval = 5 * time.Minute
 

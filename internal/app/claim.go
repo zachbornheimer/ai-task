@@ -238,19 +238,30 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
+	// The crash seam: an attempt recorded and then lost, exactly as a claim
+	// killed before it stores its worktree leaves the store.
+	if err := e.fault("claim:after-attempt"); err != nil {
+		return Session{}, err
+	}
 	if proj.Rootless() {
 		// A rootless attempt runs in place where it was claimed: its checks
 		// and on-complete actions use the claiming directory, the same
 		// directory its session token is stored under.
 		dir := e.cwd
+		expires := e.now().Add(lease)
 		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 			if err := tx.SetWorkspace(attempt.ID, dir, ""); err != nil {
+				return err
+			}
+			// The claim can be worked on now, so its whole lease starts here.
+			if err := tx.RenewLease(attempt.ID, expires); err != nil {
 				return err
 			}
 			return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
 		}); err != nil {
 			return Session{}, err
 		}
+		sess.LeaseUntil = expires
 		if err := e.storeRootlessToken(sess); err != nil {
 			return Session{}, err
 		}
@@ -298,8 +309,14 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		}
 		return Session{}, fault.New(fault.CodeNotReady, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
 	}
+	expires := e.now().Add(lease)
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := tx.SetWorkspace(attempt.ID, info.Path, info.Branch); err != nil {
+			return err
+		}
+		// The worktree holds the token, so the claim can be worked on now:
+		// its whole lease starts here, not at the attempt record.
+		if err := tx.RenewLease(attempt.ID, expires); err != nil {
 			return err
 		}
 		if len(baseNotes) > 0 {
@@ -312,6 +329,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	}); err != nil {
 		return Session{}, err
 	}
+	sess.LeaseUntil = expires
 	sess.Workspace, sess.Branch, sess.WorkspaceDirty, sess.QuarantinedWorkspace = info.Path, info.Branch, info.Dirty, info.Quarantined
 	sess.TargetBranch, sess.Regression = proj.TargetBranch, regressionChecks(sess.Task.Regression)
 	if rev, err := mgr.Revision(ctx, "refs/heads/"+proj.TargetBranch); err == nil {
