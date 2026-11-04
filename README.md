@@ -109,7 +109,9 @@ loops.
   optimistic concurrency; a DAG of hard prerequisites; organizational
   groups that never imply edges.
 - One leased attempt per task; tokens stored as digests; stale tokens are
-  inert; oldest-eligible deterministic claims; `DONE` / `STALLED` for
+  inert; a claim's lease starts when its worktree lands, so a claim that
+  died before then frees the task in five minutes, not the lease;
+  oldest-eligible deterministic claims; `DONE` / `STALLED` for
   waiting workers. One worktree per task (`atask/<id>`), reused across
   attempts, carrying the session token so commands run there need none;
   an attempt that never ended has its worktree quarantined on takeover,

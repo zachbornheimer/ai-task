@@ -108,6 +108,12 @@ claimed and verifying.
   lease.
   (`TestTakeoverLeavesStaleTokenPowerless`, `e2e.TestAgentLoopEndToEnd`,
   `e2e.TestDiscoveredBlockerFromWorktree`)
+- A claim holds the task for the claim window (`execution.ClaimWindow`,
+  five minutes) until its worktree is stored, then for its whole lease: a
+  claim whose process died before it stored the worktree and printed its
+  token comes back on its own instead of blocking the task for the lease.
+  (`TestClaimWindowFreesATaskWhoseWorktreeWasNeverStored`,
+  `TestStoredWorktreeHoldsTheWholeLease`)
 - The handoff carries prerequisites' learnings and the newest failed
   run's evidence. (`TestHandoffCarriesPrerequisiteLearningsAndLastFailure`)
 - The proof and the regression run on separate snapshots; a file the
