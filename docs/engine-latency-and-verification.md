@@ -44,7 +44,7 @@ are from that diagnosis; anything not measured is marked.
 | Build cache | `CARGO_TARGET_DIR`, `CARGO_HOME`, `RUSTUP_HOME`, `SCCACHE_DIR`, `RUSTC_WRAPPER` reach checks. Exact names: the `CARGO_REGISTRY_TOKEN` family stays blocked                                                                                                                                                                      | `TestSnapshotChecksSeeBuildCacheEnv`                                                |
 | Budgets     | `add` and `update` warn when a `run:` check looks like a full build or suite and sets no `size=`                                                                                                                                                                                                                                | `TestHeavyWithoutSize`, `TestAddWarnsAboutAHeavyCheckWithoutSize`                   |
 | Timings     | The `verify complete` result carries `phases` (`snapshot_ms`, `checks_ms`, `cleanup_ms`, `record_ms`, `prune_ms`, `actions_ms`)                                                                                                                                                                                                 | `TestVerifyResultReportsPhaseTimings`                                               |
-| History     | `list complete` and `list archived` return the newest 200 (`--limit N`, `--limit 0` for all) and say how many they omitted                                                                                                                                                                                                      | `TestListCompleteIsBoundedByDefault`                                                |
+| History     | `list complete`, `list archived`, and the completed part of the default `atask list` return the newest 200 (`--limit N`, `--limit 0` for all) and say how many they omitted; open work is never limited                                                                                                                         | `TestListCompleteIsBoundedByDefault`                                                |
 | Logs        | `atask run show ID` resolves the run's log directory through the board                                                                                                                                                                                                                                                          | `TestRunLogDirResolvesThroughStore`                                                 |
 | Help        | `--outcome` is documented as the long spec field shown by `atask context ID`                                                                                                                                                                                                                                                    | `TestOutcomeFlagIsDocumentedAsTheSpecField`                                         |
 
@@ -82,9 +82,6 @@ it. `agent-fleet-backend` writes to the same board.
   end to end through the CLI on a local PostgreSQL 16: two idle reads logged
   12 data-changing statements with `ffb5d4b` and none with this branch.
   Not run against the production board.
-- A bare `atask list` (the `all` filter) is still unbounded; only
-  `complete` and `archived` are paged.
-
 - Latency was not re-measured against the remote board after these changes;
   the tests count statements on SQLite through a wrapped driver
   (`internal/sqlite/stmtcount`), which is what scales with round trips.
