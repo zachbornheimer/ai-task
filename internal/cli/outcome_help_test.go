@@ -17,7 +17,7 @@ func TestOutcomeFlagIsDocumentedAsTheSpecField(t *testing.T) {
 		}
 		help := out + errOut
 		var line string
-		for _, l := range strings.Split(help, "\n") {
+		for l := range strings.SplitSeq(help, "\n") {
 			if strings.Contains(l, "-outcome") {
 				line = l
 				break

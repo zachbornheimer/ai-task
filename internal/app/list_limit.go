@@ -59,8 +59,8 @@ func newestHistory(rows []listed, f Filter, limit int) (kept []listed, omitted i
 		return rows, 0
 	}
 	var history []int
-	for i, r := range rows {
-		if isHistory(r, f) {
+	for i := range rows {
+		if isHistory(rows[i], f) {
 			history = append(history, i)
 		}
 	}
@@ -82,9 +82,9 @@ func newestHistory(rows []listed, f Filter, limit int) (kept []listed, omitted i
 		dropped[i] = true
 	}
 	kept = make([]listed, 0, len(rows)-len(dropped))
-	for i, r := range rows {
+	for i := range rows {
 		if !dropped[i] {
-			kept = append(kept, r)
+			kept = append(kept, rows[i])
 		}
 	}
 	return kept, len(dropped)

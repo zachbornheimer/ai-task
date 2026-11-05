@@ -47,8 +47,9 @@ func newBoard(tx *sqlite.Tx, records []sqlite.Record, projects map[project.ID]pr
 	b := &board{tx: tx, projects: projects}
 	b.records = make(map[task.ID]sqlite.Record, len(records))
 	ids := make([]task.ID, len(records))
-	for i, r := range records {
-		b.records[r.Task.ID] = r
+	for i := range records {
+		r := &records[i]
+		b.records[r.Task.ID] = *r
 		ids[i] = r.Task.ID
 	}
 	changes, err := tx.CheckChangesFor(ids)
@@ -64,7 +65,8 @@ func newBoard(tx *sqlite.Tx, records []sqlite.Record, projects map[project.ID]pr
 	// A listing views every group's members and its own runs: preload both
 	// for the listed groups, the only rows a listing asks for either.
 	var groups []task.ID
-	for _, r := range records {
+	for i := range records {
+		r := &records[i]
 		if r.Task.Kind == task.KindGroup {
 			groups = append(groups, r.Task.ID)
 		}

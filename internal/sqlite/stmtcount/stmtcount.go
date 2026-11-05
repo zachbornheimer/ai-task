@@ -157,5 +157,5 @@ func (c *countingConn) PrepareContext(ctx context.Context, q string) (driver.Stm
 	if p, ok := c.Conn.(driver.ConnPrepareContext); ok {
 		return p.PrepareContext(ctx, q)
 	}
-	return c.Conn.Prepare(q)
+	return c.Prepare(q)
 }

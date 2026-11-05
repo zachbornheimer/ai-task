@@ -66,8 +66,7 @@ func reportPhases(res *VerifyResult, err error, p *PhaseTimings) {
 	}
 	stamped := *p
 	res.Phases = &stamped
-	var fe *fault.Error
-	if errors.As(err, &fe) {
+	if fe, ok := errors.AsType[*fault.Error](err); ok {
 		if d, ok := fe.Details.(VerifyResult); ok {
 			d.Phases = &stamped
 			fe.Details = d

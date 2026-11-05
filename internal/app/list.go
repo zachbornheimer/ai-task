@@ -176,7 +176,8 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 		// Views are built after the bound, so a page of the newest history
 		// costs a page of views, not the whole history's.
 		matched, snap.Omitted = newestHistory(matched, q.Filter, historyLimit(q.Filter, q.Limit))
-		for _, m := range matched {
+		for i := range matched {
+			m := &matched[i]
 			v, err := e.buildViewDepth(b, *m.rec, m.proj, now, viewList, heads[m.proj.ID])
 			if err != nil {
 				return err
