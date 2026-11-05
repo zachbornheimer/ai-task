@@ -509,7 +509,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		if run, err := tx.GetRun(fr.runID); err != nil {
 			return err
 		} else if run.Status != sqlite.RunRunning {
-			return fault.New(fault.CodeInvalidSession, "run %d was closed (%s) while its checks ran", fr.runID, run.Status)
+			return closedRunError(fr.runID, run.Status)
 		}
 		return nil
 	}
@@ -559,6 +559,10 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// Immutable inputs: detached snapshots of the submitted revision, one
 	// per check category.
 	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, fr.attempt.WorkspacePath)
+	if isRunClosed(err) {
+		res.Evidence = evidence
+		return res, err
+	}
 	if err != nil && fault.CodeOf(err) == fault.CodeNotReady && len(evidence) == 0 {
 		return fail(sqlite.RunError, fault.CodeNotReady, err.Error(), nil)
 	}
@@ -589,7 +593,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// refused maps a finalization refusal (changed contract, lost
 	// authority, ...) to the caller's error.
 	refused := func(err error) (VerifyResult, error) {
-		if fault.IsInternal(err) {
+		if fault.IsInternal(err) || isRunClosed(err) {
 			return res, err
 		}
 		return fail(sqlite.RunFailed, fault.CodeOf(err), err.Error(), evidence)

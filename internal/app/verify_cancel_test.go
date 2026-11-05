@@ -26,6 +26,20 @@ func (f *fixture) newestRun() (status, summary string) {
 	return status, summary
 }
 
+// failures reads the failure count charged to a task.
+func (f *fixture) failures(id string) (n int) {
+	f.t.Helper()
+	db, err := sql.Open("sqlite", f.path)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer discard.CloseReadOnly(db)
+	if err := db.QueryRow(`SELECT failures FROM tasks WHERE id = ?`, id).Scan(&n); err != nil {
+		f.t.Fatal(err)
+	}
+	return n
+}
+
 // TestVerifyCancelClosesLiveRun: a `verify complete` that is wedged (its
 // caller gave up, its process still stamps heartbeats) can be closed by the
 // session that owns it, without waiting for the reaper's two missed
@@ -112,7 +126,15 @@ func TestCanceledRunCannotComplete(t *testing.T) {
 	if verr := <-done; verr == nil {
 		t.Fatal("the canceled run's verify returned success")
 	}
-	if got := f.status(string(id)); got == task.StatusComplete {
-		t.Fatal("a canceled run completed the task")
+	if got := f.status(string(id)); got != task.StatusClaimed {
+		t.Fatalf("status %s after the canceled run's process finished, want claimed", got)
+	}
+	// The lingering process must not rewrite what the cancel recorded, or
+	// the run stops reading as abandoned and starts counting as a failure.
+	if status, summary := f.newestRun(); status != "error" || !strings.HasPrefix(summary, "abandoned:") {
+		t.Fatalf("run = %s %q after the lingering process finished, want the cancel's abandoned error", status, summary)
+	}
+	if failures := f.failures(string(id)); failures != 0 {
+		t.Fatalf("a canceled run charged %d failure(s) to the task", failures)
 	}
 }

@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/zachbornheimer/ai-task/internal/execution"
+	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 )
 
@@ -14,6 +16,25 @@ const (
 	canceledRun   = sqlite.AbandonedPrefix + " canceled by the session that owns it (verify cancel)"
 	terminatedRun = sqlite.AbandonedPrefix + " the verifying process was terminated by a signal (SIGTERM or SIGHUP)"
 )
+
+// runClosedError is the fence's answer when the run it guards was closed
+// from outside (canceled, or reaped as lost) while its process kept going.
+// The process stops without writing anything about the run: whoever closed
+// it already said why, and rewriting that would turn an abandoned run into
+// a failure.
+type runClosedError struct{ error }
+
+func (e runClosedError) Unwrap() error { return e.error }
+
+func closedRunError(runID int64, status sqlite.RunStatus) error {
+	return runClosedError{fault.New(fault.CodeInvalidSession, "run %d was closed (%s) while its checks ran", runID, status)}
+}
+
+// isRunClosed reports whether err came from closedRunError.
+func isRunClosed(err error) bool {
+	var closed runClosedError
+	return errors.As(err, &closed)
+}
 
 // CancelResult says how many running verification runs a cancel closed.
 type CancelResult struct {
