@@ -3,12 +3,15 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 )
@@ -36,6 +39,10 @@ type dialect interface {
 	insertID(ctx context.Context, tx *sql.Tx, query string, args ...any) (int64, error)
 	// isPostgres reports whether the engine is PostgreSQL.
 	isPostgres() bool
+	// txBounds is the statement that arms the engine's server-side wait
+	// bounds for a transaction, run right after BEGIN; "" when the engine
+	// needs none.
+	txBounds() string
 }
 
 // --- SQLite ---
@@ -46,6 +53,11 @@ func (sqliteDialect) driver() string          { return "sqlite" }
 func (sqliteDialect) rebound(q string) string { return q }
 func (sqliteDialect) adapt(v any) any         { return v }
 func (sqliteDialect) isPostgres() bool        { return false }
+
+// txBounds: a local file's waits are lock waits, already bounded by
+// busy_timeout on the connection; a transaction adds nothing.
+func (sqliteDialect) txBounds() string { return "" }
+
 func (d sqliteDialect) insertID(_ context.Context, tx *sql.Tx, q string, args ...any) (int64, error) {
 	res, err := tx.ExecContext(context.Background(), q, args...)
 	if err != nil {
@@ -59,11 +71,17 @@ func (d sqliteDialect) insertID(_ context.Context, tx *sql.Tx, q string, args ..
 
 // --- PostgreSQL ---
 
-type postgresDialect struct{}
+// postgresDialect carries the transaction bounds parsed from the URL (the
+// defaults when it names none), so the engine difference and its tuning
+// travel as one value.
+type postgresDialect struct {
+	bounds string
+}
 
 func (postgresDialect) driver() string          { return "pgx" }
 func (postgresDialect) isPostgres() bool        { return true }
 func (postgresDialect) rebound(q string) string { return rebindPlaceholders(q) }
+func (d postgresDialect) txBounds() string      { return d.bounds }
 func (postgresDialect) adapt(v any) any {
 	// The schema stores boolean facts as BIGINT 0/1 (SQLite's convention);
 	// a Go bool must cross the wire as an integer for those columns.
@@ -150,18 +168,77 @@ func sqlitePath(path string) string {
 	return strings.TrimPrefix(path, "sqlite://")
 }
 
-// openPostgres opens a database/sql pool on a PostgreSQL URL. The URL is
-// validated up front so a malformed one fails as a parse error, not a lazy
-// connect failure deep inside the first query.
-func openPostgres(path string) (*sql.DB, error) {
-	if _, err := pgx.ParseConfig(path); err != nil {
+// Remote wait bounds: a remote store must fail loudly, never hang. A
+// connection attempt or a statement that exceeds its bound reports the
+// timeout as an error; a client that stalls inside a transaction is cut
+// loose by the server instead of holding one open forever.
+const (
+	// pgConnectTimeout bounds one connection attempt. It is enforced by
+	// the client's own dialer, so it holds whatever the URL names.
+	pgConnectTimeout = 10 * time.Second
+	// pgStatementTimeout bounds one statement, however slow the network.
+	pgStatementTimeout = 30 * time.Second
+	// pgIdleInTxTimeout bounds how long a server session may sit in an
+	// open transaction without a client command.
+	pgIdleInTxTimeout = 120 * time.Second
+)
+
+// pgBoundsStatement returns the statement that arms one transaction's
+// wait bounds: the widths the URL named (pgx keeps parameters it does not
+// recognize in RuntimeParams) and the defaults for those it did not.
+// Transaction scope is required, not merely tidy: a pooler in front of the
+// database (Neon's, for one) does not carry startup parameters through—a
+// statement_timeout named there stays at its default, and a session
+// default could not be trusted anyway, since the next client of the same
+// pooled connection would inherit it.
+func pgBoundsStatement(params map[string]string) string {
+	return fmt.Sprintf(
+		`SELECT set_config('statement_timeout', '%d', true), set_config('idle_in_transaction_session_timeout', '%d', true)`,
+		boundWidth(params, "statement_timeout", pgStatementTimeout).Milliseconds(),
+		boundWidth(params, "idle_in_transaction_session_timeout", pgIdleInTxTimeout).Milliseconds())
+}
+
+// boundWidth reads one wait bound out of a URL's parameters: a bare
+// integer is milliseconds, which is PostgreSQL's own unit for these
+// settings, and a duration string ("2s") is read as such. Anything else,
+// including a value that would not bound the wait at all, keeps the
+// default rather than leaving the wait unbounded.
+func boundWidth(params map[string]string, name string, def time.Duration) time.Duration {
+	v := params[name]
+	if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+		return time.Duration(n) * time.Millisecond
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return d
+	}
+	return def
+}
+
+// postgresConfig parses a PostgreSQL URL into the connection every remote
+// store uses: the URL's own settings plus the client-side dial bound. The
+// server-side bounds are armed per transaction (see pgBoundsStatement).
+func postgresConfig(path string) (*pgx.ConnConfig, error) {
+	config, err := pgx.ParseConfig(path)
+	if err != nil {
 		return nil, fault.WrapInternal(err, "parse postgres URL")
 	}
-	db, err := sql.Open("pgx", path)
-	if err != nil {
-		return nil, fault.WrapInternal(err, "open postgres")
+	if config.ConnectTimeout == 0 {
+		config.ConnectTimeout = pgConnectTimeout
 	}
-	return db, nil
+	return config, nil
+}
+
+// openPostgres opens a database/sql pool on a PostgreSQL URL and reports
+// the dialect its transactions run under. The URL is validated up front so
+// a malformed one fails as a parse error, not a lazy connect failure deep
+// inside the first query; the parsed config becomes every pooled
+// connection.
+func openPostgres(path string) (*sql.DB, dialect, error) {
+	config, err := postgresConfig(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return stdlib.OpenDB(*config), postgresDialect{bounds: pgBoundsStatement(config.RuntimeParams)}, nil
 }
 
 // rebindTx adapts every statement of a transaction to the store's engine.

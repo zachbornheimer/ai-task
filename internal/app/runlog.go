@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/project"
+	"github.com/zachbornheimer/ai-task/internal/sqlite"
 )
 
 // keepRunLogs is how many run directories each project keeps; older ones
@@ -26,6 +28,27 @@ func (e *Engine) runLogDir(pid project.ID, runID int64) string {
 		return ""
 	}
 	return filepath.Join(e.logRoot, string(pid), fmt.Sprintf("run-%d", runID))
+}
+
+// RunLogDir is where run runID wrote its check logs and result.json. The
+// board names the run's task and so its project; nothing on disk is
+// searched, so a same-numbered directory left by another store never
+// answers for it.
+func (e *Engine) RunLogDir(ctx context.Context, runID int64) (string, error) {
+	var dir string
+	err := e.store.Read(ctx, func(tx *sqlite.Tx) error {
+		run, err := tx.GetRun(runID)
+		if err != nil {
+			return err
+		}
+		rec, err := tx.GetRecord(run.TaskID)
+		if err != nil {
+			return err
+		}
+		dir = e.runLogDir(rec.Task.ProjectID, runID)
+		return nil
+	})
+	return dir, err
 }
 
 // openCheckLog creates a log file for checkID in dir, creating dir (and

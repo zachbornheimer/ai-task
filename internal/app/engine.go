@@ -64,6 +64,10 @@ type Config struct {
 	// Sandbox confines checks and actions. Nil reads [sandbox] from the
 	// user's config.toml (strict when absent).
 	Sandbox *proof.SandboxConfig
+	// StoreDriver names the database/sql driver a SQLite store opens with;
+	// empty means sqlite.DefaultDriver. Tests wrap the driver to count the
+	// statements a command issues.
+	StoreDriver string
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -104,7 +108,11 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := sqlite.Open(ctx, path)
+	driverName := cfg.StoreDriver
+	if driverName == "" {
+		driverName = sqlite.DefaultDriver
+	}
+	st, err := sqlite.OpenWithDriver(ctx, path, driverName)
 	if err != nil {
 		return nil, err
 	}
@@ -511,9 +519,18 @@ func (e *Engine) manager(p project.Project) workspace.Manager {
 }
 
 // reconcile closes runs and jobs whose owners' leases expired so that no
-// phantom "verifying" state survives a crash. It is cheap and idempotent.
+// phantom "verifying" state survives a crash. It is idempotent, and on a
+// board with nothing to reconcile it is one read: the write transaction
+// opens only when a read says there is something to close.
 func (e *Engine) reconcile(ctx context.Context) error {
 	now := e.now()
+	var pending bool
+	if err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) {
+		pending, err = tx.ReconcilePending(now)
+		return err
+	}); err != nil || !pending {
+		return err
+	}
 	var n int64
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		var err error

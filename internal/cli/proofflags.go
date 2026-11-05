@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/zachbornheimer/ai-task/internal/plan"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 )
 
@@ -73,6 +74,28 @@ func (f *proofFlags) parse() (proofSpec, regression *proof.ProofSpec, err error)
 		regression = &s
 	}
 	return proofSpec, regression, nil
+}
+
+// sizeWarnings flags a heavy run: check given without size=, per flag.
+func (f *proofFlags) sizeWarnings() []string {
+	var out []string
+	for _, p := range []struct{ flag, raw string }{{"--proof", f.proof}, {"--regression", f.regression}} {
+		if w := proof.HeavyWithoutSize(p.raw); w != "" {
+			out = append(out, p.flag+": "+w)
+		}
+	}
+	return out
+}
+
+// addWarnings records advisory warnings against ref in a plan result.
+func addWarnings(res *plan.Result, ref string, warnings []string) {
+	if len(warnings) == 0 {
+		return
+	}
+	if res.Warnings == nil {
+		res.Warnings = map[string][]string{}
+	}
+	res.Warnings[ref] = append(res.Warnings[ref], warnings...)
 }
 
 // requireBoth reports which flag is missing when a group is given proofs.

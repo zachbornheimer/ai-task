@@ -10,7 +10,15 @@ import (
 )
 
 // checkEnvNames are the parent variables a check may see by exact name.
-var checkEnvNames = []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "CI"}
+var checkEnvNames = []string{
+	"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "CI",
+	// The build-cache locations: a suite runs in a fresh snapshot of the
+	// revision, so a build that is warm in the working tree is cold there
+	// unless the user's shared cache reaches it. Exact names, not a CARGO_
+	// prefix: CARGO_REGISTRY_TOKEN and CARGO_REGISTRIES_*_TOKEN are
+	// credentials.
+	"CARGO_TARGET_DIR", "CARGO_HOME", "RUSTUP_HOME", "SCCACHE_DIR", "RUSTC_WRAPPER",
+}
 
 // checkEnvPrefixes admit every variable that starts with one of them.
 var checkEnvPrefixes = []string{

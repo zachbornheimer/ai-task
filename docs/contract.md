@@ -9,7 +9,7 @@ atask version
 atask context [TASK_ID]
 atask context --hook [--changed]
 
-atask list [all|open|ready|blocked|draft|complete|archived]
+atask list [all|open|ready|blocked|draft|complete|archived] [--limit N]
 atask show [TASK_ID] [--full]
 atask status
 
@@ -27,6 +27,8 @@ atask log [--done TEXT] [--next TEXT] [--learned TEXT] [--note TEXT]
 atask verify proof
 atask verify regression
 atask verify complete [TASK_ID] [--reverify]
+atask verify cancel [TOKEN|-]
+atask run show RUN_ID
 
 atask init [--name NAME] [--path PATH]
 atask project add NAME

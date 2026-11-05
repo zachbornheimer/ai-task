@@ -24,13 +24,13 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver for ATASK_DB_URL
-	_ "modernc.org/sqlite"             // pure-Go SQLite driver; see docs/decisions/0002-sqlite.md
+	_ "modernc.org/sqlite" // pure-Go SQLite driver; see docs/decisions/0002-sqlite.md
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
 	"github.com/zachbornheimer/ai-task/internal/fault"
+	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
 //go:embed migrations/*.sql
@@ -63,12 +63,23 @@ type Store struct {
 // is limited to a single connection so every statement sees the same
 // database.
 func Open(ctx context.Context, path string) (*Store, error) {
+	return OpenWithDriver(ctx, path, DefaultDriver)
+}
+
+// DefaultDriver is the database/sql driver name a SQLite file store opens
+// with.
+const DefaultDriver = "sqlite"
+
+// OpenWithDriver is Open with the SQLite driver named by the caller: the
+// seam a test uses to wrap the driver and count the statements a store
+// issues. A PostgreSQL URL ignores driver.
+func OpenWithDriver(ctx context.Context, path, driver string) (*Store, error) {
 	if IsPostgresURL(path) {
-		db, err := openPostgres(path)
+		db, d, err := openPostgres(path)
 		if err != nil {
 			return nil, err
 		}
-		s := &Store{db: db, path: path, d: postgresDialect{}}
+		s := &Store{db: db, path: path, d: d}
 		if err := s.migrate(ctx); err != nil {
 			return nil, errors.Join(err, db.Close())
 		}
@@ -83,7 +94,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		}
 	}
 	dsn := dsnFor(path, memory)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fault.WrapInternal(err, "open database")
 	}
@@ -142,6 +153,13 @@ type Tx struct {
 	tx  rebindTx
 	ctx context.Context
 	d   dialect
+	// childrenByParent and runsByTask are the reads a listing preloaded
+	// (see PreloadChildren and PreloadRuns): a listing asks for the
+	// relations of every row it will view in one query each, instead of
+	// one query per row. A transaction that preloads must not also change
+	// what it loaded.
+	childrenByParent map[task.ID][]Record
+	runsByTask       map[task.ID][]Run
 }
 
 // Read runs fn in a read-only (deferred) transaction so that a multi-query
@@ -167,6 +185,16 @@ func (s *Store) run(ctx context.Context, readOnly bool, fn func(*Tx) error) (err
 			panic(p)
 		}
 	}()
+	// Arm the engine's wait bounds for this transaction before any of its
+	// statements: a remote statement that stalls then fails loudly instead
+	// of hanging, and the server abandons the transaction if the client
+	// stops driving it.
+	if bounds := s.d.txBounds(); bounds != "" {
+		if _, err := tx.ExecContext(ctx, bounds); err != nil {
+			_ = tx.Rollback()
+			return fault.WrapInternal(err, "arm transaction bounds")
+		}
+	}
 	if err := fn(&Tx{tx: rebindTx{tx: tx, d: s.d}, ctx: ctx, d: s.d}); err != nil {
 		_ = tx.Rollback()
 		if cerr := ctx.Err(); cerr != nil && fault.IsInternal(err) {
@@ -209,6 +237,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	sort.Strings(names)
+	if s.ledgerRecords(ctx, names) {
+		return nil
+	}
 	// The migrations table itself is created idempotently outside the loop.
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)`); err != nil {
 		return fault.WrapInternal(err, "create schema_migrations")
@@ -255,11 +286,48 @@ func (s *Store) migrate(ctx context.Context) error {
 	})
 }
 
+// ledgerRecords reports whether schema_migrations already records every
+// embedded migration under the name this build embeds, so opening a
+// migrated store is one read and no write. A missing table, an unreadable
+// ledger, a missing version, or a version recorded under another name all
+// answer false: the full path then creates, applies, or reports the
+// mismatch.
+func (s *Store) ledgerRecords(ctx context.Context, names []string) bool {
+	rows, err := s.db.QueryContext(ctx, `SELECT version, name FROM schema_migrations`)
+	if err != nil {
+		return false
+	}
+	defer discard.CloseReadOnly(rows)
+	applied := map[int64]string{}
+	for rows.Next() {
+		var v int64
+		var recorded string
+		if rows.Scan(&v, &recorded) != nil {
+			return false
+		}
+		applied[v] = recorded
+	}
+	if rows.Err() != nil {
+		return false
+	}
+	for _, name := range names {
+		version, err := strconv.ParseInt(strings.SplitN(name, "_", 2)[0], 10, 64)
+		if err != nil || applied[version] != name {
+			return false
+		}
+	}
+	return true
+}
+
 // migratePostgres applies the final PostgreSQL schema once and records it
 // in schema_migrations. There are no incremental migrations to replay: the
 // schema is only ever created from scratch by sync or first use, so a
 // recorded version means it is current.
 func (s *Store) migratePostgres(ctx context.Context) error {
+	var recorded int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version = $1`, pgSchemaVersion).Scan(&recorded); err == nil && recorded > 0 {
+		return nil // current: one read, no write
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version BIGINT PRIMARY KEY, name TEXT NOT NULL, applied_at BIGINT NOT NULL)`); err != nil {
 		return fault.WrapInternal(err, "create schema_migrations")
 	}

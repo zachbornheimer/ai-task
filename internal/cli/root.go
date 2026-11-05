@@ -385,6 +385,7 @@ atask claim renew [token]
 atask claim release [token] [--note ...] [--failed]
 atask log --done ... --next ... --learned ... --note ...
 atask verify proof|regression|complete
+atask verify cancel [token]             force-close this session's running verification
 
 Commands:`)
 	names := make([]string, 0, len(commands))

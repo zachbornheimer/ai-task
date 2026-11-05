@@ -88,6 +88,7 @@ func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter, p painter
 				say(w, "    requires: %s\n", requiresText(*t, true))
 			}
 		}
+		renderOmitted(w, snap)
 		return
 	}
 	known := map[task.ID]bool{}
@@ -130,6 +131,15 @@ func renderList(w io.Writer, snap app.PlanSnapshot, filter app.Filter, p painter
 			sayln(w)
 		}
 		renderGroup(w, *g, byGroup, children, "", "", p)
+	}
+	renderOmitted(w, snap)
+}
+
+// renderOmitted says how much finished work the listing's bound left out,
+// and how to lift it. Silent when nothing was omitted.
+func renderOmitted(w io.Writer, snap app.PlanSnapshot) {
+	if snap.Omitted > 0 {
+		say(w, "(%d older completed or archived task(s) omitted: --limit 0 lists them all)\n", snap.Omitted)
 	}
 }
 

@@ -50,13 +50,17 @@ func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verific
 	var res VerifyResult
 	var err error
 	if mode == verification.ModeComplete {
-		res, err = e.verifyComplete(ctx, token)
+		phases := &PhaseTimings{}
+		res, err = e.verifyComplete(withPhases(ctx, phases), token)
 		if err == nil && res.Completed {
+			stop := phases.measure(&phases.Actions)
 			err = e.attachActions(ctx, token, &res)
+			stop()
 		}
 		if err == nil {
 			err = e.attachCheckChanges(ctx, token, &res)
 		}
+		reportPhases(&res, err, phases)
 	} else {
 		res, err = e.verifyDiagnostic(ctx, token, mode)
 	}
@@ -190,6 +194,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // leaves behind can be the reason a regression check passes.
 func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project, workDir string) ([]verification.Evidence, error) {
 	var out []verification.Evidence
+	ph := phasesOf(ctx)
 	inPlace := proj.Rootless()
 	var changed []string
 	if !inPlace {
@@ -203,13 +208,19 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 		dir, cleanup := workDir, func() {}
 		if !inPlace {
 			var err error
+			stop := ph.measure(&ph.Snapshot)
 			dir, cleanup, err = mgr.Snapshot(ctx, revision)
+			stop()
 			if err != nil {
 				return nil, err
 			}
 		}
+		stop := ph.measure(&ph.Checks)
 		ev, err := e.runChecks(ctx, dir, taskPolicy, runID, revision, fence, taskOpts)
+		stop()
+		stop = ph.measure(&ph.Cleanup)
 		cleanup()
+		stop()
 		out = append(out, ev...)
 		if err != nil {
 			return out, err
@@ -231,15 +242,23 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 		return append(out, ev...), err
 	}
 	if inPlace {
+		stop := ph.measure(&ph.Checks)
 		ev, err := e.runChecks(ctx, workDir, regPolicy, runID, revision, fence, regOpts)
+		stop()
 		return append(out, ev...), err
 	}
+	stop := ph.measure(&ph.Snapshot)
 	dir, cleanup, err := mgr.Snapshot(ctx, revision)
+	stop()
 	if err != nil {
 		return out, err
 	}
+	stop = ph.measure(&ph.Checks)
 	ev, err := e.runChecks(ctx, dir, regPolicy, runID, revision, fence, regOpts)
+	stop()
+	stop = ph.measure(&ph.Cleanup)
 	cleanup()
+	stop()
 	return append(out, ev...), err
 }
 
@@ -487,6 +506,13 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		if latest != fr.runID {
 			return fault.New(fault.CodeInvalidSession, "run %d superseded", fr.runID)
 		}
+		// A run closed from outside (canceled, or reaped as lost) must not
+		// finish by itself: its process may still be alive.
+		if run, err := tx.GetRun(fr.runID); err != nil {
+			return err
+		} else if run.Status != sqlite.RunRunning {
+			return closedRunError(fr.runID, run.Status)
+		}
 		return nil
 	}
 	// fail records why the run did not complete. Only a genuine failed
@@ -535,6 +561,10 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// Immutable inputs: detached snapshots of the submitted revision, one
 	// per check category.
 	evidence, err := e.runSuites(checkCtx, mgr, fr.revision, fr.policy, fr.runID, fence, fr.rec.Task, fr.proj, fr.attempt.WorkspacePath)
+	if isRunClosed(err) {
+		res.Evidence = evidence
+		return res, err
+	}
 	if err != nil && fault.CodeOf(err) == fault.CodeNotReady && len(evidence) == 0 {
 		return fail(sqlite.RunError, fault.CodeNotReady, err.Error(), nil)
 	}
@@ -565,7 +595,7 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// refused maps a finalization refusal (changed contract, lost
 	// authority, ...) to the caller's error.
 	refused := func(err error) (VerifyResult, error) {
-		if fault.IsInternal(err) {
+		if fault.IsInternal(err) || isRunClosed(err) {
 			return res, err
 		}
 		return fail(sqlite.RunFailed, fault.CodeOf(err), err.Error(), evidence)
@@ -576,6 +606,8 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// One transaction re-checks everything completion depends on and
 	// records it.
 	now := e.now()
+	ph := phasesOf(ctx)
+	stopRecord := ph.measure(&ph.Record)
 	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := fence(tx); err != nil {
 			return err
@@ -591,11 +623,14 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		return tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now)
 	})
+	stopRecord()
 	if err != nil {
 		return refused(err)
 	}
 	// The task is done: its quarantined directories are history.
+	stopPrune := ph.measure(&ph.Prune)
 	_, _ = mgr.Prune(ctx, string(fr.rec.Task.ID), true)
+	stopPrune()
 	return done()
 }
 

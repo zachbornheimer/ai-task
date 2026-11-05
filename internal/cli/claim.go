@@ -22,7 +22,7 @@ import (
 func init() {
 	register("claim", "claim work: atask claim [REF] [--wait] | atask claim --group REF [--wait] | atask claim renew [token|-] | atask claim release [token|-] [--note ..] [--failed]", runClaim)
 	register("log", "record progress under the current session: atask log --done .. --next .. --learned .. --note ..", runLog)
-	register("verify", "run checks under the current session: atask verify proof|regression|complete", runVerify)
+	register("verify", "run checks under the current session: atask verify proof|regression|complete|cancel", runVerify)
 }
 
 // token resolves a REQUIRED session token: a positional argument, "-" for
@@ -319,6 +319,9 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	if len(c.args) < 1 {
 		return usage("verify needs a mode: `atask verify proof`, `atask verify regression`, `atask verify complete`, or `atask verify complete GROUP`")
 	}
+	if c.args[0] == "cancel" {
+		return c.verifyCancel(ctx, c.args[1:])
+	}
 	if c.args[0] == string(verification.ModeComplete) && len(c.args) == 2 {
 		if handled, err := c.verifyGroup(ctx, c.args[1]); handled {
 			return err
@@ -343,12 +346,33 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	case *reverify:
 		res, err = e.Reverify(ctx, tok)
 	default:
-		res, err = e.Verify(ctx, tok, mode)
+		err = runUntilTerminated(ctx, func(ctx context.Context) (verr error) {
+			res, verr = e.Verify(ctx, tok, mode)
+			return verr
+		}, func(ctx context.Context) { _, _ = e.AbandonVerify(ctx, tok) })
 	}
 	if err != nil {
 		return err
 	}
 	return c.emit(res, func(w io.Writer) { renderVerify(w, res) })
+}
+
+// verifyCancel force-closes the verification runs still recorded running
+// for the session, so a wedged `verify` stops holding the task.
+func (c *ctxt) verifyCancel(ctx context.Context, rest []string) error {
+	tok, err := c.token(ctx, rest)
+	if err != nil {
+		return err
+	}
+	e, err := c.engine(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := e.CancelVerify(ctx, tok)
+	if err != nil {
+		return err
+	}
+	return c.emit(res, func(w io.Writer) { say(w, "%s\n", res.Message) })
 }
 
 // verifyGroup completes the group ref names: its proofs run on the merge of

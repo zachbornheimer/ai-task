@@ -208,7 +208,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		}
 		// A previous attempt that never ended (lease ran out) may still have
 		// a live process in the worktree: quarantine that worktree.
-		if prev := r.Attempt; prev != nil && prev.EndedAt == nil {
+		if prev := r.Attempt; prev != nil && prev.EndedUncleanly() {
 			quarantineSeq = prev.Seq
 		}
 		if required, err = completedRequirements(tx, r.Task.ID); err != nil {

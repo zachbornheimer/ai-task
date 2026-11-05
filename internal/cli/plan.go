@@ -202,7 +202,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	key := c.fs.String("key", "", "stable project-local key")
 	group := c.fs.Bool("group", false, "create an organizational group instead of a task")
 	parent := c.fs.String("parent", "", "enclosing group (id or key)")
-	outcome := c.fs.String("outcome", "", "the single intended outcome (default: the title)")
+	outcome := c.fs.String("outcome", "", "the task's long spec, any length: the single intended outcome, shown by atask context ID (default: the title; keep the title short and put the spec here, with --constraint and --accept)")
 	var constraints, accept, requires, blocks stringList
 	c.fs.Var(&constraints, "constraint", "constraint (repeatable)")
 	c.fs.Var(&accept, "accept", "acceptance criterion (repeatable)")
@@ -264,8 +264,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	var id task.ID
-	for _, v := range res.Created {
+	for name, v := range res.Created {
 		id = v
+		addWarnings(&res, name, pfl.sizeWarnings())
 	}
 	if id == "" {
 		// Identical replay: look the key up for the acknowledgement.
@@ -382,7 +383,7 @@ func (c *ctxt) namedProjectIDs(ctx context.Context, names []string) ([]project.I
 }
 
 func runUpdate(ctx context.Context, c *ctxt, args []string) error {
-	outcome := c.fs.String("outcome", "", "new outcome")
+	outcome := c.fs.String("outcome", "", "replace the task's long spec, any length: the single intended outcome, shown by atask context ID")
 	parent := c.fs.String("parent", "\x00", "move into a group (id or key); empty string clears")
 	var constraints, accept, requires, remove stringList
 	c.fs.Var(&constraints, "constraint", "replace constraints (repeatable)")
@@ -459,6 +460,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
+	addWarnings(&res, string(target), pfl.sizeWarnings())
 	view, verr := e.Show(ctx, pid, string(target), false)
 	type out struct {
 		plan.Result
@@ -562,8 +564,12 @@ func listFilter(s string) (app.Filter, bool) {
 }
 
 func runList(ctx context.Context, c *ctxt, args []string) error {
+	limit := c.fs.Int("limit", -1, fmt.Sprintf("finished work only (complete, archived, and the completed part of the default listing): show the newest N (default %d); 0 shows all. Open work is never limited", app.DefaultHistoryLimit))
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if *limit < -1 {
+		return usage("--limit takes a count of tasks, or 0 for all; got %d", *limit)
 	}
 	e, err := c.engine(ctx)
 	if err != nil {
@@ -589,7 +595,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		}
 		pid = p.ID
 	}
-	snap, err := e.List(ctx, app.ListQuery{ProjectID: pid, Filter: filter})
+	snap, err := e.List(ctx, app.ListQuery{ProjectID: pid, Filter: filter, Limit: listLimit(*limit)})
 	if err != nil {
 		return err
 	}
@@ -609,6 +615,18 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		}
 		renderList(w, snap, filter, p)
 	})
+}
+
+// listLimit maps the --limit flag (unset is -1, 0 is "all") to the
+// engine's ListQuery.Limit (unset is 0, all is NoLimit).
+func listLimit(flag int) int {
+	switch flag {
+	case -1:
+		return 0
+	case 0:
+		return app.NoLimit
+	}
+	return flag
 }
 
 func runStatus(ctx context.Context, c *ctxt, args []string) error {

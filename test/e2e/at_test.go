@@ -61,7 +61,7 @@ func newEnv(t *testing.T) *env {
 	cwd := filepath.Join(base, "repo")
 	must.OK(t, os.MkdirAll(cwd, 0o750))
 	e := &env{t: t, db: filepath.Join(base, "state", "at.db"), cwd: cwd}
-	e.env = append(os.Environ(), "ATASK_DB="+e.db, "ATASK_OUTPUT=json", "ATASK_PROJECT=", "ATASK_SESSION=")
+	e.env = append(os.Environ(), "ATASK_DB="+e.db, "ATASK_DB_URL=", "ATASK_OUTPUT=json", "ATASK_PROJECT=", "ATASK_SESSION=")
 	isolated, err := testgit.Overrides(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
