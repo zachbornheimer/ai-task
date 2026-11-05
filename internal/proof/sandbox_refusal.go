@@ -11,7 +11,8 @@ import (
 // OPTokenEnv is the 1Password service-account token. It is the one way a
 // confined check can reach 1Password: the sandbox denies ~/.config/op and
 // the Keychain, so the desktop integration is out of reach.
-const OPTokenEnv = "OP_SERVICE_ACCOUNT_TOKEN"
+// #nosec G101 -- the value is an env var's name, not a secret
+const OPTokenEnv = "OP_SERVICE_ACCOUNT_TOKEN" //nolint:gosec // the value is an env var's name, not a secret
 
 // sshCommands read ~/.ssh (identity, known_hosts, config), which the check
 // sandbox denies by design and no [sandbox] setting re-allows.
@@ -153,11 +154,12 @@ func simpleCommands(script string) [][]string {
 			word.WriteRune(r)
 			escaped = false
 		case quote != 0:
-			if r == quote {
+			switch {
+			case r == quote:
 				quote = 0
-			} else if r == '\\' && quote == '"' {
+			case r == '\\' && quote == '"':
 				escaped = true
-			} else {
+			default:
 				word.WriteRune(r)
 			}
 		case r == '\\':

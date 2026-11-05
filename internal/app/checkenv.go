@@ -83,7 +83,8 @@ func opConfigEnv(env []string, tmp string) []string {
 		return nil
 	}
 	dir := filepath.Join(tmp, "op-config")
-	if os.MkdirAll(dir, 0o700) != nil || os.Chmod(dir, 0o700) != nil {
+	// #nosec G302 -- a directory needs the execute bit, and op refuses a config directory others can read
+	if os.MkdirAll(dir, 0o700) != nil || os.Chmod(dir, 0o700) != nil { //nolint:gosec // a directory needs the execute bit, and op refuses a config directory others can read
 		return nil
 	}
 	return []string{opConfigDirEnv + "=" + dir}
