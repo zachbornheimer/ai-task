@@ -111,6 +111,17 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 	return n + nJ + nA, nil
 }
 
+// CancelRunningRuns closes, as errors carrying summary, every run still
+// recorded running for one attempt, returning how many it closed.
+func (t *Tx) CancelRunningRuns(attemptID int64, summary string, now time.Time) (int64, error) {
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = ? WHERE status = 'running' AND attempt_id = ?`, ms(now), summary, attemptID)
+	if err != nil {
+		return 0, wrapInternal(err, "cancel running runs")
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // endRuns closes the running runs that match where (one placeholder: now)
 // as errors carrying summary, returning how many it closed.
 func (t *Tx) endRuns(what, where, summary string, now time.Time) (int64, error) {

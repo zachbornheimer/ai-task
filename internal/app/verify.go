@@ -504,6 +504,13 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		if latest != fr.runID {
 			return fault.New(fault.CodeInvalidSession, "run %d superseded", fr.runID)
 		}
+		// A run closed from outside (canceled, or reaped as lost) must not
+		// finish by itself: its process may still be alive.
+		if run, err := tx.GetRun(fr.runID); err != nil {
+			return err
+		} else if run.Status != sqlite.RunRunning {
+			return fault.New(fault.CodeInvalidSession, "run %d was closed (%s) while its checks ran", fr.runID, run.Status)
+		}
 		return nil
 	}
 	// fail records why the run did not complete. Only a genuine failed
