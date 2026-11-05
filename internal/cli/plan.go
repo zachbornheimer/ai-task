@@ -202,7 +202,7 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 	key := c.fs.String("key", "", "stable project-local key")
 	group := c.fs.Bool("group", false, "create an organizational group instead of a task")
 	parent := c.fs.String("parent", "", "enclosing group (id or key)")
-	outcome := c.fs.String("outcome", "", "the single intended outcome (default: the title)")
+	outcome := c.fs.String("outcome", "", "the task's long spec, any length: the single intended outcome, shown by atask context ID (default: the title; keep the title short and put the spec here, with --constraint and --accept)")
 	var constraints, accept, requires, blocks stringList
 	c.fs.Var(&constraints, "constraint", "constraint (repeatable)")
 	c.fs.Var(&accept, "accept", "acceptance criterion (repeatable)")
@@ -382,7 +382,7 @@ func (c *ctxt) namedProjectIDs(ctx context.Context, names []string) ([]project.I
 }
 
 func runUpdate(ctx context.Context, c *ctxt, args []string) error {
-	outcome := c.fs.String("outcome", "", "new outcome")
+	outcome := c.fs.String("outcome", "", "replace the task's long spec, any length: the single intended outcome, shown by atask context ID")
 	parent := c.fs.String("parent", "\x00", "move into a group (id or key); empty string clears")
 	var constraints, accept, requires, remove stringList
 	c.fs.Var(&constraints, "constraint", "replace constraints (repeatable)")
