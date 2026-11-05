@@ -21,9 +21,9 @@ func clearRemoteStore(t *testing.T) {
 
 // openCounting opens a second engine on the fixture's store whose SQLite
 // driver reports every statement to the returned counter.
-func (f *fixture) openCounting(name string) (*app.Engine, *stmtcount.Counter) {
+func (f *fixture) openCounting(prefix string) (*app.Engine, *stmtcount.Counter) {
 	f.t.Helper()
-	counter := stmtcount.Register(name)
+	name, counter := stmtcount.Register(prefix)
 	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, PollInterval: 50 * time.Millisecond, StoreDriver: name})
 	if err != nil {
 		f.t.Fatal(err)
@@ -39,8 +39,7 @@ func (f *fixture) openCounting(name string) (*app.Engine, *stmtcount.Counter) {
 func TestOpenSkipsMigrationWriteWhenCurrent(t *testing.T) {
 	clearRemoteStore(t)
 	f := newFixture(t) // migrates f.path
-	name := "count-open-current"
-	counter := stmtcount.Register(name)
+	name, counter := stmtcount.Register("count-open-current")
 	e, err := app.Open(f.ctx, app.Config{Path: f.path, StoreDriver: name})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +100,7 @@ func TestListQueryCountIsConstant(t *testing.T) {
 	for _, n := range []int{20, 200} {
 		f := newFixture(t)
 		f.seedCompletedUnderEpic(n)
-		e, counter := f.openCounting(fmt.Sprintf("count-list-%d", n))
+		e, counter := f.openCounting("count-list")
 		counter.Reset()
 		snap, err := e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterComplete})
 		if err != nil {

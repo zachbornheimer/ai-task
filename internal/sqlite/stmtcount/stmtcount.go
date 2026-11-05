@@ -9,8 +9,11 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Counter records what a counting driver saw. It is safe for concurrent use.
@@ -87,12 +90,17 @@ func (c *Counter) begin(readOnly bool) {
 	c.mu.Unlock()
 }
 
-// Register installs a driver named name that wraps the SQLite driver and
-// reports to the returned Counter. Each test registers a unique name.
-func Register(name string) *Counter {
-	c := &Counter{}
-	sql.Register(name, &countingDriver{counter: c})
-	return c
+var registrations atomic.Int64
+
+// Register installs a driver that wraps the SQLite driver and reports to the
+// returned Counter, and returns the name to open a store with. The name
+// carries a process-wide sequence number, so registering again (a test run
+// with -count=2) never collides: database/sql panics on a repeated name.
+func Register(prefix string) (name string, counter *Counter) {
+	name = fmt.Sprintf("%s-%d", prefix, registrations.Add(1))
+	counter = &Counter{}
+	sql.Register(name, &countingDriver{counter: counter})
+	return name, counter
 }
 
 type countingDriver struct {
@@ -120,10 +128,11 @@ type countingConn struct {
 
 func (c *countingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	c.counter.begin(opts.ReadOnly)
-	if b, ok := c.Conn.(driver.ConnBeginTx); ok {
-		return b.BeginTx(ctx, opts)
+	b, ok := c.Conn.(driver.ConnBeginTx)
+	if !ok {
+		return nil, errors.New("stmtcount: the wrapped driver does not implement driver.ConnBeginTx")
 	}
-	return c.Conn.Begin() //nolint:staticcheck // the wrapped driver predates ConnBeginTx
+	return b.BeginTx(ctx, opts)
 }
 
 func (c *countingConn) ExecContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Result, error) {
