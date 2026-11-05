@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
+	"github.com/zachbornheimer/ai-task/internal/execution"
 	"github.com/zachbornheimer/ai-task/internal/process"
 )
 
@@ -24,6 +25,8 @@ const (
 	epicVerifierDead = `status = 'running' AND mode = 'group' AND job_id IN (SELECT id FROM verification_jobs WHERE status = 'running' AND lease_expires_at <= ?)`
 	// jobLeaseExpired: a verification job whose verifier's lease ran out.
 	jobLeaseExpired = `status = 'running' AND lease_expires_at <= ?`
+	// attemptLeaseExpired: an attempt nothing ended whose lease ran out.
+	attemptLeaseExpired = `ended_at IS NULL AND lease_expires_at <= ?`
 )
 
 // ReconcilePending reports whether ReconcileRuns would change anything: one
@@ -39,7 +42,8 @@ func (t *Tx) ReconcilePending(now time.Time) (bool, error) {
 		 OR EXISTS (SELECT 1 FROM verification_runs WHERE `+diagnosticAttemptGone+`)
 		 OR EXISTS (SELECT 1 FROM verification_runs WHERE `+epicVerifierDead+`)
 		 OR EXISTS (SELECT 1 FROM verification_jobs WHERE `+jobLeaseExpired+`)
-		THEN 1 ELSE 0 END`, at, at, at, at, at).Scan(&pending); err != nil {
+		 OR EXISTS (SELECT 1 FROM execution_attempts WHERE `+attemptLeaseExpired+`)
+		THEN 1 ELSE 0 END`, at, at, at, at, at, at).Scan(&pending); err != nil {
 		return false, wrapInternal(err, "probe for dead runs")
 	}
 	if pending == 1 {
@@ -95,7 +99,16 @@ func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
 		return 0, wrapInternal(err, "reconcile jobs")
 	}
 	nJ, _ := res.RowsAffected()
-	return n + nJ, nil
+	// Last, so the runs above are closed while their attempts still read as
+	// open: an attempt that expired with nothing re-claiming the task is
+	// dead, and a row left open only makes every "is it open?" query rule
+	// it out again.
+	resA, err := t.tx.ExecContext(t.ctx, `UPDATE execution_attempts SET ended_at = ?, end_reason = ? WHERE `+attemptLeaseExpired, ms(now), execution.EndExpired, ms(now))
+	if err != nil {
+		return 0, wrapInternal(err, "end expired attempts")
+	}
+	nA, _ := resA.RowsAffected()
+	return n + nJ + nA, nil
 }
 
 // endRuns closes the running runs that match where (one placeholder: now)

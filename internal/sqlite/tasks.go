@@ -326,7 +326,7 @@ func (t *Tx) ResetAttempts(id task.ID, now time.Time) (bool, error) {
 	if _, err := t.ReconcileRuns(now); err != nil {
 		return false, err
 	}
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE execution_attempts SET ended_at = ?, end_reason = ? WHERE task_id = ? AND ended_at IS NULL AND lease_expires_at <= ?`, ms(now), execution.EndReleased, id, ms(now))
+	res, err := t.tx.ExecContext(t.ctx, `UPDATE execution_attempts SET ended_at = COALESCE(ended_at, ?), end_reason = ? WHERE task_id = ? AND seq = (SELECT current_attempt_seq FROM tasks WHERE id = ?) AND (end_reason = ? OR (ended_at IS NULL AND lease_expires_at <= ?))`, ms(now), execution.EndReleased, id, id, execution.EndExpired, ms(now))
 	if err != nil {
 		return false, wrapInternal(err, "end dead attempt")
 	}

@@ -85,6 +85,9 @@ const (
 	// and the task is immediately takeable again (or blocked, if a new
 	// prerequisite was added).
 	EndReleased EndReason = "released"
+	// EndExpired: the attempt's lease ran out and nothing took the task
+	// again; a reconcile closed it.
+	EndExpired EndReason = "expired"
 )
 
 // Attempt is one execution attempt of a task. Seq is the fencing generation:
@@ -127,9 +130,18 @@ func (a Attempt) LeaseActive(now time.Time) bool {
 }
 
 // Interrupted reports whether the attempt stopped without finishing: its
-// lease ran out while it was still current.
+// lease ran out while it was still current, whether or not a reconcile has
+// since recorded that (EndExpired) or the row is still open.
 func (a Attempt) Interrupted(now time.Time) bool {
-	return a.EndedAt == nil && !now.Before(a.LeaseExpiresAt)
+	return a.EndReason == EndExpired || a.EndedAt == nil && !now.Before(a.LeaseExpiresAt)
+}
+
+// EndedUncleanly reports whether the attempt left its worktree without
+// handing it back: its row never ended, or a reconcile ended it because its
+// lease ran out. A process may still be running in that worktree, so the
+// next claim quarantines it instead of reusing it.
+func (a Attempt) EndedUncleanly() bool {
+	return a.EndedAt == nil || a.EndReason == EndExpired
 }
 
 // Authorize decides whether a token-identified attempt may mutate task state
@@ -138,6 +150,9 @@ func (a Attempt) Interrupted(now time.Time) bool {
 func Authorize(a Attempt, currentSeq int, now time.Time) error {
 	if a.Seq != currentSeq {
 		return fault.New(fault.CodeInvalidSession, "session for %s was superseded by attempt %d; run `atask claim %s` to start a new attempt", a.TaskID, currentSeq, a.TaskID)
+	}
+	if a.EndReason == EndExpired {
+		return fault.New(fault.CodeInvalidSession, "lease for %s expired at %s; run `atask claim %s` to resume with the saved handoff", a.TaskID, a.LeaseExpiresAt.UTC().Format(time.RFC3339), a.TaskID)
 	}
 	if a.EndedAt != nil {
 		if a.EndReason == EndFinished {
