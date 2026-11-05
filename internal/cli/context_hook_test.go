@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zachbornheimer/ai-task/internal/app"
 	"github.com/zachbornheimer/ai-task/internal/testgit"
 )
 
@@ -153,5 +154,27 @@ func TestContextHookChangedEmitsOnlyOnStateChange(t *testing.T) {
 	}
 	if _, plain := h.run(h.ws, "", "context", "--hook", "--changed"); !strings.Contains(plain, "something new") {
 		t.Fatalf("no session id must behave as plain --hook: %q", plain)
+	}
+}
+
+func TestContextHookChangedKeyedByCwdWithoutSession(t *testing.T) {
+	h := newHookProject(t)
+	_, first := h.run(h.ws, "", "context", "--hook", "--changed")
+	if !strings.Contains(first, "id: "+h.id) {
+		t.Fatalf("first run printed nothing useful: %q", first)
+	}
+	if _, second := h.run(h.ws, "", "context", "--hook", "--changed"); second != "" {
+		t.Fatalf("unchanged state printed: %q", second)
+	}
+	h.run(h.ws, "", "log", "--next", "something new")
+	if _, third := h.run(h.ws, "", "context", "--hook", "--changed"); !strings.Contains(third, "something new") {
+		t.Fatalf("changed state not printed: %q", third)
+	}
+	entries, err := os.ReadDir(app.HookStateRoot(h.db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("want exactly one hook-state entry, got %d", len(entries))
 	}
 }

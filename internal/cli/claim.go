@@ -3,6 +3,8 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"strings"
@@ -411,7 +413,8 @@ func runContext(ctx context.Context, c *ctxt, args []string) error {
 }
 
 // runContextHook prints the current claim's context. With changed it stays
-// silent unless the output differs from this session's last emission.
+// silent unless the output differs from the last emission: the session's
+// when the hook payload carries one, else the resolution context's (cwd).
 func runContextHook(ctx context.Context, c *ctxt, changed bool) error {
 	e, err := c.engine(ctx)
 	if err != nil {
@@ -426,14 +429,10 @@ func runContextHook(ctx context.Context, c *ctxt, changed bool) error {
 		return err
 	}
 	if changed {
-		if sid := hookSessionID(c.env.Stdin); sid != "" {
-			fresh, err := e.RecordHookEmission(sid, out)
-			if err != nil {
-				return err
-			}
-			if !fresh {
-				return nil
-			}
+		if fresh, err := e.RecordHookEmission(hookEmissionKey(c.env.Cwd, c.env.Stdin), out); err != nil {
+			return err
+		} else if !fresh {
+			return nil
 		}
 	}
 	_, err = c.env.Stdout.Write(out)
@@ -453,6 +452,18 @@ func hookSessionID(in io.Reader) string {
 		return ""
 	}
 	return payload.SessionID
+}
+
+// hookEmissionKey identifies the emission RecordHookEmission stores under:
+// the hook payload's session_id when present, else a hash of the
+// resolution context (cwd), so session-less callers dedupe per context
+// instead of printing on every prompt.
+func hookEmissionKey(cwd string, in io.Reader) string {
+	if sid := hookSessionID(in); sid != "" {
+		return sid
+	}
+	sum := sha256.Sum256([]byte("cwd:" + cwd))
+	return hex.EncodeToString(sum[:])
 }
 
 const hookPayloadLimit = 1 << 20
