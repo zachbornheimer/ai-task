@@ -63,6 +63,17 @@ type Store struct {
 // is limited to a single connection so every statement sees the same
 // database.
 func Open(ctx context.Context, path string) (*Store, error) {
+	return OpenWithDriver(ctx, path, DefaultDriver)
+}
+
+// DefaultDriver is the database/sql driver name a SQLite file store opens
+// with.
+const DefaultDriver = "sqlite"
+
+// OpenWithDriver is Open with the SQLite driver named by the caller: the
+// seam a test uses to wrap the driver and count the statements a store
+// issues. A PostgreSQL URL ignores driver.
+func OpenWithDriver(ctx context.Context, path, driver string) (*Store, error) {
 	if IsPostgresURL(path) {
 		db, err := openPostgres(path)
 		if err != nil {
@@ -83,7 +94,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		}
 	}
 	dsn := dsnFor(path, memory)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fault.WrapInternal(err, "open database")
 	}

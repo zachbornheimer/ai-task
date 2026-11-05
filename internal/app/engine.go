@@ -64,6 +64,10 @@ type Config struct {
 	// Sandbox confines checks and actions. Nil reads [sandbox] from the
 	// user's config.toml (strict when absent).
 	Sandbox *proof.SandboxConfig
+	// StoreDriver names the database/sql driver a SQLite store opens with;
+	// empty means sqlite.DefaultDriver. Tests wrap the driver to count the
+	// statements a command issues.
+	StoreDriver string
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -104,7 +108,11 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := sqlite.Open(ctx, path)
+	driverName := cfg.StoreDriver
+	if driverName == "" {
+		driverName = sqlite.DefaultDriver
+	}
+	st, err := sqlite.OpenWithDriver(ctx, path, driverName)
 	if err != nil {
 		return nil, err
 	}
