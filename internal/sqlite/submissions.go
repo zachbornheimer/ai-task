@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/zachbornheimer/ai-task/internal/discard"
@@ -296,105 +295,6 @@ func (t *Tx) EvidenceForRun(runID int64) ([]verification.Evidence, error) {
 	}
 	discard.CloseReadOnly(rows)
 	return out, t.attachRunResults(runID, out)
-}
-
-// ReconcileRuns closes final runs whose owning attempt's lease has expired
-// (the verifying process is gone), and closes group runs
-// whose job lease expired. Returns how many
-// rows changed.
-func (t *Tx) ReconcileRuns(now time.Time) (int64, error) {
-	res, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the verifying attempt lease expired before the run finished'
-		WHERE status = 'running' AND mode = 'complete' AND attempt_id IN (SELECT id FROM execution_attempts WHERE lease_expires_at <= ?)`, ms(now), ms(now))
-	if err != nil {
-		return 0, wrapInternal(err, "reconcile final runs")
-	}
-	n, _ := res.RowsAffected()
-	// A run whose owning process no longer exists is dead now, whatever its
-	// heartbeat and attempt lease still say.
-	nO, err := t.abandonRunsOfGoneOwners(now)
-	if err != nil {
-		return 0, err
-	}
-	n += nO
-	// A run whose process stopped stamping its heartbeat for two intervals
-	// is dead even while its attempt lease is still live (and even when its
-	// owner cannot be probed).
-	resH, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = ?
-		WHERE status = 'running' AND mode IN ('complete', 'proof', 'regression') AND heartbeat_every_ms > 0
-		  AND heartbeat_at + 2 * heartbeat_every_ms <= ?`, ms(now), abandonedNoHeartbeat, ms(now))
-	if err != nil {
-		return 0, wrapInternal(err, "reap lost runs")
-	}
-	nH, _ := resH.RowsAffected()
-	n += nH
-	// Diagnostic runs whose attempt ended or expired while they were
-	// recorded running: the process is gone; close them (no task failure).
-	resD, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the attempt ended or its lease expired before the diagnostic run finished'
-		WHERE status = 'running' AND mode IN ('proof', 'regression') AND attempt_id IN (SELECT id FROM execution_attempts WHERE ended_at IS NOT NULL OR lease_expires_at <= ?)`, ms(now), ms(now))
-	if err != nil {
-		return 0, wrapInternal(err, "reconcile diagnostic runs")
-	}
-	nD, _ := resD.RowsAffected()
-	n += nD
-	// An epic (group-mode) run whose verifier died is closed as an error, so
-	// the epic reads as pending again and the next worker reruns it; it
-	// must run before the jobs below are marked interrupted.
-	res4, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = 'interrupted: the epic verifier died before the run finished; the epic will be verified again'
-		WHERE status = 'running' AND mode = 'group' AND job_id IN (SELECT id FROM verification_jobs WHERE status = 'running' AND lease_expires_at <= ?)`, ms(now), ms(now))
-	if err != nil {
-		return 0, wrapInternal(err, "reconcile epic runs")
-	}
-	n4, _ := res4.RowsAffected()
-	n += n4
-	// 'interrupted' (not 'error'): a dead verifier is not a failed
-	// promotion, so it does not count toward the job's retry backoff.
-	res3, err := t.tx.ExecContext(t.ctx, `UPDATE verification_jobs SET status = 'interrupted', finished_at = ?, summary = 'verifier lease expired; job will be retried'
-		WHERE status = 'running' AND lease_expires_at <= ?`, ms(now), ms(now))
-	if err != nil {
-		return 0, wrapInternal(err, "reconcile jobs")
-	}
-	n3, _ := res3.RowsAffected()
-	return n + n3, nil
-}
-
-// abandonRunsOfGoneOwners closes running runs whose recorded owner process
-// provably no longer exists. It returns how many it closed.
-func (t *Tx) abandonRunsOfGoneOwners(now time.Time) (int64, error) {
-	rows, err := t.tx.QueryContext(t.ctx, `SELECT id, owner_pid, owner_host, owner_start FROM verification_runs
-		WHERE status = 'running' AND mode IN ('complete', 'proof', 'regression') AND owner_pid > 0`)
-	if err != nil {
-		return 0, wrapInternal(err, "list running runs")
-	}
-	defer discard.CloseReadOnly(rows)
-	type owned struct {
-		id    int64
-		owner process.Owner
-	}
-	var gone []owned
-	for rows.Next() {
-		var o owned
-		if err := rows.Scan(&o.id, &o.owner.PID, &o.owner.Host, &o.owner.Start); err != nil {
-			return 0, wrapInternal(err, "scan running run")
-		}
-		if o.owner.Gone() {
-			gone = append(gone, o)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, wrapInternal(err, "list running runs")
-	}
-	discard.CloseReadOnly(rows)
-	var n int64
-	for _, o := range gone {
-		res, err := t.tx.ExecContext(t.ctx, `UPDATE verification_runs SET status = 'error', finished_at = ?, summary = ? WHERE id = ? AND status = 'running'`,
-			ms(now), fmt.Sprintf(abandonedOwnerGone, o.owner.PID), o.id)
-		if err != nil {
-			return 0, wrapInternal(err, "abandon run of a gone owner")
-		}
-		c, _ := res.RowsAffected()
-		n += c
-	}
-	return n, nil
 }
 
 // AbandonedRun is the newest run of an open task, closed because its

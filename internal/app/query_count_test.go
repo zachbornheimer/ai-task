@@ -54,6 +54,29 @@ func TestOpenSkipsMigrationWriteWhenCurrent(t *testing.T) {
 	}
 }
 
+// TestReadsOfAnIdleBoardIssueNoWrites: List and Show reconcile dead runs
+// first, but a board with nothing to close must stay read-only; a write
+// transaction per read is a lock and a round trip nobody asked for.
+func TestReadsOfAnIdleBoardIssueNoWrites(t *testing.T) {
+	clearRemoteStore(t)
+	f := newFixture(t)
+	id := f.add("idle")
+	e, counter := f.openCounting("count-idle-reads")
+	counter.Reset()
+	if _, err := e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Show(f.ctx, f.proj.ID, string(id), false); err != nil {
+		t.Fatal(err)
+	}
+	if writes := counter.Writes(); len(writes) != 0 {
+		t.Fatalf("reading an idle board wrote: %q", writes)
+	}
+	if n := counter.WriteTransactions(); n != 0 {
+		t.Fatalf("reading an idle board began %d write transactions, want 0", n)
+	}
+}
+
 // seedCompletedUnderEpic adds n tasks under one open epic and marks each
 // complete, the shape of `list complete` on a real board: every row's
 // parent is a group the listing does not itself return.

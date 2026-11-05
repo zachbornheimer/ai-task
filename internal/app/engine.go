@@ -519,9 +519,18 @@ func (e *Engine) manager(p project.Project) workspace.Manager {
 }
 
 // reconcile closes runs and jobs whose owners' leases expired so that no
-// phantom "verifying" state survives a crash. It is cheap and idempotent.
+// phantom "verifying" state survives a crash. It is idempotent, and on a
+// board with nothing to reconcile it is one read: the write transaction
+// opens only when a read says there is something to close.
 func (e *Engine) reconcile(ctx context.Context) error {
 	now := e.now()
+	var pending bool
+	if err := e.store.Read(ctx, func(tx *sqlite.Tx) (err error) {
+		pending, err = tx.ReconcilePending(now)
+		return err
+	}); err != nil || !pending {
+		return err
+	}
 	var n int64
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		var err error
