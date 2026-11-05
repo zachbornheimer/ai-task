@@ -36,6 +36,10 @@ const (
 type ListQuery struct {
 	ProjectID project.ID
 	Filter    Filter
+	// Limit bounds the completed and archived filters to their newest
+	// tasks: 0 means DefaultHistoryLimit, NoLimit lifts the bound. Other
+	// filters are never bounded.
+	Limit int
 }
 
 // List returns a consistent snapshot of the plan.
@@ -96,6 +100,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 			return err
 		}
 		snap.Tasks, snap.Groups = []TaskView{}, []GroupView{}
+		var matched []listed
 		for i := range records {
 			r := &records[i]
 			rp := proj
@@ -164,7 +169,13 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					continue
 				}
 			}
-			v, err := e.buildViewDepth(b, *r, rp, now, viewList, heads[rp.ID])
+			matched = append(matched, listed{rec: r, proj: rp})
+		}
+		// Views are built after the bound, so a page of the newest history
+		// costs a page of views, not the whole history's.
+		matched, snap.Omitted = newestHistory(matched, q.Filter, historyLimit(q.Filter, q.Limit))
+		for _, m := range matched {
+			v, err := e.buildViewDepth(b, *m.rec, m.proj, now, viewList, heads[m.proj.ID])
 			if err != nil {
 				return err
 			}

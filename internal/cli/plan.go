@@ -564,8 +564,12 @@ func listFilter(s string) (app.Filter, bool) {
 }
 
 func runList(ctx context.Context, c *ctxt, args []string) error {
+	limit := c.fs.Int("limit", -1, fmt.Sprintf("complete and archived only: show the newest N (default %d); 0 shows all", app.DefaultHistoryLimit))
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if *limit < -1 {
+		return usage("--limit takes a count of tasks, or 0 for all; got %d", *limit)
 	}
 	e, err := c.engine(ctx)
 	if err != nil {
@@ -591,7 +595,7 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		}
 		pid = p.ID
 	}
-	snap, err := e.List(ctx, app.ListQuery{ProjectID: pid, Filter: filter})
+	snap, err := e.List(ctx, app.ListQuery{ProjectID: pid, Filter: filter, Limit: listLimit(*limit)})
 	if err != nil {
 		return err
 	}
@@ -611,6 +615,18 @@ func runList(ctx context.Context, c *ctxt, args []string) error {
 		}
 		renderList(w, snap, filter, p)
 	})
+}
+
+// listLimit maps the --limit flag (unset is -1, 0 is "all") to the
+// engine's ListQuery.Limit (unset is 0, all is NoLimit).
+func listLimit(flag int) int {
+	switch flag {
+	case -1:
+		return 0
+	case 0:
+		return app.NoLimit
+	}
+	return flag
 }
 
 func runStatus(ctx context.Context, c *ctxt, args []string) error {

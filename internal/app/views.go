@@ -200,6 +200,9 @@ type PlanSnapshot struct {
 	Tasks    []TaskView  `json:"tasks"`
 	Groups   []GroupView `json:"groups"`
 	Summary  Summary     `json:"summary"`
+	// Omitted counts the older completed or archived tasks the listing's
+	// Limit left out.
+	Omitted int `json:"omitted,omitempty"`
 }
 
 // Session is what Claim returns: the only place a token is ever emitted.

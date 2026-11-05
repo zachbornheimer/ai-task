@@ -9,7 +9,7 @@ atask version
 atask context [TASK_ID]
 atask context --hook [--changed]
 
-atask list [all|open|ready|blocked|draft|complete|archived]
+atask list [all|open|ready|blocked|draft|complete|archived] [--limit N]
 atask show [TASK_ID] [--full]
 atask status
 
