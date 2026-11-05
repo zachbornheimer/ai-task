@@ -12,17 +12,26 @@ CLI (`cmd/atask`) over one SQLite file. No daemon, no API keys.
 
 ## Install
 
-Needs Go 1.24 or later and Git. Linux is the tested platform; macOS and
-Windows build but are untested.
+Needs Git. Linux is the tested platform; macOS and Windows build but are
+untested.
 
 ```sh
-go install github.com/zachbornheimer/ai-task/cmd/atask@main
-export PATH="$(go env GOPATH)/bin:$PATH"   # if `atask` is not found
-atask version                                 # the commit you installed, e.g. v0.0.0-20261011…-e83b0eafd593
+mise use -g github:zachbornheimer/ai-task@latest   # installs the atask-* release into ~/.local/bin
+atask version                                      # the release you installed, e.g. v0.0.0-20261104…-b68bdfdc429f
 ```
 
-There are no release tags yet, so `@main` (or `@latest`, which resolves to
-the same commit) installs the newest commit on `main`. State lives in one
+The release is preferred: builds are published per commit, and installing
+them keeps `atask` in `~/.local/bin`, where nothing can shadow it. To build
+from source instead, pin the destination explicitly — a mise-managed
+`GOBIN` otherwise captures the binary into a Go bin directory that shadows
+`~/.local/bin` on PATH:
+
+```sh
+GOBIN="$HOME/.local/bin" go install github.com/zachbornheimer/ai-task/cmd/atask@main
+```
+
+`@main` (or `@latest`, which resolves to the same commit) installs the
+newest commit on `main`. State lives in one
 SQLite file, `~/.local/state/atask/atask.db` on Linux (`ATASK_DB` overrides; `at
 --help` shows the default), with task worktrees and run logs beside it.
 Set `ATASK_DB_URL` to a `postgres://` URL to keep state in PostgreSQL
