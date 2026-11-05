@@ -264,8 +264,9 @@ func runAdd(ctx context.Context, c *ctxt, args []string) error {
 		return err
 	}
 	var id task.ID
-	for _, v := range res.Created {
+	for name, v := range res.Created {
 		id = v
+		addWarnings(&res, name, pfl.sizeWarnings())
 	}
 	if id == "" {
 		// Identical replay: look the key up for the acknowledgement.
@@ -459,6 +460,7 @@ func runUpdate(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
+	addWarnings(&res, string(target), pfl.sizeWarnings())
 	view, verr := e.Show(ctx, pid, string(target), false)
 	type out struct {
 		plan.Result
