@@ -178,3 +178,30 @@ func TestContextHookChangedKeyedByCwdWithoutSession(t *testing.T) {
 		t.Fatalf("want exactly one hook-state entry, got %d", len(entries))
 	}
 }
+
+// Two directories resolving to the same claim print the same text; each one
+// must still get its own first emission, so the cwd key never collides.
+func TestContextHookChangedKeysDistinctCwdsSeparately(t *testing.T) {
+	h := newHookProject(t)
+	sub := filepath.Join(h.ws, "sub")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, cwd := range []string{h.ws, sub} {
+		if _, first := h.run(cwd, "", "context", "--hook", "--changed"); !strings.Contains(first, "id: "+h.id) {
+			t.Fatalf("first run in %s printed nothing useful: %q", cwd, first)
+		}
+	}
+	for _, cwd := range []string{h.ws, sub} {
+		if _, second := h.run(cwd, "", "context", "--hook", "--changed"); second != "" {
+			t.Fatalf("unchanged state printed in %s: %q", cwd, second)
+		}
+	}
+	entries, err := os.ReadDir(app.HookStateRoot(h.db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("want one hook-state entry per cwd, got %d", len(entries))
+	}
+}
