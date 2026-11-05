@@ -7,10 +7,13 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
 )
 
-// canceledRun is the summary a canceled run is closed with. It carries the
-// abandoned prefix so it reads like any run lost with its verifier: it
-// never counts toward the attempt budget.
-const canceledRun = sqlite.AbandonedPrefix + " canceled by the session that owns it (verify cancel)"
+// Why a run was closed from outside. Both carry the abandoned prefix so
+// they read like any run lost with its verifier: neither counts toward the
+// attempt budget.
+const (
+	canceledRun   = sqlite.AbandonedPrefix + " canceled by the session that owns it (verify cancel)"
+	terminatedRun = sqlite.AbandonedPrefix + " the verifying process was terminated by a signal (SIGTERM or SIGHUP)"
+)
 
 // CancelResult says how many running verification runs a cancel closed.
 type CancelResult struct {
@@ -25,6 +28,17 @@ type CancelResult struct {
 // fence and stops without completing anything; the claim stays live and no
 // failure is charged. Closing nothing is not an error.
 func (e *Engine) CancelVerify(ctx context.Context, token execution.Token) (CancelResult, error) {
+	return e.closeRunning(ctx, token, canceledRun, "verification canceled; the claim is still live")
+}
+
+// AbandonVerify closes the session's running runs as lost to a termination
+// signal. The CLI calls it, on a context the signal did not cancel, after
+// SIGTERM or SIGHUP stopped its own verification.
+func (e *Engine) AbandonVerify(ctx context.Context, token execution.Token) (CancelResult, error) {
+	return e.closeRunning(ctx, token, terminatedRun, "verification stopped by a signal; the claim is still live")
+}
+
+func (e *Engine) closeRunning(ctx context.Context, token execution.Token, summary, closedMessage string) (CancelResult, error) {
 	now := e.now()
 	var closed int64
 	err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
@@ -32,7 +46,7 @@ func (e *Engine) CancelVerify(ctx context.Context, token execution.Token) (Cance
 		if err != nil {
 			return err
 		}
-		closed, err = tx.CancelRunningRuns(a.ID, canceledRun, now)
+		closed, err = tx.CancelRunningRuns(a.ID, summary, now)
 		return err
 	})
 	if err != nil {
@@ -40,7 +54,7 @@ func (e *Engine) CancelVerify(ctx context.Context, token execution.Token) (Cance
 	}
 	if closed > 0 {
 		e.notify()
-		return CancelResult{Closed: closed, Message: "verification canceled; the claim is still live"}, nil
+		return CancelResult{Closed: closed, Message: closedMessage}, nil
 	}
 	return CancelResult{Message: "no verification was running for this session"}, nil
 }

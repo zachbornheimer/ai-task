@@ -58,6 +58,30 @@ func TestVerifyCancelClosesLiveRun(t *testing.T) {
 	}
 }
 
+// TestAbandonVerifyClosesTheRunAsTerminated: the CLI calls this after a
+// SIGTERM or SIGHUP stopped its verification, so the run reads as lost to
+// a termination, not as a user's cancel, and still costs no attempt.
+func TestAbandonVerifyClosesTheRunAsTerminated(t *testing.T) {
+	clearRemoteStore(t)
+	f := newGitFixture(t)
+	e, s, id, cancel := startSleepingVerify(t, f)
+	defer cancel()
+	res, err := e.AbandonVerify(f.ctx, s.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Closed != 1 {
+		t.Fatalf("closed %d runs, want 1", res.Closed)
+	}
+	status, summary := f.newestRun()
+	if status != "error" || !strings.HasPrefix(summary, "abandoned:") || !strings.Contains(summary, "terminated") {
+		t.Fatalf("run = %s %q, want an abandoned error naming the termination", status, summary)
+	}
+	if got := f.status(string(id)); got != task.StatusClaimed {
+		t.Fatalf("status %s, want claimed", got)
+	}
+}
+
 // TestCanceledRunCannotComplete: the process whose run was canceled may
 // still be alive; its checks finishing must not complete the task.
 func TestCanceledRunCannotComplete(t *testing.T) {

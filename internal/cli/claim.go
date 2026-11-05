@@ -346,7 +346,10 @@ func runVerify(ctx context.Context, c *ctxt, args []string) error {
 	case *reverify:
 		res, err = e.Reverify(ctx, tok)
 	default:
-		res, err = e.Verify(ctx, tok, mode)
+		err = runUntilTerminated(ctx, func(ctx context.Context) (verr error) {
+			res, verr = e.Verify(ctx, tok, mode)
+			return verr
+		}, func(ctx context.Context) { _, _ = e.AbandonVerify(ctx, tok) })
 	}
 	if err != nil {
 		return err
