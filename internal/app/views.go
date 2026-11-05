@@ -259,6 +259,8 @@ type VerifyResult struct {
 	// (complete only).
 	ChecksChangedAfterClaim bool               `json:"checks_changed_after_claim"`
 	CheckChanges            []task.CheckChange `json:"check_changes,omitempty"`
+	// Phases says where a completion spent its time (complete only).
+	Phases *PhaseTimings `json:"phases,omitempty"`
 }
 
 // MarshalJSON adds run_results: the RunResult of every executed check, in

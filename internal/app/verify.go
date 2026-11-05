@@ -50,13 +50,17 @@ func (e *Engine) Verify(ctx context.Context, token execution.Token, mode verific
 	var res VerifyResult
 	var err error
 	if mode == verification.ModeComplete {
-		res, err = e.verifyComplete(ctx, token)
+		phases := &PhaseTimings{}
+		res, err = e.verifyComplete(withPhases(ctx, phases), token)
 		if err == nil && res.Completed {
+			stop := phases.measure(&phases.Actions)
 			err = e.attachActions(ctx, token, &res)
+			stop()
 		}
 		if err == nil {
 			err = e.attachCheckChanges(ctx, token, &res)
 		}
+		reportPhases(&res, err, phases)
 	} else {
 		res, err = e.verifyDiagnostic(ctx, token, mode)
 	}
@@ -190,6 +194,7 @@ func (e *Engine) verifyDiagnostic(ctx context.Context, token execution.Token, mo
 // leaves behind can be the reason a regression check passes.
 func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision string, policy verification.Policy, runID int64, fence func(*sqlite.Tx) error, t task.Task, proj project.Project, workDir string) ([]verification.Evidence, error) {
 	var out []verification.Evidence
+	ph := phasesOf(ctx)
 	inPlace := proj.Rootless()
 	var changed []string
 	if !inPlace {
@@ -203,13 +208,19 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 		dir, cleanup := workDir, func() {}
 		if !inPlace {
 			var err error
+			stop := ph.measure(&ph.Snapshot)
 			dir, cleanup, err = mgr.Snapshot(ctx, revision)
+			stop()
 			if err != nil {
 				return nil, err
 			}
 		}
+		stop := ph.measure(&ph.Checks)
 		ev, err := e.runChecks(ctx, dir, taskPolicy, runID, revision, fence, taskOpts)
+		stop()
+		stop = ph.measure(&ph.Cleanup)
 		cleanup()
+		stop()
 		out = append(out, ev...)
 		if err != nil {
 			return out, err
@@ -231,15 +242,23 @@ func (e *Engine) runSuites(ctx context.Context, mgr workspace.Manager, revision 
 		return append(out, ev...), err
 	}
 	if inPlace {
+		stop := ph.measure(&ph.Checks)
 		ev, err := e.runChecks(ctx, workDir, regPolicy, runID, revision, fence, regOpts)
+		stop()
 		return append(out, ev...), err
 	}
+	stop := ph.measure(&ph.Snapshot)
 	dir, cleanup, err := mgr.Snapshot(ctx, revision)
+	stop()
 	if err != nil {
 		return out, err
 	}
+	stop = ph.measure(&ph.Checks)
 	ev, err := e.runChecks(ctx, dir, regPolicy, runID, revision, fence, regOpts)
+	stop()
+	stop = ph.measure(&ph.Cleanup)
 	cleanup()
+	stop()
 	return append(out, ev...), err
 }
 
@@ -574,6 +593,8 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 	// One transaction re-checks everything completion depends on and
 	// records it.
 	now := e.now()
+	ph := phasesOf(ctx)
+	stopRecord := ph.measure(&ph.Record)
 	err = e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := fence(tx); err != nil {
 			return err
@@ -589,11 +610,14 @@ func (e *Engine) executeFinal(ctx context.Context, fr finalRun) (VerifyResult, e
 		}
 		return tx.EndAttempt(fr.attempt.ID, execution.EndFinished, now)
 	})
+	stopRecord()
 	if err != nil {
 		return refused(err)
 	}
 	// The task is done: its quarantined directories are history.
+	stopPrune := ph.measure(&ph.Prune)
 	_, _ = mgr.Prune(ctx, string(fr.rec.Task.ID), true)
+	stopPrune()
 	return done()
 }
 
