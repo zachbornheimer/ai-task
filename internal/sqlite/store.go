@@ -237,6 +237,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	sort.Strings(names)
+	if s.ledgerRecords(ctx, names) {
+		return nil
+	}
 	// The migrations table itself is created idempotently outside the loop.
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)`); err != nil {
 		return fault.WrapInternal(err, "create schema_migrations")
@@ -283,11 +286,48 @@ func (s *Store) migrate(ctx context.Context) error {
 	})
 }
 
+// ledgerRecords reports whether schema_migrations already records every
+// embedded migration under the name this build embeds, so opening a
+// migrated store is one read and no write. A missing table, an unreadable
+// ledger, a missing version, or a version recorded under another name all
+// answer false: the full path then creates, applies, or reports the
+// mismatch.
+func (s *Store) ledgerRecords(ctx context.Context, names []string) bool {
+	rows, err := s.db.QueryContext(ctx, `SELECT version, name FROM schema_migrations`)
+	if err != nil {
+		return false
+	}
+	defer discard.CloseReadOnly(rows)
+	applied := map[int64]string{}
+	for rows.Next() {
+		var v int64
+		var recorded string
+		if rows.Scan(&v, &recorded) != nil {
+			return false
+		}
+		applied[v] = recorded
+	}
+	if rows.Err() != nil {
+		return false
+	}
+	for _, name := range names {
+		version, err := strconv.ParseInt(strings.SplitN(name, "_", 2)[0], 10, 64)
+		if err != nil || applied[version] != name {
+			return false
+		}
+	}
+	return true
+}
+
 // migratePostgres applies the final PostgreSQL schema once and records it
 // in schema_migrations. There are no incremental migrations to replay: the
 // schema is only ever created from scratch by sync or first use, so a
 // recorded version means it is current.
 func (s *Store) migratePostgres(ctx context.Context) error {
+	var recorded int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version = $1`, pgSchemaVersion).Scan(&recorded); err == nil && recorded > 0 {
+		return nil // current: one read, no write
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version BIGINT PRIMARY KEY, name TEXT NOT NULL, applied_at BIGINT NOT NULL)`); err != nil {
 		return fault.WrapInternal(err, "create schema_migrations")
 	}

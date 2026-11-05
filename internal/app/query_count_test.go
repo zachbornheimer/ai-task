@@ -32,6 +32,28 @@ func (f *fixture) openCounting(name string) (*app.Engine, *stmtcount.Counter) {
 	return e, counter
 }
 
+// TestOpenSkipsMigrationWriteWhenCurrent: opening a store whose ledger
+// already records every migration this build embeds must not write, so
+// every CLI call on a migrated board pays one read instead of a schema
+// statement plus a write transaction.
+func TestOpenSkipsMigrationWriteWhenCurrent(t *testing.T) {
+	clearRemoteStore(t)
+	f := newFixture(t) // migrates f.path
+	name := "count-open-current"
+	counter := stmtcount.Register(name)
+	e, err := app.Open(f.ctx, app.Config{Path: f.path, StoreDriver: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	must.OK(t, e.Close())
+	if writes := counter.Writes(); len(writes) != 0 {
+		t.Fatalf("opening a current store wrote: %q", writes)
+	}
+	if n := counter.WriteTransactions(); n != 0 {
+		t.Fatalf("opening a current store began %d write transactions, want 0", n)
+	}
+}
+
 // seedCompletedUnderEpic adds n tasks under one open epic and marks each
 // complete, the shape of `list complete` on a real board: every row's
 // parent is a group the listing does not itself return.
