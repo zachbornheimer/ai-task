@@ -313,6 +313,9 @@ func (a *applier) addTask(ctx context.Context, i int, c plan.AddTask) error {
 	if err := vacuityError(spec); err != nil {
 		return err
 	}
+	if err := a.sandboxError(spec); err != nil {
+		return err
+	}
 	id, err := a.insert(spec)
 	if err != nil {
 		return err
@@ -617,6 +620,11 @@ func (a *applier) updateTask(ctx context.Context, c plan.UpdateTask) error {
 				return err
 			}
 		}
+		if t.Kind == task.KindTask && (c.TaskChecks.Set || c.Proof != nil || c.Regression != nil) {
+			if err := a.sandboxError(spec); err != nil {
+				return err
+			}
+		}
 		t.Description, t.Outcome, t.Constraints, t.Acceptance = spec.Description, spec.Outcome, spec.Constraints, spec.Acceptance
 		if err := a.tx.UpdateTaskContract(t, a.now); err != nil {
 			return err
@@ -871,6 +879,37 @@ func vacuityError(spec task.Spec) error {
 		}
 	}
 	return nil
+}
+
+// sandboxError rejects a task whose proof or regression runs a command the
+// check sandbox always refuses (see proof.SandboxRefusal), so it is never
+// filed. It judges only checks that run confined: a rootless project, or
+// an unconfined [sandbox] mode, runs them with the host's credentials.
+func (a *applier) sandboxError(spec task.Spec) error {
+	if spec.Kind != task.KindTask || !a.e.checksConfined(a.proj) {
+		return nil
+	}
+	granted := grantedCheckEnv()
+	for _, group := range [][]verification.CheckSpec{spec.Verification.TaskChecks, spec.Verification.Regression} {
+		for _, c := range group {
+			if c.Eval != nil {
+				continue
+			}
+			if err := proof.SandboxRefusal(checkScript(c.Command), granted); err != nil {
+				return fault.New(fault.CodeInvalidInput, "check %q: %s", c.ID, fault.MessageOf(err))
+			}
+		}
+	}
+	return nil
+}
+
+// checkScript is the shell text a check's argv runs: the script of sh -c
+// SCRIPT, else the argv quoted as a shell would need it typed.
+func checkScript(argv []string) string {
+	if len(argv) == 3 && argv[1] == "-c" && filepath.Base(argv[0]) == "sh" {
+		return argv[2]
+	}
+	return shellJoin(argv)
 }
 
 func checkSubject(argv []string) string {

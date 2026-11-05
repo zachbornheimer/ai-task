@@ -9,6 +9,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/fault"
 	"github.com/zachbornheimer/ai-task/internal/process"
+	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/proof"
 	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
@@ -140,4 +141,11 @@ func (e *Engine) ensureSandbox() error {
 		return fault.Wrap(err, fault.CodeInvalidInput, "run checks")
 	}
 	return nil
+}
+
+// checksConfined reports whether the checks of proj run under the Seatbelt
+// sandbox: rootless projects run unconfined, and so does any run whose
+// configured mode or platform does not confine.
+func (e *Engine) checksConfined(proj project.Project) bool {
+	return !proj.Rootless() && (&process.Sandbox{Mode: e.sandbox.Mode}).Active()
 }

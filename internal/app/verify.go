@@ -297,11 +297,11 @@ func (e *Engine) suiteOpts(t task.Task, proj project.Project, changed []string) 
 // checkEnv is the environment checks and actions run with: the allowlisted
 // part of the parent environment (see CheckEnvironment), GOFLAGS carrying
 // -count=1 so Go's own test cache cannot turn a fresh run into a replay,
-// and a TMPDIR private to the snapshot so temporary files of one suite
-// never reach another.
+// a TMPDIR private to the snapshot so temporary files of one suite never
+// reach another, and, for a check handed the 1Password token, a private
+// OP_CONFIG_DIR (see opConfigEnv).
 func checkEnv(dir string) []string {
-	extra, _ := proof.LoadExtraEnv(proof.ConfigPath()) // a bad config is reported where presets load
-	env := NewCheckEnvironment(extra).Filter(os.Environ())
+	env := NewCheckEnvironment(grantedCheckEnv()).Filter(os.Environ())
 	flags := "-count=1"
 	kept := env[:0:0]
 	for _, kv := range env {
@@ -318,7 +318,9 @@ func checkEnv(dir string) []string {
 			kept = append(kept, kv)
 		}
 	}
-	return append(kept, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+checkTmpDir(dir))
+	tmp := checkTmpDir(dir)
+	kept = append(kept, "GOFLAGS="+flags, "ATASK_CHECK_DIR="+dir, "TMPDIR="+tmp)
+	return append(kept, opConfigEnv(kept, tmp)...)
 }
 
 // checkTmpDir is the TMPDIR for checks running in dir, created. Without a

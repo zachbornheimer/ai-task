@@ -199,6 +199,19 @@ Strict mode fails closed: without `sandbox-exec` the run fails `INVALID_INPUT`
 ("sandbox unavailable: ...") before any check starts. On other platforms
 checks run unconfined and report `"sandboxed": false`.
 
+A check that needs a host credential the sandbox withholds can never pass, so
+filing refuses it (`INVALID_INPUT`, naming the need) instead of storing a
+proof that fails at every verify. A proof or regression whose command words
+include `ssh`, `scp`, `sftp` or `ssh-add` (also inside `sh -c`) is refused
+with `needs ~/.ssh`: reads of `~/.ssh` are denied and no `[sandbox]` setting
+grants them. `op` is refused unless `extra_env` lists
+`OP_SERVICE_ACCOUNT_TOKEN`: a confined check reaches 1Password only through
+that token, and a check handed it also gets a private `OP_CONFIG_DIR` inside
+its `TMPDIR` (the sandbox keeps denying `~/.config/op`). Only command words
+are read, so a tool that reaches ssh or op indirectly (a mise task, a script)
+is not refused and fails at run time with its own error. Rootless projects and
+`mode = "none"` run checks unconfined, so nothing is refused there.
+
 ### Output and errors
 
 Every command prints `{"ok":true,"result":...}` or
