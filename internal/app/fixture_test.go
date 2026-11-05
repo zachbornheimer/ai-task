@@ -92,7 +92,19 @@ func newGitFixture(t *testing.T) *fixture {
 // open opens another engine on the same database, simulating a separate
 // process (separate connection pool, same file).
 func (f *fixture) open() *app.Engine {
-	e, err := app.Open(f.ctx, app.Config{Path: f.path, Now: f.c.Now, PollInterval: 50 * time.Millisecond, ProofBudget: f.proofBudget, Switch: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")}})
+	return f.openWith(app.Config{})
+}
+
+// openWith opens another engine on the same database with cfg's fields
+// layered over the fixture's: a test that needs its own switcher or renewal
+// interval builds that engine here, not in the fixture itself.
+func (f *fixture) openWith(cfg app.Config) *app.Engine {
+	cfg.Path, cfg.Now, cfg.ProofBudget = f.path, f.c.Now, f.proofBudget
+	cfg.PollInterval = 50 * time.Millisecond
+	if cfg.Switch == nil {
+		cfg.Switch = addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")}
+	}
+	e, err := app.Open(f.ctx, cfg)
 	if err != nil {
 		f.t.Fatal(err)
 	}

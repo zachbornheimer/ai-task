@@ -53,9 +53,9 @@ const DefaultLease = 30 * time.Minute
 // holds the task. A claim records its attempt, builds the worktree, and stores
 // the token in that worktree last, so a process killed in between leaves a
 // claim nobody can work on and nobody holds a token to release: this window is
-// the whole recovery time. It matches the caller-side bound on one claim (the
-// start_atask_task capability gives up on a claim after five minutes), so a
-// claim that outlives it has already failed its caller.
+// the whole recovery time. A claim that is still provisioning renews the
+// window itself, so a live claim is never ended mid-build by the length of its
+// worktree build; only a claim whose process stopped renewing expires.
 const ClaimWindow = 5 * time.Minute
 
 // ClaimExpiry is the expiry an attempt is recorded with: at most the claim
