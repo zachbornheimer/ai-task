@@ -119,7 +119,7 @@ func (e *Engine) Context(ctx context.Context, pid project.ID, ref string, token 
 		sibs = sibs[:SiblingLimit]
 	}
 	c := Context{Project: proj.ID, Task: &v, TargetBranch: proj.TargetBranch, Regression: regression, Siblings: sibs}
-	if a := v.Attempt; a != nil && a.EndedAt == nil {
+	if a := v.Attempt; a != nil && (a.EndedAt == nil || a.EndReason == execution.EndExpired) {
 		c.Workspace, c.Branch = a.Workspace, a.Branch
 		lease := a.LeaseExpiresAt
 		c.LeaseUntil = &lease
