@@ -74,10 +74,14 @@ it. `agent-fleet-backend` writes to the same board.
 
 ## Caveats
 
-- Not exercised against PostgreSQL (no reachable test database): the reconcile
-  probe, the migrate fast path, `CancelRunningRuns`, and the `ResetAttempts`
-  update. They use the dialect's usual placeholder rewriting and were run on
-  SQLite only.
+- The PostgreSQL paths (the reconcile probe, the migrate fast path,
+  `CancelRunningRuns`, the `ResetAttempts` update) are covered by
+  `TestReconcileScenarioOnPostgreSQL`, which runs when
+  `ATASK_TEST_POSTGRES_URL` names a database (it works in a schema of its
+  own and drops it). The default suite skips it. They were also exercised
+  end to end through the CLI on a local PostgreSQL 16: two idle reads logged
+  12 data-changing statements with `ffb5d4b` and none with this branch.
+  Not run against the production board.
 - A bare `atask list` (the `all` filter) is still unbounded; only
   `complete` and `archived` are paged.
 
