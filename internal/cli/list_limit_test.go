@@ -19,6 +19,16 @@ func TestRenderListNamesWhatTheLimitOmitted(t *testing.T) {
 	}
 }
 
+// The default listing is the hierarchical one; it says so too.
+func TestRenderDefaultListNamesWhatTheLimitOmitted(t *testing.T) {
+	var b bytes.Buffer
+	snap := app.PlanSnapshot{Tasks: []app.TaskView{{ID: "at-aaaaaa", Title: "newest"}}, Omitted: 7}
+	renderList(&b, snap, app.FilterAll, painter{})
+	if out := b.String(); !strings.Contains(out, "7 older") || !strings.Contains(out, "--limit 0") {
+		t.Fatalf("the default listing does not say 7 older tasks were left out:\n%s", out)
+	}
+}
+
 func TestRenderListIsSilentWhenNothingWasOmitted(t *testing.T) {
 	var b bytes.Buffer
 	renderList(&b, app.PlanSnapshot{Tasks: []app.TaskView{{ID: "at-aaaaaa", Title: "only"}}}, app.FilterComplete, painter{})

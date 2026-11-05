@@ -564,7 +564,7 @@ func listFilter(s string) (app.Filter, bool) {
 }
 
 func runList(ctx context.Context, c *ctxt, args []string) error {
-	limit := c.fs.Int("limit", -1, fmt.Sprintf("complete and archived only: show the newest N (default %d); 0 shows all", app.DefaultHistoryLimit))
+	limit := c.fs.Int("limit", -1, fmt.Sprintf("finished work only (complete, archived, and the completed part of the default listing): show the newest N (default %d); 0 shows all. Open work is never limited", app.DefaultHistoryLimit))
 	if err := c.parse(args); err != nil {
 		return err
 	}

@@ -36,9 +36,11 @@ const (
 type ListQuery struct {
 	ProjectID project.ID
 	Filter    Filter
-	// Limit bounds the completed and archived filters to their newest
-	// tasks: 0 means DefaultHistoryLimit, NoLimit lifts the bound. Other
-	// filters are never bounded.
+	// Limit bounds the finished work a listing returns to its newest
+	// tasks: the whole of the complete and archived filters, and the
+	// completed part of the default (all) listing. 0 means
+	// DefaultHistoryLimit, NoLimit lifts the bound. Unfinished work is
+	// never bounded.
 	Limit int
 }
 
@@ -169,7 +171,7 @@ func (e *Engine) List(ctx context.Context, q ListQuery) (PlanSnapshot, error) {
 					continue
 				}
 			}
-			matched = append(matched, listed{rec: r, proj: rp})
+			matched = append(matched, listed{rec: r, proj: rp, status: st})
 		}
 		// Views are built after the bound, so a page of the newest history
 		// costs a page of views, not the whole history's.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/zachbornheimer/ai-task/internal/project"
 	"github.com/zachbornheimer/ai-task/internal/sqlite"
+	"github.com/zachbornheimer/ai-task/internal/task"
 )
 
 const (
@@ -17,16 +18,20 @@ const (
 )
 
 // listed is a record that passed a listing's filter, with the project its
-// view is built against.
+// view is built against and its derived status.
 type listed struct {
-	rec  *sqlite.Record
-	proj project.Project
+	rec    *sqlite.Record
+	proj   project.Project
+	status task.Status
 }
 
-// historyLimit is the bound a query applies: only the history filters are
-// bounded (open work is never paged), and Limit 0 means the default.
+// historyLimit is the bound a query applies, and Limit 0 means the default.
+// Every filter that can return finished work is bounded; ready, blocked,
+// draft and open list only unfinished work, which is never paged.
 func historyLimit(f Filter, limit int) int {
-	if f != FilterComplete && f != FilterArchived {
+	switch f {
+	case FilterComplete, FilterArchived, FilterAll:
+	default:
 		return NoLimit
 	}
 	switch {
@@ -38,11 +43,28 @@ func historyLimit(f Filter, limit int) int {
 	return limit
 }
 
+// isHistory reports whether a row counts toward the bound under f: every
+// row of the complete and archived filters, and only the completed rows of
+// the default listing, so open work is never hidden by it.
+func isHistory(r listed, f Filter) bool {
+	return f != FilterAll || r.status == task.StatusComplete
+}
+
 // newestHistory keeps the limit most recently completed (or archived) of
-// rows, in their original order, and reports how many it left out. A
-// limit of NoLimit, or one the rows do not exceed, keeps everything.
+// the history rows, plus every other row, in their original order, and
+// reports how many history rows it left out. A limit of NoLimit, or one the
+// history does not exceed, keeps everything.
 func newestHistory(rows []listed, f Filter, limit int) (kept []listed, omitted int) {
-	if limit == NoLimit || len(rows) <= limit {
+	if limit == NoLimit {
+		return rows, 0
+	}
+	var history []int
+	for i, r := range rows {
+		if isHistory(r, f) {
+			history = append(history, i)
+		}
+	}
+	if len(history) <= limit {
 		return rows, 0
 	}
 	stamp := func(r listed) int64 {
@@ -54,16 +76,16 @@ func newestHistory(rows []listed, f Filter, limit int) (kept []listed, omitted i
 		}
 		return 0
 	}
-	newest := make([]int, len(rows))
-	for i := range newest {
-		newest[i] = i
+	sort.SliceStable(history, func(a, b int) bool { return stamp(rows[history[a]]) > stamp(rows[history[b]]) })
+	dropped := make(map[int]bool, len(history)-limit)
+	for _, i := range history[limit:] {
+		dropped[i] = true
 	}
-	sort.SliceStable(newest, func(a, b int) bool { return stamp(rows[newest[a]]) > stamp(rows[newest[b]]) })
-	newest = newest[:limit]
-	sort.Ints(newest)
-	kept = make([]listed, 0, limit)
-	for _, i := range newest {
-		kept = append(kept, rows[i])
+	kept = make([]listed, 0, len(rows)-len(dropped))
+	for i, r := range rows {
+		if !dropped[i] {
+			kept = append(kept, r)
+		}
 	}
-	return kept, len(rows) - limit
+	return kept, len(dropped)
 }

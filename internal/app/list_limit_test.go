@@ -69,6 +69,38 @@ func TestListLimitCanBeLifted(t *testing.T) {
 	}
 }
 
+// The default listing (`atask list`, every live task) pages only the
+// completed history: all open work is always there, plus the newest page of
+// what is done, and the omitted count says what was left out.
+func TestListAllBoundsOnlyTheCompletedHistory(t *testing.T) {
+	clearRemoteStore(t)
+	f := newFixture(t)
+	f.seedStaggeredCompletions(250)
+	open := map[string]bool{}
+	for i := range 3 {
+		key := fmt.Sprintf("open%d", i)
+		f.add(key)
+		open[key] = false
+	}
+	snap, err := f.e.List(f.ctx, app.ListQuery{ProjectID: f.proj.ID, Filter: app.FilterAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range snap.Tasks {
+		if _, ok := open[v.Title]; ok {
+			open[v.Title] = true
+		}
+	}
+	for key, seen := range open {
+		if !seen {
+			t.Errorf("open task %s is missing from the default listing", key)
+		}
+	}
+	if want := app.DefaultHistoryLimit + 3; len(snap.Tasks) != want || snap.Omitted != 50 {
+		t.Fatalf("listed %d tasks, omitted %d; want %d and 50", len(snap.Tasks), snap.Omitted, want)
+	}
+}
+
 // Open work is never paged: a limit that hid a ready task would be a bug.
 func TestListOpenIgnoresTheHistoryLimit(t *testing.T) {
 	clearRemoteStore(t)
