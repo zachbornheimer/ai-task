@@ -27,6 +27,8 @@ atask log [--done TEXT] [--next TEXT] [--learned TEXT] [--note TEXT]
 atask verify proof
 atask verify regression
 atask verify complete [TASK_ID] [--reverify]
+atask verify cancel [TOKEN|-]
+atask run show RUN_ID
 
 atask init [--name NAME] [--path PATH]
 atask project add NAME
