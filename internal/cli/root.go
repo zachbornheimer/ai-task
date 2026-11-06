@@ -267,7 +267,7 @@ func (c *ctxt) engine(ctx context.Context) (*app.Engine, error) {
 	// A slow step of a claim says what it waits on, on stderr as a warning
 	// (the prefix stderr carries on a command that still succeeds): stdout
 	// stays the command's result, which --json callers parse.
-	progress := func(line string) { fmt.Fprintln(c.env.Stderr, "warning: "+line) }
+	progress := func(line string) { _, _ = fmt.Fprintln(c.env.Stderr, "warning: "+line) }
 	e, err := app.Open(ctx, app.Config{Path: c.g.db, Actor: actor, Cwd: c.env.Cwd, Progress: progress})
 	if err != nil {
 		return nil, err
