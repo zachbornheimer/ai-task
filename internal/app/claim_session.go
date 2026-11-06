@@ -14,8 +14,9 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/workspace"
 )
 
-// DefaultSessionRoot places rootless claim tokens beside the database, or
-// in the local state directory when the database is remote.
+// DefaultSessionRoot places the tokens of claims, keyed by the directory they
+// were made from, beside the database, or in the local state directory when
+// the database is remote.
 func DefaultSessionRoot(dbPath string) string {
 	if sqlite.IsPostgresURL(dbPath) {
 		return filepath.Join(localStateRoot(), "sessions")
@@ -59,9 +60,9 @@ func (e *Engine) liveSessions(ctx context.Context) []workspace.StoredSession {
 	return out
 }
 
-// AmbientToken returns the token of the one live rootless claim made from
-// this engine's directory, or "" when there is none. Several claims from
-// one directory are ambiguous: the caller must pass the token.
+// AmbientToken returns the token of the one live claim made from this
+// engine's directory, or "" when there is none. Several claims from one
+// directory are ambiguous: the caller must pass the token.
 func (e *Engine) AmbientToken(ctx context.Context) (execution.Token, error) {
 	if e.cwd == "" {
 		return "", nil
@@ -99,9 +100,14 @@ func (e *Engine) liveClaimFromCwd(ctx context.Context, id task.ID) (Session, boo
 	return s, true
 }
 
-// storeRootlessToken records the token of a rootless claim under the state
-// directory, replacing any earlier claim's file for the same task (takeover).
-func (e *Engine) storeRootlessToken(s Session) error {
+// storeClaimSession records the token of a claim under the state directory,
+// keyed by the claiming directory and the task, replacing any earlier claim's
+// file for the same task (takeover). A claim made from no directory has
+// nothing to key it by and stores nothing.
+func (e *Engine) storeClaimSession(s Session) error {
+	if e.cwd == "" {
+		return nil
+	}
 	e.sessions().RemoveTask(string(s.Task.ID))
 	return e.sessions().Save(workspace.StoredSession{Cwd: e.cwd, TaskID: string(s.Task.ID), Token: string(s.Token)})
 }

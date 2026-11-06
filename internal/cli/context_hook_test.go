@@ -38,6 +38,10 @@ func (h *hookProject) run(cwd, stdin string, args ...string) (int, string) {
 		return ""
 	}
 	code := Main(Env{Args: args, Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
+	if code == ExitOK {
+		// A slow claim warns on stderr; callers read the command's stdout.
+		return code, out.String()
+	}
 	return code, out.String() + errb.String()
 }
 

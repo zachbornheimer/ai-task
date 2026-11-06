@@ -109,11 +109,21 @@ claimed and verifying.
   (`TestTakeoverLeavesStaleTokenPowerless`, `e2e.TestAgentLoopEndToEnd`,
   `e2e.TestDiscoveredBlockerFromWorktree`)
 - A claim holds the task for the claim window (`execution.ClaimWindow`,
-  five minutes) until its worktree is stored, then for its whole lease: a
-  claim whose process died before it stored the worktree and printed its
-  token comes back on its own instead of blocking the task for the lease.
+  five minutes) until its workspace is built, then for its whole lease: a
+  claim whose process died before then comes back on its own instead of
+  blocking the task for the lease. The claim's session is stored under the
+  claiming directory before the workspace is built, so a claim that hangs
+  or is killed while building it is never one nobody can verify or release;
+  a claim whose workspace is not built within the window returns, gives the
+  task back and leaves no session; and the repository's hooks `wt switch`
+  started end with the claim's context.
   (`TestClaimWindowFreesATaskWhoseWorktreeWasNeverStored`,
-  `TestStoredWorktreeHoldsTheWholeLease`)
+  `TestStoredWorktreeHoldsTheWholeLease`,
+  `TestClaimStoresItsSessionBeforeBuildingTheWorktree`,
+  `TestClaimThatCannotBuildItsWorktreeReturnsAndReleasesTheTask`,
+  `TestKilledClaimIsTakenOverFromItsDirectory`,
+  `TestWorktrunkSwitcherEnsureEndsWithItsContext`,
+  `TestClaimFromRepoRootLeavesASessionTheDirectoryResolves`)
 - The handoff carries prerequisites' learnings and the newest failed
   run's evidence. (`TestHandoffCarriesPrerequisiteLearningsAndLastFailure`)
 - The proof and the regression run on separate snapshots; a file the

@@ -46,11 +46,14 @@
    quarantined directory (`<path>.stale-<seq>`) is removed when the task
    completes or by `atask prune`, which is the operator's decision to stop
    caring about that process.
-   A lost token on a claim that never stored its worktree frees the task
-   in the claim window (five minutes), not the lease: the attempt is
-   recorded with that expiry and the claim's lease starts when the
-   worktree is stored. A token lost after that leaves the task claimed
-   until the lease (at most 30 minutes) expires; that is accepted.
+   A claim killed or hung before its workspace is built frees the task in
+   the claim window (five minutes), not the lease: the attempt is recorded
+   with that expiry and the claim's lease starts when the workspace is
+   built. Its token is already stored under the claiming directory, so
+   claiming the task again from there takes it over at once. A token lost
+   after that (the token printed, the directory's session file removed)
+   leaves the task claimed until the lease (at most 30 minutes) expires;
+   that is accepted.
 
 10. **Single host, local filesystem.** WAL-mode SQLite on a network
     filesystem is unsafe.

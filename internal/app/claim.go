@@ -140,9 +140,19 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	if err := e.reconcile(ctx); err != nil {
 		return Session{}, err
 	}
+	retakeSeq := 0
 	if req.TaskID != nil {
 		if s, ok := e.liveClaimFromCwd(ctx, *req.TaskID); ok {
-			return s, nil
+			if s.Workspace != "" {
+				return s, nil
+			}
+			// This directory's own claim recorded its attempt and never got a
+			// workspace: the process that made it hung or was killed while
+			// building it. There is nothing to resume, so this claim takes
+			// the task over: its attempt supersedes that one, and whatever
+			// worktree that one left is quarantined like any other attempt
+			// that did not end cleanly.
+			retakeSeq = s.AttemptSeq
 		}
 	}
 	now := e.now()
@@ -164,7 +174,7 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 			}
 			// An explicit claim is the retry path for a task whose worktree
 			// could not be prepared: the caller decided to try again.
-			if err := notClaimable(r, proj, now, true); err != nil {
+			if err := notClaimable(r, proj, now, true); err != nil && !ownUnbuiltClaim(r, retakeSeq) {
 				return err
 			}
 		} else {
@@ -238,95 +248,140 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		return Session{}, err
 	}
 	e.notify()
+	job := claimJob{proj: proj, sess: sess, attemptID: attempt.ID, required: required, quarantineSeq: quarantineSeq, lease: lease}
+	// The token is the claim's only credential and exists nowhere else yet.
+	// Store it under the claiming directory now, before any slow step: a
+	// claim that hangs or is killed while its workspace is being built has
+	// still left a session that `atask` commands run from this directory
+	// (verify, log, renew, release) and the next claim from it can find.
+	if err := e.storeClaimSession(sess); err != nil {
+		e.giveBackClaim(ctx, job, "")
+		return Session{}, fault.Wrap(err, fault.CodeNotReady, "%s: store the claim's session for %s", sess.Task.ID, e.cwd)
+	}
 	// The crash seam: an attempt recorded and then lost, exactly as a claim
 	// killed before it stores its worktree leaves the store.
 	if err := e.fault("claim:after-attempt"); err != nil {
 		return Session{}, err
 	}
-	if proj.Rootless() {
-		// A rootless attempt runs in place where it was claimed: its checks
-		// and on-complete actions use the claiming directory, the same
-		// directory its session token is stored under.
-		dir := e.cwd
-		expires := e.now().Add(lease)
-		if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-			if err := tx.SetWorkspace(attempt.ID, dir, ""); err != nil {
-				return err
-			}
-			// The claim can be worked on now, so its whole lease starts here.
-			if err := tx.RenewLease(attempt.ID, expires); err != nil {
-				return err
-			}
-			return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
-		}); err != nil {
-			return Session{}, err
-		}
-		sess.LeaseUntil = expires
-		if err := e.storeRootlessToken(sess); err != nil {
-			return Session{}, err
-		}
-		sess.Workspace = dir
-		if sess.Task.Attempt != nil {
-			sess.Task.Attempt.Workspace = dir
-		}
-		return sess, nil
+	return e.attachWorkspace(ctx, job)
+}
+
+// claimCleanupBudget bounds the write that gives back a claim that failed or
+// was interrupted. It runs on a fresh context: the one that ended is the
+// reason it runs.
+const claimCleanupBudget = 10 * time.Second
+
+// claimJob is an attempt that has been recorded and still needs its
+// workspace.
+type claimJob struct {
+	proj          project.Project
+	sess          Session
+	attemptID     int64
+	required      []workspace.Requirement
+	quarantineSeq int
+	lease         time.Duration
+}
+
+// ownUnbuiltClaim reports that r's current attempt is the claim, attempt seq,
+// that this directory made and that never got a workspace.
+func ownUnbuiltClaim(r sqlite.Record, seq int) bool {
+	return seq != 0 && r.Attempt != nil && r.Attempt.Seq == seq && r.Attempt.WorkspacePath == ""
+}
+
+// attachWorkspace gives the recorded attempt its workspace and, with it, its
+// whole lease.
+func (e *Engine) attachWorkspace(ctx context.Context, j claimJob) (Session, error) {
+	if j.proj.Rootless() {
+		return e.attachClaimDir(ctx, j)
 	}
-	// One branch and worktree per task, reused across clean handoffs so
-	// committed and uncommitted work survives. The token is stored in the
-	// worktree's private git dir so commands run there need no ATASK_SESSION.
-	// When the previous attempt did not end cleanly its worktree is
-	// quarantined first, so a stale process keeps only its own expired
-	// token and can never reach this attempt's files or branch.
+	return e.attachWorktree(ctx, j)
+}
+
+// attachClaimDir makes the claiming directory the attempt's workspace. A
+// rootless attempt runs in place where it was claimed: its checks and
+// on-complete actions use that directory, the same one its session token is
+// stored under.
+func (e *Engine) attachClaimDir(ctx context.Context, j claimJob) (Session, error) {
+	sess, dir := j.sess, e.cwd
+	expires := e.now().Add(j.lease)
+	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
+		if err := tx.SetWorkspace(j.attemptID, dir, ""); err != nil {
+			return err
+		}
+		// The claim can be worked on now, so its whole lease starts here.
+		if err := tx.RenewLease(j.attemptID, expires); err != nil {
+			return err
+		}
+		return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
+	}); err != nil {
+		return Session{}, err
+	}
+	sess.LeaseUntil = expires
+	sess.Workspace = dir
+	if sess.Task.Attempt != nil {
+		sess.Task.Attempt.Workspace = dir
+	}
+	return sess, nil
+}
+
+// attachWorktree gives the attempt its task worktree. One branch and
+// worktree per task, reused across clean handoffs so committed and
+// uncommitted work survives. The token is stored in the worktree's private
+// git dir so commands run there need no ATASK_SESSION. When the previous
+// attempt did not end cleanly its worktree is quarantined first, so a stale
+// process keeps only its own expired token and can never reach this
+// attempt's files or branch.
+//
+// Building the worktree is bounded by the claim window
+// (Engine's claim budget, execution.ClaimWindow): `wt switch` runs the repository's git hooks and
+// the worktree lock queues behind other claims, so without a bound a claim
+// can block for as long as they take. A claim that outlives its window has
+// already failed its caller, so it gives the task back and says why.
+func (e *Engine) attachWorktree(ctx context.Context, j claimJob) (Session, error) {
+	bctx, cancel := context.WithTimeout(ctx, e.claimBudget)
+	defer cancel()
+	sess, proj := j.sess, j.proj
 	mgr := e.manager(proj)
 	base, werr := proj.TargetBranch, error(nil)
 	var baseNotes []string
-	if !mgr.BranchExists(ctx, workspace.TaskBranch(string(sess.Task.ID))) {
+	if !mgr.BranchExists(bctx, workspace.TaskBranch(string(sess.Task.ID))) {
 		var resolved workspace.BaseResult
-		resolved, werr = mgr.ResolveBase(ctx, proj.TargetBranch, required)
+		resolved, werr = mgr.ResolveBase(bctx, proj.TargetBranch, j.required)
 		base, baseNotes = resolved.Revision, resolved.Explain()
 	}
 	var info workspace.Info
 	if werr == nil {
-		info, werr = mgr.EnsureTask(ctx, string(sess.Task.ID), base, quarantineSeq)
+		info, werr = mgr.EnsureTask(bctx, string(sess.Task.ID), base, j.quarantineSeq)
 	}
 	if werr == nil {
-		werr = workspace.StoreToken(ctx, info.Path, string(token))
+		// Recording the worktree is a few local writes: it finishes on the
+		// caller's context even when copying dependencies used up the window.
+		werr = workspace.StoreToken(ctx, info.Path, string(sess.Token))
 	}
 	if werr != nil {
-		// The task, not the queue, is blocked: record the reason so
-		// automatic selection skips it and humans can see it, and end the
-		// attempt that never got a workspace.
-		_ = e.store.Write(ctx, func(tx *sqlite.Tx) error {
-			now := e.now()
-			if err := tx.EndAttempt(attempt.ID, execution.EndReleased, now); err != nil {
-				return err
-			}
-			return tx.SetWorkspaceError(sess.Task.ID, fault.MessageOf(werr), now)
-		})
-		e.notify()
-		if fault.CodeOf(werr) == fault.CodeBaseConflict {
-			return Session{}, fault.New(fault.CodeBaseConflict, "%s: required tasks cannot be combined: %s; the task stays out of automatic claims until the conflict is resolved (rework one required task) and `atask claim %s` succeeds", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID)
-		}
-		return Session{}, fault.New(fault.CodeNotReady, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
+		return Session{}, e.failClaim(ctx, bctx, j, werr)
 	}
-	expires := e.now().Add(lease)
+	expires := e.now().Add(j.lease)
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
-		if err := tx.SetWorkspace(attempt.ID, info.Path, info.Branch); err != nil {
+		if err := tx.SetWorkspace(j.attemptID, info.Path, info.Branch); err != nil {
 			return err
 		}
 		// The worktree holds the token, so the claim can be worked on now:
 		// its whole lease starts here, not at the attempt record.
-		if err := tx.RenewLease(attempt.ID, expires); err != nil {
+		if err := tx.RenewLease(j.attemptID, expires); err != nil {
 			return err
 		}
 		if len(baseNotes) > 0 {
 			entry := execution.LogEntry{Note: strings.Join(baseNotes, "\n")}
-			if _, err := tx.InsertLog(sess.Task.ID, attempt.ID, entry, e.now()); err != nil {
+			if _, err := tx.InsertLog(sess.Task.ID, j.attemptID, entry, e.now()); err != nil {
 				return err
 			}
 		}
 		return tx.SetWorkspaceError(sess.Task.ID, "", e.now())
 	}); err != nil {
+		if fault.CodeOf(err) == fault.CodeInvalidSession {
+			return Session{}, fault.Wrap(err, fault.CodeNotReady, "%s: the claim ended while its workspace was being prepared (another claim took the task, or its window ran out); claim it again", sess.Task.ID)
+		}
 		return Session{}, err
 	}
 	sess.LeaseUntil = expires
@@ -339,6 +394,49 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		sess.Task.Attempt.Workspace, sess.Task.Attempt.Branch = info.Path, info.Branch
 	}
 	return sess, nil
+}
+
+// failClaim gives back the attempt whose workspace could not be built and
+// returns the error the caller sees. A claim that ran out of its window or
+// was interrupted only gives the task back; any other failure also marks the
+// task, so the queue skips it and humans can see why.
+func (e *Engine) failClaim(ctx, bctx context.Context, j claimJob, werr error) error {
+	id := j.sess.Task.ID
+	switch {
+	case ctx.Err() != nil:
+		e.giveBackClaim(ctx, j, "")
+		return fault.Wrap(ctx.Err(), fault.CodeNotReady, "%s: the claim was interrupted while its workspace was being prepared; the task was released, claim it again to retry", id)
+	case bctx.Err() != nil:
+		e.giveBackClaim(ctx, j, "")
+		return fault.Wrap(werr, fault.CodeNotReady, "%s: its workspace was not ready within the claim window of %s (%s); the task was released, claim it again to retry", id, e.claimBudget, fault.MessageOf(werr))
+	}
+	e.giveBackClaim(ctx, j, fault.MessageOf(werr))
+	if fault.CodeOf(werr) == fault.CodeBaseConflict {
+		return fault.New(fault.CodeBaseConflict, "%s: required tasks cannot be combined: %s; the task stays out of automatic claims until the conflict is resolved (rework one required task) and `atask claim %s` succeeds", id, fault.MessageOf(werr), id)
+	}
+	return fault.New(fault.CodeNotReady, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", id, fault.MessageOf(werr), id, id)
+}
+
+// giveBackClaim ends an attempt that never got its workspace, so the task is
+// claimable at once instead of held until the claim window ends, and drops
+// the session stored for it. A non-empty workspaceErr is recorded on the
+// task as the reason its workspace is unusable.
+func (e *Engine) giveBackClaim(ctx context.Context, j claimJob, workspaceErr string) {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimCleanupBudget)
+	defer cancel()
+	id := j.sess.Task.ID
+	_ = e.store.Write(cleanup, func(tx *sqlite.Tx) error {
+		now := e.now()
+		if err := tx.EndAttempt(j.attemptID, execution.EndReleased, now); err != nil {
+			return err
+		}
+		if workspaceErr == "" {
+			return nil
+		}
+		return tx.SetWorkspaceError(id, workspaceErr, now)
+	})
+	e.sessions().Remove(e.cwd, string(id))
+	e.notify()
 }
 
 // completedRequirements lists the completed revisions of the tasks id

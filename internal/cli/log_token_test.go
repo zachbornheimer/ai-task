@@ -37,6 +37,10 @@ func TestLogAcceptsClaimToken(t *testing.T) {
 			return ""
 		}
 		code := Main(Env{Args: args, Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb, Cwd: cwd, Getenv: getenv})
+		if code == ExitOK {
+			// A slow claim warns on stderr; JSON callers read stdout alone.
+			return code, out.String()
+		}
 		return code, out.String() + errb.String()
 	}
 

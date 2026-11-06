@@ -391,11 +391,23 @@ const (
 - `Claim`: atomic eligibility and exclusive leased assignment; isolated
   worktree for Git tasks. The attempt is recorded with the claim window
   (`execution.ClaimWindow`, five minutes) and the claim's whole lease starts
-  when it stores the worktree and the token in it, so a claim that dies before
-  then frees the task in that window instead of holding it for the lease. The
-  token is discoverable from the task worktree;
-  a rootless claim's token is also stored under the state dir keyed by the claim directory, so log, verify, renew and release work from that directory;
-  elsewhere it is passed explicitly or via `ATASK_SESSION`. A rootless claim's
+  when its workspace is built, so a claim that dies before then frees the
+  task in that window instead of holding it for the lease. The token is
+  stored under the state dir, keyed by the claim directory and the task, the
+  moment the attempt is recorded and before any slow step, so a claim that is
+  killed or still building its worktree has already left a session that
+  log, verify, renew and release resolve from that directory; a Git claim's
+  token is also stored in its task worktree, so those commands work there
+  too; elsewhere it is passed explicitly or via `ATASK_SESSION`. Building the
+  worktree is bounded by the claim window (the worktree lock, `wt switch`
+  and the repository's git hooks it runs, and copying ignored
+  dependencies): a claim that outlives it ends the hooks it started, gives
+  the task back, stores no session and fails with `NOT_READY`; a claim that
+  waits longer than 15 seconds on any of those says so every 15 seconds on
+  stderr as a `warning:` line (never on stdout, which `--json` callers
+  parse), naming the lock holder. Claiming a
+  task again from the directory whose claim never got its workspace takes it
+  over: the new attempt supersedes the stuck one. A rootless claim's
   workspace is the claiming directory, not the directory the task was filed
   from: its proof, regression and on-complete actions run there, and a
   re-claim after release moves the workspace to the new claiming directory.

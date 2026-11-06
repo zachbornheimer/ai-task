@@ -52,6 +52,12 @@ type Manager struct {
 	Root string
 	// Switch creates live task worktrees. Nil means WorktrunkSwitcher{}.
 	Switch Switcher
+	// Progress, when set, hears a line each NoticeEvery while a step that
+	// can take long (waiting for the worktree lock, `wt switch`, copying
+	// dependencies) is still running, so a slow claim says what it waits on.
+	Progress func(string)
+	// NoticeEvery is the interval of those lines; zero means 15 seconds.
+	NoticeEvery time.Duration
 }
 
 // Info describes a task worktree.
@@ -94,42 +100,10 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 	if err := os.MkdirAll(m.Root, 0o750); err != nil {
 		return info, fault.Wrap(err, fault.CodeNotReady, "create workspace root")
 	}
-	// `git worktree add` writes a worktree's metadata non-atomically, so a
-	// concurrent add or list from another claimer can read it half-written
-	// and fail. Creation is serialized across processes.
-	unlock, err := m.repoLock(ctx, worktreeLockFile, "worktree")
-	if err != nil {
+	built, err := m.attachTask(ctx, &info, base, quarantineSeq)
+	if err != nil || !built {
 		return info, err
 	}
-	defer unlock()
-	existing, err := m.worktreeFor(ctx, info.Branch)
-	if err != nil {
-		return info, err
-	}
-	if existing != "" {
-		info.Path = existing
-		if st, err := Inspect(ctx, info.Path); err == nil {
-			info.Dirty = !st.Clean()
-		}
-		if quarantineSeq == 0 {
-			return info, nil
-		}
-		stale := QuarantinedPath(info.Path, quarantineSeq)
-		if err := gitRetry(ctx, m.Repo, "worktree", "move", info.Path, stale); err != nil {
-			return info, fault.Wrap(err, fault.CodeNotReady, "quarantine worktree of attempt %d", quarantineSeq)
-		}
-		if _, err := git(ctx, stale, "checkout", "-q", "--detach"); err != nil {
-			return info, fault.Wrap(err, fault.CodeNotReady, "detach quarantined worktree %s", stale)
-		}
-		info.Quarantined = stale
-		info.Path = ""
-	}
-	create := !m.BranchExists(ctx, info.Branch)
-	path, err := m.switcher().Ensure(ctx, m.Repo, info.Branch, base, create)
-	if err != nil {
-		return info, err
-	}
-	info.Path = path
 	if head := CurrentBranch(ctx, info.Path); head != info.Branch {
 		return info, fault.New(fault.CodeNotReady, "%s exists but is not the worktree for %s (HEAD is %q)", info.Path, info.Branch, head)
 	}
@@ -140,13 +114,71 @@ func (m Manager) EnsureTask(ctx context.Context, taskID string, base string, qua
 	}
 	// Provision the source checkout's ignored dependencies (node_modules,
 	// built artifacts) into the worktree; Worktrunk's post-start hook that
-	// would do this is skipped for task worktrees. Advisory: a check
+	// would do this is skipped for task worktrees. This runs outside the
+	// worktree lock: it touches only the new worktree, and how long it takes
+	// grows with the dependencies, so holding the lock would queue every
+	// other claim in the repository behind it. Advisory: a check
 	// environment must never fail because provisioning did, but the failure
 	// has to be visible in the log.
-	if err := CopyIgnored(ctx, m.Repo, info.Path); err != nil {
+	stop := m.notice(func(waited time.Duration) string {
+		return fmt.Sprintf("still copying ignored dependencies into %s after %s", info.Path, waited)
+	})
+	err = CopyIgnored(ctx, m.Repo, info.Path)
+	stop()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "atask: ignored dependencies were not provisioned in %s: %v\n", info.Path, err)
 	}
 	return info, nil
+}
+
+// attachTask puts the task's branch in a worktree: it reuses the existing
+// one, or quarantines it first when quarantineSeq is set, and otherwise has
+// Worktrunk create it. built reports that a new worktree was created.
+//
+// `git worktree add` writes a worktree's metadata non-atomically, so a
+// concurrent add or list from another claimer can read it half-written and
+// fail. Everything here that touches the repository's worktree metadata is
+// serialized across processes by the worktree lock, and nothing that does
+// not is.
+func (m Manager) attachTask(ctx context.Context, info *Info, base string, quarantineSeq int) (built bool, err error) {
+	unlock, err := m.repoLock(ctx, worktreeLockFile, "worktree")
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	existing, err := m.worktreeFor(ctx, info.Branch)
+	if err != nil {
+		return false, err
+	}
+	if existing != "" {
+		info.Path = existing
+		if st, err := Inspect(ctx, info.Path); err == nil {
+			info.Dirty = !st.Clean()
+		}
+		if quarantineSeq == 0 {
+			return false, nil
+		}
+		stale := QuarantinedPath(info.Path, quarantineSeq)
+		if err := gitRetry(ctx, m.Repo, "worktree", "move", info.Path, stale); err != nil {
+			return false, fault.Wrap(err, fault.CodeNotReady, "quarantine worktree of attempt %d", quarantineSeq)
+		}
+		if _, err := git(ctx, stale, "checkout", "-q", "--detach"); err != nil {
+			return false, fault.Wrap(err, fault.CodeNotReady, "detach quarantined worktree %s", stale)
+		}
+		info.Quarantined = stale
+		info.Path = ""
+	}
+	create := !m.BranchExists(ctx, info.Branch)
+	stop := m.notice(func(waited time.Duration) string {
+		return fmt.Sprintf("still creating the worktree for %s after %s: `wt switch` is waiting on git, which runs the repository's post-checkout hooks", info.Branch, waited)
+	})
+	path, err := m.switcher().Ensure(ctx, m.Repo, info.Branch, base, create)
+	stop()
+	if err != nil {
+		return false, err
+	}
+	info.Path = path
+	return true, nil
 }
 
 // BranchExists reports whether a local branch exists.
@@ -411,7 +443,8 @@ const (
 )
 
 // repoLock takes the advisory lock named file under the git common dir;
-// what only labels errors.
+// what only labels errors and notices. While it waits, Progress hears who
+// holds the lock, so a claim queued behind another is never silent.
 func (m Manager) repoLock(ctx context.Context, file, what string) (func(), error) {
 	common, err := git(ctx, m.Repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -422,6 +455,10 @@ func (m Manager) repoLock(ctx context.Context, file, what string) (func(), error
 	if err != nil {
 		return nil, fault.Wrap(err, fault.CodeNotReady, "open %s lock", what)
 	}
+	stopNotice := m.notice(func(waited time.Duration) string {
+		return fmt.Sprintf("still waiting for the %s lock after %s (%s): another atask process is using this repository", what, waited, lockHolder(path))
+	})
+	defer stopNotice()
 	delay := 10 * time.Millisecond
 	for {
 		locked, err := tryLockFile(f)
@@ -444,6 +481,53 @@ func (m Manager) repoLock(ctx context.Context, file, what string) (func(), error
 			delay *= 2
 		}
 	}
+}
+
+// lockHolder names the process recorded in a lock file ("lock holder unknown"
+// when none is).
+func lockHolder(path string) string {
+	b, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return "lock holder unknown"
+	}
+	pid, _, _ := strings.Cut(strings.TrimSpace(string(b)), "\n")
+	if pid == "" {
+		return "lock holder unknown"
+	}
+	return "held by pid " + pid
+}
+
+// defaultNoticeEvery is how long a step runs before Progress hears of it, and
+// the interval between later reports.
+const defaultNoticeEvery = 15 * time.Second
+
+// notice reports a slow step to Progress: what(waited) after NoticeEvery and
+// then every NoticeEvery until the returned stop is called, which returns
+// only after the last report. A Manager without Progress reports nothing.
+func (m Manager) notice(what func(waited time.Duration) string) (stop func()) {
+	if m.Progress == nil {
+		return func() {}
+	}
+	every := m.NoticeEvery
+	if every <= 0 {
+		every = defaultNoticeEvery
+	}
+	done, exited := make(chan struct{}), make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(exited)
+		tick := time.NewTicker(every)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				m.Progress(what(time.Since(start).Round(time.Second)))
+			}
+		}
+	}()
+	return func() { close(done); <-exited }
 }
 
 // worktreeFor returns the path of the worktree that has branch checked

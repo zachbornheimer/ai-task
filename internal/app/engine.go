@@ -68,6 +68,14 @@ type Config struct {
 	// empty means sqlite.DefaultDriver. Tests wrap the driver to count the
 	// statements a command issues.
 	StoreDriver string
+	// Progress, when set, hears a line whenever a slow step of a claim (the
+	// worktree lock, `wt switch`, copying dependencies) is still running, so
+	// a claim that takes long says what it waits on instead of staying silent.
+	Progress func(string)
+	// ClaimBudget is the most a claim may spend building its workspace
+	// before it gives the task back. Zero means execution.ClaimWindow; only
+	// tests need another value.
+	ClaimBudget time.Duration
 }
 
 // Engine is the single entry point for every use case. One Engine per
@@ -87,6 +95,8 @@ type Engine struct {
 	cwd            string
 	proofBudget    time.Duration
 	sandbox        proof.SandboxConfig
+	progress       func(string)
+	claimBudget    time.Duration
 
 	mu      sync.Mutex
 	changed chan struct{}
@@ -144,12 +154,16 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if lease <= 0 {
 		lease = execution.DefaultLease
 	}
+	claimBudget := cfg.ClaimBudget
+	if claimBudget <= 0 {
+		claimBudget = execution.ClaimWindow
+	}
 	// Storage keeps millisecond precision; truncating here keeps values the
 	// caller sees identical to what a later read returns.
 	return &Engine{
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
 		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, lease: lease, changed: make(chan struct{}),
-		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget, sandbox: sandbox,
+		swt: cfg.Switch, progress: cfg.Progress, claimBudget: claimBudget, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget, sandbox: sandbox,
 	}, nil
 }
 
@@ -515,7 +529,7 @@ func (e *Engine) manager(p project.Project) workspace.Manager {
 	if root == "" {
 		root = filepath.Join(e.wsRoot, string(p.ID))
 	}
-	return workspace.Manager{Repo: p.RootPath, Root: root, Switch: e.swt}
+	return workspace.Manager{Repo: p.RootPath, Root: root, Switch: e.swt, Progress: e.progress}
 }
 
 // reconcile closes runs and jobs whose owners' leases expired so that no

@@ -81,8 +81,10 @@ func (s WorktrunkSwitcher) Ensure(ctx context.Context, repo, branch, base string
 	return path, nil
 }
 
+// runWt runs wt contained: `wt switch` has git run the repository's
+// post-checkout hooks, so a canceled context must end those too.
 func runWt(ctx context.Context, wt, dir string, args []string) ([]byte, error) {
-	cmd := process.Command(ctx, dir, wt, args...)
+	cmd := process.Contained(ctx, dir, wt, args...)
 	return cmd.CombinedOutput()
 }
 

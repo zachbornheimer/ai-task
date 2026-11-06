@@ -42,6 +42,9 @@ func CopyIgnored(ctx context.Context, src, dst string) error {
 		return fault.Wrap(err, fault.CodeNotReady, "list ignored files in %s", src)
 	}
 	for entry := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		if err := ctx.Err(); err != nil {
+			return fault.Wrap(err, fault.CodeNotReady, "copy ignored files")
+		}
 		if entry == "" {
 			continue
 		}
@@ -51,7 +54,7 @@ func CopyIgnored(ctx context.Context, src, dst string) error {
 		from := filepath.Join(src, filepath.FromSlash(entry))
 		to := filepath.Join(dst, filepath.FromSlash(entry))
 		if strings.HasSuffix(entry, "/") {
-			if err := copyTree(from, to); err != nil {
+			if err := copyTree(ctx, from, to); err != nil {
 				return fault.Wrap(err, fault.CodeNotReady, "copy ignored directory %s", entry)
 			}
 			continue
@@ -66,9 +69,12 @@ func CopyIgnored(ctx context.Context, src, dst string) error {
 // copyTree copies the tree rooted at from into to, skipping files that
 // already exist in to (idempotency) and every nonCopyable member at any
 // depth, including a nested checkout's .git directory or worktree file.
-func copyTree(from, to string) error {
+func copyTree(ctx context.Context, from, to string) error {
 	return filepath.WalkDir(from, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		rel, err := filepath.Rel(from, path)

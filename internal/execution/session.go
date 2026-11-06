@@ -50,12 +50,14 @@ func (t Token) Digest() string {
 const DefaultLease = 30 * time.Minute
 
 // ClaimWindow is how long an attempt that has not stored its worktree yet
-// holds the task. A claim records its attempt, builds the worktree, and stores
-// the token in that worktree last, so a process killed in between leaves a
-// claim nobody can work on and nobody holds a token to release: this window is
-// the whole recovery time. It matches the caller-side bound on one claim (the
-// start_atask_task capability gives up on a claim after five minutes), so a
-// claim that outlives it has already failed its caller.
+// holds the task, and the most a claim may spend building that worktree
+// (Engine's claim budget). A claim records its attempt, stores its session
+// under the claiming directory, builds the worktree, and stores the token in
+// that worktree last, so a process killed in between leaves a claim nobody
+// works on: this window is the whole recovery time unless the claiming
+// directory takes the task over sooner. It matches the caller-side bound on
+// one claim (the start_atask_task capability gives up on a claim after five
+// minutes), so a claim that outlives it has already failed its caller.
 const ClaimWindow = 5 * time.Minute
 
 // ClaimExpiry is the expiry an attempt is recorded with: at most the claim

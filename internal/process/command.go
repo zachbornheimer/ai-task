@@ -82,15 +82,13 @@ func Run(ctx context.Context, spec Spec) Result {
 	}
 	defer cleanup()
 	res.Sandboxed = spec.Sandbox.Active()
-	cmd := Command(cctx, spec.Dir, argv[0], argv[1:]...)
+	cmd := Contained(cctx, spec.Dir, argv[0], argv[1:]...)
 	if spec.Env != nil {
 		cmd.Env = spec.Env
 	}
 	if res.Sandboxed {
 		cmd.Env = append(envOrInherited(cmd.Env), SandboxEnvVar+"=1")
 	}
-	isolate(cmd)
-	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr boundedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if spec.Log != nil {

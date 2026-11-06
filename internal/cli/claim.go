@@ -74,8 +74,8 @@ func (c *ctxt) token(ctx context.Context, positional []string) (execution.Token,
 	return tok, c.guardWorkspace(ctx, tok)
 }
 
-// directoryToken is the token of the live rootless claim made from the
-// working directory ("" when there is none).
+// directoryToken is the token of the live claim made from the working
+// directory ("" when there is none).
 func (c *ctxt) directoryToken(ctx context.Context) (string, error) {
 	e, err := c.engine(ctx)
 	if err != nil {
