@@ -277,9 +277,18 @@ func renderContext(c Context) string {
 	}
 	w.WriteString("\n")
 	if len(v.Requires) > 0 {
-		w.WriteString("Prerequisites (complete; their work is on the target branch):\n")
+		w.WriteString("Prerequisites (complete):\n")
 		for _, r := range v.Requires {
 			fmt.Fprintf(&w, "- %s %s\n", r.ID, r.Title)
+		}
+		if v.Handoff != nil {
+			for _, entry := range v.Handoff.RecentLogs {
+				for line := range strings.SplitSeq(entry.Note, "\n") {
+					if strings.Contains(line, "completed in another repository") {
+						fmt.Fprintf(&w, "- %s\n", line)
+					}
+				}
+			}
 		}
 		w.WriteString("\n")
 	}

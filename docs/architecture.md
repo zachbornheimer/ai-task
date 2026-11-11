@@ -81,7 +81,7 @@ a fact written only by the finalising transaction.
 
 Every project is a Git repository (`atask init` runs `git init` and makes an
 initial commit when the directory is not one). Every task has one
-worktree on branch `atask/<task-id>`, created at the first claim from the target branch plus a merge of every required task's completed revision (`BASE_CONFLICT` when those merges conflict) and reused by every later attempt, so retries continue from
+worktree on branch `atask/<task-id>`, created at the first claim from the target branch plus a merge of every required task's completed revision in this repository (`BASE_CONFLICT` when those merges conflict; a revision from another repository is not merged) and reused by every later attempt, so retries continue from
 the previous attempt's commits. The claim stores the session token in
 the worktree's private Git directory, so `atask` commands run there need no
 `ATASK_SESSION`. When the previous attempt never ended cleanly, the claim
