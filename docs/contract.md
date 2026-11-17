@@ -392,7 +392,9 @@ const (
   worktree for Git tasks. The attempt is recorded with the claim window
   (`execution.ClaimWindow`, five minutes) and the claim's whole lease starts
   when it stores the worktree and the token in it, so a claim that dies before
-  then frees the task in that window instead of holding it for the lease. The
+  then frees the task in that window instead of holding it for the lease; a
+  claim that is still provisioning renews the window, so its worktree build
+  may take longer than the window without ending the attempt. The
   token is discoverable from the task worktree;
   a rootless claim's token is also stored under the state dir keyed by the claim directory, so log, verify, renew and release work from that directory;
   elsewhere it is passed explicitly or via `ATASK_SESSION`. A rootless claim's

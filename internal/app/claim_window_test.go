@@ -1,7 +1,9 @@
 package app_test
 
 import (
+	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -64,5 +66,59 @@ func TestStoredWorktreeHoldsTheWholeLease(t *testing.T) {
 	}
 	if v := f.show(string(s.Task.ID)); !v.Attempt.LeaseExpiresAt.Equal(s.LeaseUntil) {
 		t.Fatalf("the recorded expiry %s is not the session's %s", v.Attempt.LeaseExpiresAt, s.LeaseUntil)
+	}
+}
+
+// slowSwitcher builds the worktree like the fixture's own switcher and then
+// runs during: the claim's provisioning, aged past the claim window in steps
+// that leave room for the claim's own renewals, with another engine reading
+// the board — the reconcile that ends an attempt nobody renewed.
+type slowSwitcher struct {
+	addSwitcher
+	during func()
+}
+
+func (s slowSwitcher) Ensure(ctx context.Context, repo, branch, base string, create bool) (string, error) {
+	path, err := s.addSwitcher.Ensure(ctx, repo, branch, base, create)
+	if err == nil {
+		s.during()
+	}
+	return path, err
+}
+
+// A claim whose worktree build outlives the claim window keeps the task. The
+// window is the time a dead claim may hold a task, so it must not end a claim
+// that is still alive and working: provisioning renews it, and another process
+// reconciling the board mid-build must still find the attempt live.
+func TestProvisioningClaimRenewsItsWindow(t *testing.T) {
+	f := newGitFixture(t)
+	id := f.add("slow")
+	f.stampRegression()
+	during := func() {
+		for range 6 {
+			f.c.Advance(time.Minute)
+			time.Sleep(100 * time.Millisecond) // the claim's renewals land here
+		}
+		f.show(string(id)) // another process reconciles: an unrenewed attempt ends here
+	}
+	e := f.openWith(app.Config{
+		HeartbeatInterval: 5 * time.Millisecond,
+		Switch: slowSwitcher{
+			addSwitcher: addSwitcher{t: f.t, repo: f.repo, root: filepath.Join(filepath.Dir(f.repo), "ws")},
+			during:      during,
+		},
+	})
+	s, err := e.Claim(f.ctx, app.ClaimRequest{TaskID: &id})
+	if err != nil {
+		t.Fatalf("a claim that provisions for longer than the claim window failed: %v", err)
+	}
+	if s.Workspace == "" {
+		t.Fatalf("the claim returned no worktree: %+v", s)
+	}
+	if want := f.c.Now().Add(execution.DefaultLease); !s.LeaseUntil.Equal(want) {
+		t.Fatalf("the stored claim holds the task until %s, want the whole lease %s", s.LeaseUntil, want)
+	}
+	if got := f.status(string(id)); got != task.StatusClaimed {
+		t.Fatalf("after the slow claim the task is %s, want %s", got, task.StatusClaimed)
 	}
 }

@@ -277,6 +277,13 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 	// When the previous attempt did not end cleanly its worktree is
 	// quarantined first, so a stale process keeps only its own expired
 	// token and can never reach this attempt's files or branch.
+	//
+	// Building that worktree copies the source checkout's ignored
+	// dependencies into it, which can outlast the attempt's claim window;
+	// renewing the window while this process provisions keeps the task its
+	// own instead of letting the store below be refused as an ended attempt.
+	stopKeeping := e.keepClaimWindow(ctx, token)
+	defer stopKeeping()
 	mgr := e.manager(proj)
 	base, werr := proj.TargetBranch, error(nil)
 	var baseNotes []string
@@ -309,6 +316,10 @@ func (e *Engine) claimOnce(ctx context.Context, req ClaimRequest, lease time.Dur
 		}
 		return Session{}, fault.New(fault.CodeNotReady, "%s: workspace could not be prepared (%v); the task is marked needs_attention and skipped by automatic claims until `atask claim %s` succeeds or a planner runs `atask update %s --reset-attempts`", sess.Task.ID, fault.MessageOf(werr), sess.Task.ID, sess.Task.ID)
 	}
+	// The worktree and token exist, so the claim can be worked on: stop
+	// renewing before the store below grants the whole lease, so a late
+	// renewal cannot shorten it back to the claim window.
+	stopKeeping()
 	expires := e.now().Add(lease)
 	if err := e.store.Write(ctx, func(tx *sqlite.Tx) error {
 		if err := tx.SetWorkspace(attempt.ID, info.Path, info.Branch); err != nil {

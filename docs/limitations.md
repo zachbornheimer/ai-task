@@ -48,7 +48,8 @@
    caring about that process.
    A lost token on a claim that never stored its worktree frees the task
    in the claim window (five minutes), not the lease: the attempt is
-   recorded with that expiry and the claim's lease starts when the
+   recorded with that expiry, renewed while the claim that owns it is
+   alive and provisioning, and the claim's lease starts when the
    worktree is stored. A token lost after that leaves the task claimed
    until the lease (at most 30 minutes) expires; that is accepted.
 
