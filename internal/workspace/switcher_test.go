@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestParseSwitchPathPrettyJSONWithPreamble(t *testing.T) {
+	// portable-home-ok: fixture mirrors wt's absolute path field, not this machine.
+	out := []byte("\u25ce Creating worktree for atask/at-v0kbh6...\nPreparing worktree (new branch 'atask/at-v0kbh6')\nHEAD is now at 91bd15d Merge pull request #129...\n\u2713 Created branch atask/at-v0kbh6\n{\n  \"action\": \"created\",\n  \"branch\": \"atask/at-v0kbh6\",\n  \"path\": \"/worktrees/dev-env-atask-at-v0kbh6\",\n  \"created_branch\": true,\n  \"base_branch\": \"91bd15dff86aad6dafe6e75b137850537aa76297\"\n}\n")
+	path, err := parseSwitchPath(out)
+	if err != nil || path != "/worktrees/dev-env-atask-at-v0kbh6" {
+		t.Fatalf("%q %v", path, err)
+	}
+}
+
+func TestParseSwitchPathSkipsBlankAndBrokenObjects(t *testing.T) {
+	for _, out := range []string{
+		"progress {not json} result: {\"path\":\"/tmp/ws\"} finished",
+		"progress {\"path\":\"\"} result: {\"path\":\"/tmp/ws\"} finished",
+	} {
+		path, err := parseSwitchPath([]byte(out))
+		if err != nil || path != "/tmp/ws" {
+			t.Fatalf("output %q: %q %v", out, path, err)
+		}
+	}
+	for _, out := range []string{"{\"path\":\"\"}", "{\"path\":\"  \"}"} {
+		if _, err := parseSwitchPath([]byte(out)); err == nil || !strings.Contains(err.Error(), "wt switch --format json did not include path") {
+			t.Fatalf("output %q: %v", out, err)
+		}
+	}
+}
+
 func TestParseSwitchPathJSONLine(t *testing.T) {
 	out := []byte("{\"action\":\"created\",\"branch\":\"atask/x\",\"path\":\"/tmp/ws\"}\n○ Switched\n")
 	path, err := parseSwitchPath(out)
