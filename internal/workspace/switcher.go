@@ -86,14 +86,20 @@ func runWt(ctx context.Context, wt, dir string, args []string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+// parseSwitchPath reads the worktree path from wt switch --format json.
+// Worktrunk writes a human preamble, then one JSON object that may span
+// several lines. A path is accepted only when it is non-blank.
 func parseSwitchPath(out []byte) (string, error) {
-	for line := range bytes.SplitSeq(out, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || line[0] != '{' {
-			continue
+	for start := 0; start < len(out); {
+		offset := bytes.IndexByte(out[start:], '{')
+		if offset < 0 {
+			break
 		}
+		start += offset
 		var s switchJSON
-		if err := json.Unmarshal(line, &s); err != nil {
+		err := json.NewDecoder(bytes.NewReader(out[start:])).Decode(&s)
+		start++
+		if err != nil {
 			continue
 		}
 		if strings.TrimSpace(s.Path) != "" {
