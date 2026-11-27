@@ -55,7 +55,8 @@ func TestIsolateGitIdentityInjectedConfig(t *testing.T) {
 			}
 			repo := t.TempDir()
 			abbrev := func() (string, error) {
-				cmd := exec.Command("git", "-C", repo, "config", "--get", "core.abbrev")
+				cmd := exec.Command("git", "config", "--get", "core.abbrev")
+				cmd.Dir = repo
 				out, err := cmd.CombinedOutput()
 				return strings.TrimSpace(string(out)), err
 			}
