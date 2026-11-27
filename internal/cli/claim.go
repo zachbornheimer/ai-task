@@ -171,7 +171,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+		return c.emitSession(s)
 	}
 	if len(c.args) == 1 {
 		ref := c.args[0]
@@ -201,7 +201,20 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+	return c.emitSession(s)
+}
+
+// Runtime-bound rootless claims carry their token only in the private store.
+func (c *ctxt) emitSession(s app.Session) error {
+	if !c.runtimeBound || s.Branch != "" {
+		return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+	}
+	s.Token = ""
+	out := struct {
+		app.Session
+		Token *string `json:"token,omitempty"`
+	}{Session: s}
+	return c.emit(out, func(w io.Writer) { renderSession(w, s) })
 }
 
 // renderSession is the human acknowledgement of a claim.
@@ -241,7 +254,9 @@ func renderSession(w io.Writer, s app.Session) {
 	sayln(w)
 	renderShow(w, s.Task, false, painter{})
 	renderHandoff(w, s.Handoff)
-	say(w, "token=%s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
+	if s.Token != "" {
+		say(w, "token=%s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
+	}
 }
 
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {

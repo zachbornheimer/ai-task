@@ -89,12 +89,13 @@ type command struct {
 
 // ctxt is the per-invocation context handed to commands.
 type ctxt struct {
-	env  Env
-	g    globals
-	fs   *flag.FlagSet
-	name string      // the subcommand being run
-	eng  *app.Engine // opened lazily
-	args []string    // positional arguments after interleaved parsing
+	env          Env
+	g            globals
+	fs           *flag.FlagSet
+	name         string      // the subcommand being run
+	eng          *app.Engine // opened lazily
+	runtimeBound bool        // set only after private runtime registration validates
+	args         []string    // positional arguments after interleaved parsing
 }
 
 // Main runs the CLI and returns the process exit code.
@@ -280,6 +281,7 @@ func (c *ctxt) engine(ctx context.Context) (*app.Engine, error) {
 		return nil, err
 	}
 	c.eng = e
+	c.runtimeBound = runtime != nil
 	return e, nil
 }
 
