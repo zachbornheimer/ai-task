@@ -25,7 +25,8 @@ func TestEnsureCheckTmpRefusesSharedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Mkdir applies the caller's umask; establish the shared mode explicitly.
-	if err := os.Chmod(root, 0o750); err != nil {
+	// #nosec G302 -- deliberately group-accessible fixture proves shared roots are rejected
+	if err := os.Chmod(root, 0o750); err != nil { //nolint:gosec // deliberately group-accessible fixture proves shared roots are rejected
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(root); err != nil || info.Mode().Perm() != 0o750 {
