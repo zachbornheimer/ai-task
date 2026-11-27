@@ -46,13 +46,11 @@ func (e *Engine) live(ctx context.Context, tok execution.Token) bool {
 }
 
 // liveSessions lists the stored sessions of this engine's cwd whose claim is
-// still live; dead ones are deleted.
+// still live. Stale snapshots never unlink a successor's token file.
 func (e *Engine) liveSessions(ctx context.Context) []workspace.StoredSession {
 	var out []workspace.StoredSession
 	for _, v := range e.sessions().ForCwd(e.cwd) {
-		if !e.live(ctx, execution.Token(v.Token)) {
-			e.sessions().Remove(v.Cwd, v.TaskID)
-		} else if e.runtime.Allows(v.Runtime) {
+		if e.live(ctx, execution.Token(v.Token)) && e.runtime.Allows(v.Runtime) {
 			out = append(out, v)
 		}
 	}

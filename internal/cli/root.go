@@ -34,12 +34,12 @@ const (
 
 // Env is the process environment the CLI depends on, injected for tests.
 type Env struct {
-	Args         []string
-	Stdin        io.Reader
-	Stdout       io.Writer
-	Stderr       io.Writer
-	Getenv       func(string) string
-	Cwd          string
+	Args   []string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+	Getenv func(string) string
+	Cwd    string
 	// engineConfig supplies test clocks and leases without production env flags.
 	engineConfig *app.Config
 }

@@ -176,6 +176,15 @@ func TestRuntimeRegistryRejectsInsecureFilesystem(t *testing.T) {
 			}
 			return root
 		}},
+		{"FIFO registration", func(t *testing.T, root, name string) string {
+			if err := os.Remove(name); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Mkfifo(name, 0600); err != nil {
+				t.Fatal(err)
+			}
+			return root
+		}},
 		{"malformed JSON", func(t *testing.T, root, name string) string {
 			if err := os.WriteFile(name, []byte(`{"capability":"`+testRuntimeCapability+`",BROKEN}`), 0600); err != nil {
 				t.Fatal(err)
@@ -287,6 +296,13 @@ func TestRuntimeRegistryProcParent(t *testing.T) {
 	}
 }
 
+func TestRuntimeRegistryAncestorCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := runtimeAncestor(ctx, os.Getppid()); err == nil {
+		t.Fatal("canceled ancestry probe authorized an owner")
+	}
+}
 func TestRuntimeRegistryEngineConfigMerge(t *testing.T) {
 	root, _, _ := runtimeFixture(t)
 	cwd := t.TempDir()

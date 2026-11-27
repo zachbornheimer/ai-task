@@ -25,7 +25,8 @@ func (e *Engine) RenewRuntime(ctx context.Context) (int, error) {
 		}
 		if _, err := e.Renew(ctx, execution.Token(v.Token)); err != nil {
 			if fault.CodeOf(err) == fault.CodeInvalidSession || fault.CodeOf(err) == fault.CodeNotFound {
-				e.sessions().Remove(v.Cwd, v.TaskID)
+				// A successor may have replaced the file since this snapshot.
+				// Only mutation fencing is authoritative; do not unlink by pathname.
 				continue
 			}
 			return renewed, err
