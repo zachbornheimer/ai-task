@@ -12,17 +12,12 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
-// isolateGitIdentity hides ambient Git configuration from this test, so
-// the only identity is the one the test gives the repository.
 func isolateGitIdentity(t *testing.T) {
 	t.Helper()
 	empty := filepath.Join(t.TempDir(), "gitconfig")
 	must.OK(t, os.WriteFile(empty, nil, 0o600))
 	t.Setenv("GIT_CONFIG_GLOBAL", empty)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	// Command-scope config can be injected by a host even without config
-	// files. Ignore both forms only for this test; preserve the caller's
-	// values (including signing configuration) when cleanup runs.
 	t.Setenv("GIT_CONFIG_COUNT", "0")
 	t.Setenv("GIT_CONFIG_PARAMETERS", "")
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
@@ -78,29 +73,33 @@ func TestIsolateGitIdentityInjectedConfig(t *testing.T) {
 	}
 }
 
+func requireGitIdentityCheck(t *testing.T, report app.DoctorReport) app.DoctorCheck {
+	t.Helper()
+	for _, check := range report.Checks {
+		if check.ID == "git_identity" {
+			return check
+		}
+	}
+	t.Fatalf("no git_identity check in %+v", report)
+	return app.DoctorCheck{}
+}
+
 func TestDoctorGitIdentity(t *testing.T) {
 	f := newGitFixture(t)
 	isolateGitIdentity(t)
 	f.git(f.repo, "config", "user.useConfigOnly", "true")
 	f.git(f.repo, "config", "--unset-all", "user.name")
 	f.git(f.repo, "config", "--unset-all", "user.email")
-	find := func(rep app.DoctorReport) app.DoctorCheck {
-		for _, c := range rep.Checks {
-			if c.ID == "git_identity" {
-				return c
-			}
-		}
-		t.Fatalf("no git_identity check in %+v", rep)
-		return app.DoctorCheck{}
-	}
-	rep, _ := f.e.Doctor(f.ctx, f.proj.ID)
-	if c := find(rep); c.OK || c.Severity != "error" || rep.Healthy {
+	rep, err := f.e.Doctor(f.ctx, f.proj.ID)
+	must.OK(t, err)
+	if c := requireGitIdentityCheck(t, rep); c.OK || c.Severity != "error" || rep.Healthy {
 		t.Fatalf("missing identity must make doctor unhealthy: %+v healthy=%v", c, rep.Healthy)
 	}
 	f.git(f.repo, "config", "user.name", "Repo Owner")
 	f.git(f.repo, "config", "user.email", "owner@example.com")
-	rep, _ = f.e.Doctor(f.ctx, f.proj.ID)
-	if c := find(rep); !c.OK || !strings.Contains(c.Message, "Repo Owner <owner@example.com>") {
+	rep, err = f.e.Doctor(f.ctx, f.proj.ID)
+	must.OK(t, err)
+	if c := requireGitIdentityCheck(t, rep); !c.OK || !strings.Contains(c.Message, "Repo Owner <owner@example.com>") {
 		t.Fatalf("identity check: %+v", c)
 	}
 }
