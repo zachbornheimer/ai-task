@@ -21,11 +21,11 @@ func (r RuntimeIdentity) Valid() bool {
 	return r.Session != "" && r.PID > 0 && err == nil && len(digest) == 32
 }
 
-// Allows preserves legacy unbound claims, but never grants a bound claim to
-// an absent or different runtime. All identity components must match.
+// Allows preserves legacy discovery only for an unbound caller. A runtime
+// never adopts an unbound claim; every identity component must match.
 func (r *RuntimeIdentity) Allows(owner *RuntimeIdentity) bool {
 	if owner == nil {
-		return true
+		return r == nil
 	}
 	return r != nil && r.Valid() && owner.Valid() && *r == *owner
 }

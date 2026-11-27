@@ -2,7 +2,13 @@
 
 Interactive hosts can bind rootless claims to a private runtime identity. This adds token discovery, not a new execution authority: current attempt sequence, lease expiry and terminal-state checks remain mandatory for every renewal/log/verification.
 
-## Host protocol
+## Maintained host and protocol
+
+Source owner: `zachbornheimer/dev-profile`, `apps/omp/extensions/atask-lease/index.ts`. Its `config/mise.toml` deploy map symlinks the directory to `~/.omp/agent/extensions/atask-lease`, where omp loads `index.ts`. The CLI registration seam is `storeRootlessToken` after the rootless attempt/workspace commit. The host never parses a token from model/tool text.
+
+Lookup precedence is positional/stdin token, `ATASK_SESSION`, private task-worktree token, then runtime-scoped ambient discovery. If `ATASK_RUNTIME_ROOT` is declared but registration is missing/stale, ambient discovery fails closed. A validated runtime never adopts a legacy unbound claim. With no declared runtime, existing unambiguous legacy directory discovery and ambiguity refusal remain unchanged. Malformed or unsafe present registration fails closed at engine opening.
+
+The OS account is the trust boundary: private files and process ancestry prevent accidental cross-session selection and unrelated processes, not malicious code with equivalent same-UID file/process access.
 
 A host creates one private directory per process and exposes its absolute path as `ATASK_RUNTIME_ROOT` before spawning native shells. Each active session has `<sha256(PI_SESSION_ID)>.json` in that directory:
 
@@ -34,4 +40,4 @@ mise run test:engine
 
 `test:lease` uses the installed profile extension host proof and the real CLI adapter in child processes, injecting one-second leases only in the test binary. Two session owners share a cwd; timer renewal spans at least three lease periods without model renew/log writes, followed by token-free log/verify and unauthorized/released/completed checks. Production leases remain 30 minutes. This is a no-model host integration, not a visual terminal test.
 
-From `~/.omp/agent/extensions/atask-lease`, `ATASK_ENGINE_SOURCE=/path/to/ai-task mise run test:lease` runs both lifecycle and integration checks. Profile publication follows the host's managed-dotfile deployment path; repository merge does not publish profile changes itself.
+From the maintained dev-profile checkout, `ATASK_ENGINE_SOURCE=/path/to/ai-task mise run test:lease` runs `apps/omp/extensions/atask-lease/host-proof.ts` against this CLI helper. The proof holds the same attempt across more than three one-second leases while a real long-running child tool is in flight. Host publication follows the profile's deploy map; repository commits preserve the complete source even if an ephemeral sandbox is lost.

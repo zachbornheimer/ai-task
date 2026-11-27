@@ -8,7 +8,7 @@ run = "go test ./internal/execution ./internal/app -count=1"
 
 [tasks."test:lease"]
 description = "Real interactive CLI ownership across three leases without model renewals"
-env.ATASK_INTERACTIVE_HOST = "{{env.HOME}}/.omp/agent/extensions/atask-lease/host-proof.ts"
+env.ATASK_INTERACTIVE_HOST = "{{env.ATASK_INTERACTIVE_HOST | default(value=env.HOME ~ '/.omp/agent/extensions/atask-lease/host-proof.ts')}}"
 run = "go test ./internal/cli -run '^TestInteractiveLeaseHost$' -count=1 -v"
 
 [tasks."test:lease-unit"]

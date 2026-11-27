@@ -34,8 +34,8 @@ func TestRuntimeRenewDoesNotAdoptLegacyClaims(t *testing.T) {
 	if count, err := owner.RenewRuntime(ctx); err != nil || count != 0 {
 		t.Fatalf("legacy adoption: count=%d err=%v", count, err)
 	}
-	if tok, err := owner.AmbientToken(ctx); err != nil || tok == "" {
-		t.Fatalf("legacy cwd compatibility: %v", err)
+	if tok, err := owner.AmbientToken(ctx); err != nil || tok != "" {
+		t.Fatalf("runtime selected a legacy cwd claim: %v", err)
 	}
 }
 

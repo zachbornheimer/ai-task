@@ -81,6 +81,9 @@ func (c *ctxt) directoryToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if c.env.Getenv("ATASK_RUNTIME_ROOT") != "" && !c.runtimeBound {
+		return "", fault.New(fault.CodeInvalidSession, "interactive runtime registration is missing or stale; ambient claim discovery refused")
+	}
 	tok, err := e.AmbientToken(ctx)
 	return string(tok), err
 }
