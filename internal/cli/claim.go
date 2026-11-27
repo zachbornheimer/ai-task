@@ -247,8 +247,26 @@ func renderSession(w io.Writer, s app.Session) {
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 	note := c.fs.String("note", "", "why the task is being released (logged)")
 	failed := c.fs.Bool("failed", false, "record a failed attempt (retry bookkeeping)")
+	runtime := c.fs.Bool("runtime", false, "renew every live rootless claim owned by the registered runtime")
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if *runtime {
+		if sub != "renew" || len(c.args) != 0 || *failed || *note != "" {
+			return usage("--runtime requires claim renew without a token or release flags")
+		}
+		e, err := c.engine(ctx)
+		if err != nil {
+			return err
+		}
+		count, err := e.RenewRuntime(ctx)
+		if err != nil {
+			return err
+		}
+		out := struct {
+			Renewed int `json:"renewed"`
+		}{count}
+		return c.emit(out, func(w io.Writer) { say(w, "✓ Renewed %d runtime claims\n", count) })
 	}
 	tok, err := c.token(ctx, c.args)
 	if err != nil {

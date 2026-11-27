@@ -50,10 +50,10 @@ func (e *Engine) live(ctx context.Context, tok execution.Token) bool {
 func (e *Engine) liveSessions(ctx context.Context) []workspace.StoredSession {
 	var out []workspace.StoredSession
 	for _, v := range e.sessions().ForCwd(e.cwd) {
-		if e.live(ctx, execution.Token(v.Token)) {
-			out = append(out, v)
-		} else {
+		if !e.live(ctx, execution.Token(v.Token)) {
 			e.sessions().Remove(v.Cwd, v.TaskID)
+		} else if e.runtime.Allows(v.Runtime) {
+			out = append(out, v)
 		}
 	}
 	return out
@@ -84,7 +84,7 @@ func (e *Engine) AmbientToken(ctx context.Context) (execution.Token, error) {
 // liveClaimFromCwd returns the live claim of id made from this directory.
 func (e *Engine) liveClaimFromCwd(ctx context.Context, id task.ID) (Session, bool) {
 	v, ok := e.sessions().Find(e.cwd, string(id))
-	if !ok || !e.live(ctx, execution.Token(v.Token)) {
+	if !ok || !e.runtime.Allows(v.Runtime) || !e.live(ctx, execution.Token(v.Token)) {
 		return Session{}, false
 	}
 	tok := execution.Token(v.Token)
@@ -103,5 +103,5 @@ func (e *Engine) liveClaimFromCwd(ctx context.Context, id task.ID) (Session, boo
 // directory, replacing any earlier claim's file for the same task (takeover).
 func (e *Engine) storeRootlessToken(s Session) error {
 	e.sessions().RemoveTask(string(s.Task.ID))
-	return e.sessions().Save(workspace.StoredSession{Cwd: e.cwd, TaskID: string(s.Task.ID), Token: string(s.Token)})
+	return e.sessions().Save(workspace.StoredSession{Cwd: e.cwd, TaskID: string(s.Task.ID), Token: string(s.Token), Runtime: e.runtime})
 }

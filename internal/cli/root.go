@@ -34,12 +34,14 @@ const (
 
 // Env is the process environment the CLI depends on, injected for tests.
 type Env struct {
-	Args   []string
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-	Getenv func(string) string
-	Cwd    string
+	Args         []string
+	Stdin        io.Reader
+	Stdout       io.Writer
+	Stderr       io.Writer
+	Getenv       func(string) string
+	Cwd          string
+	// engineConfig supplies test clocks and leases without production env flags.
+	engineConfig *app.Config
 }
 
 // globals are options every subcommand accepts, from flags or environment.
@@ -264,7 +266,16 @@ func (c *ctxt) engine(ctx context.Context) (*app.Engine, error) {
 	if actor == "" {
 		actor = c.env.Getenv("USER")
 	}
-	e, err := app.Open(ctx, app.Config{Path: c.g.db, Actor: actor, Cwd: c.env.Cwd})
+	runtime, err := lookupRuntime(ctx, c.env.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	cfg := app.Config{}
+	if c.env.engineConfig != nil {
+		cfg = *c.env.engineConfig
+	}
+	cfg.Path, cfg.Actor, cfg.Cwd, cfg.Runtime = c.g.db, actor, c.env.Cwd, runtime
+	e, err := app.Open(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
