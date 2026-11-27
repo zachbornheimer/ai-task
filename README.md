@@ -146,6 +146,16 @@ CLI), `docs/limitations.md`, `docs/decisions/`. Agent onboarding:
 
 ## Development
 
+`go.mod` pins the development toolchain to Go 1.26.11, which fixes
+GO-2026-6859 in `net/http`. The shared mise profile reads that `toolchain`
+directive on each host; keep it patched even when the profile's default Go
+version is newer. Verify the effective runtime and vulnerability scan with:
+
+```sh
+mise exec -- go version
+mise exec -- govulncheck ./...
+```
+
 ```sh
 go test ./...                       # unit, engine, CLI goldens, subprocess e2e, example runner
 go test -race ./internal/app/ ./test/e2e/
