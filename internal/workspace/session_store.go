@@ -67,6 +67,9 @@ func (s SessionStore) AllChecked() ([]StoredSession, error) {
 	var out []StoredSession
 	for _, entry := range entries {
 		body, err := os.ReadFile(filepath.Join(s.Dir, entry.Name()))
+		if os.IsNotExist(err) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

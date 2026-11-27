@@ -105,7 +105,8 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 		if !cfg.Runtime.Valid() {
 			return nil, errors.New("invalid runtime identity")
 		}
-		owner = new(*cfg.Runtime)
+		identity := *cfg.Runtime
+		owner = &identity
 	}
 	path := cfg.Path
 	if path == "" {

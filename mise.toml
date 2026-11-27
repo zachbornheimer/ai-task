@@ -13,7 +13,7 @@ run = "go test ./internal/cli -run '^TestInteractiveLeaseHost$' -count=1 -v"
 
 [tasks."test:lease-unit"]
 description = "Deterministic interactive lifecycle transitions"
-run = "bun test $HOME/.omp/agent/extensions/atask-lease/lease.test.ts"
+run = "bun test \"${ATASK_LEASE_TEST:-$HOME/.omp/agent/extensions/atask-lease/lease.test.ts}\""
 
 [tasks."fmt:runtime"]
 run = "gofmt -w internal/cli/runtime*.go internal/cli/interactive_host_test.go internal/app/runtime*.go internal/workspace/runtime*.go internal/workspace/session_store.go internal/app/rootless_session.go internal/app/engine.go internal/cli/claim.go internal/cli/root.go"
@@ -22,4 +22,4 @@ run = "gofmt -w internal/cli/runtime*.go internal/cli/interactive_host_test.go i
 run = "go test ./internal/cli -count=1"
 
 [tasks."test:runtime-race"]
-run = "go test -race ./internal/app ./internal/cli -run 'Runtime|Rootless|InteractiveLease' -count=1"
+run = "go test -race ./internal/workspace ./internal/execution ./internal/app ./internal/cli -run 'Runtime|Rootless|InteractiveLease' -count=1"

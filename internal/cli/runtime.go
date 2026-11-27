@@ -57,7 +57,10 @@ func lookupRuntime(ctx context.Context, getenv func(string) string) (*workspace.
 	}
 	defer root.Close()
 	openedInfo, err := root.Stat(".")
-	if err != nil || !os.SameFile(rootInfo, openedInfo) {
+	if err != nil {
+		return nil, fmt.Errorf("inspect opened runtime registry root: %w", err)
+	}
+	if !os.SameFile(rootInfo, openedInfo) {
 		return nil, fmt.Errorf("runtime registry root changed while opening")
 	}
 	if err := privateRuntimePath(openedInfo, true); err != nil {
@@ -89,7 +92,10 @@ func readRuntimeRegistration(root *os.Root, name string) (*runtimeRegistration, 
 	}
 	defer file.Close()
 	openedInfo, err := file.Stat()
-	if err != nil || !os.SameFile(info, openedInfo) {
+	if err != nil {
+		return nil, fmt.Errorf("inspect opened runtime registration: %w", err)
+	}
+	if !os.SameFile(info, openedInfo) {
 		return nil, fmt.Errorf("runtime registration changed while opening")
 	}
 	if err := privateRuntimePath(openedInfo, false); err != nil {
