@@ -20,6 +20,7 @@ atask update TASK_ID [FLAGS]
 atask claim [TASK_ID] [--wait]
 atask claim --group REF [--wait]
 atask claim renew [TOKEN|-]
+atask claim renew --runtime   # private interactive runtime's rootless claims; no tokens emitted
 atask claim release [TOKEN|-] [--note TEXT] [--failed]
 
 atask log [--done TEXT] [--next TEXT] [--learned TEXT] [--note TEXT]

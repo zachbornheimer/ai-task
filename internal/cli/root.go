@@ -40,6 +40,8 @@ type Env struct {
 	Stderr io.Writer
 	Getenv func(string) string
 	Cwd    string
+	// engineConfig supplies test clocks and leases without production env flags.
+	engineConfig *app.Config
 }
 
 // globals are options every subcommand accepts, from flags or environment.
@@ -87,12 +89,13 @@ type command struct {
 
 // ctxt is the per-invocation context handed to commands.
 type ctxt struct {
-	env  Env
-	g    globals
-	fs   *flag.FlagSet
-	name string      // the subcommand being run
-	eng  *app.Engine // opened lazily
-	args []string    // positional arguments after interleaved parsing
+	env          Env
+	g            globals
+	fs           *flag.FlagSet
+	name         string      // the subcommand being run
+	eng          *app.Engine // opened lazily
+	runtimeBound bool        // set only after private runtime registration validates
+	args         []string    // positional arguments after interleaved parsing
 }
 
 // Main runs the CLI and returns the process exit code.
@@ -264,11 +267,21 @@ func (c *ctxt) engine(ctx context.Context) (*app.Engine, error) {
 	if actor == "" {
 		actor = c.env.Getenv("USER")
 	}
-	e, err := app.Open(ctx, app.Config{Path: c.g.db, Actor: actor, Cwd: c.env.Cwd})
+	runtime, err := lookupRuntime(ctx, c.env.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	cfg := app.Config{}
+	if c.env.engineConfig != nil {
+		cfg = *c.env.engineConfig
+	}
+	cfg.Path, cfg.Actor, cfg.Cwd, cfg.Runtime = c.g.db, actor, c.env.Cwd, runtime
+	e, err := app.Open(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	c.eng = e
+	c.runtimeBound = runtime != nil
 	return e, nil
 }
 

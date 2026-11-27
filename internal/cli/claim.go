@@ -81,6 +81,9 @@ func (c *ctxt) directoryToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if c.env.Getenv("ATASK_RUNTIME_ROOT") != "" && !c.runtimeBound {
+		return "", fault.New(fault.CodeInvalidSession, "interactive runtime registration is missing or stale; ambient claim discovery refused")
+	}
 	tok, err := e.AmbientToken(ctx)
 	return string(tok), err
 }
@@ -171,7 +174,7 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 		if err != nil {
 			return err
 		}
-		return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+		return c.emitSession(s)
 	}
 	if len(c.args) == 1 {
 		ref := c.args[0]
@@ -201,7 +204,20 @@ func runClaim(ctx context.Context, c *ctxt, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+	return c.emitSession(s)
+}
+
+// Runtime-bound rootless claims carry their token only in the private store.
+func (c *ctxt) emitSession(s app.Session) error {
+	if !c.runtimeBound || s.Branch != "" {
+		return c.emit(s, func(w io.Writer) { renderSession(w, s) })
+	}
+	s.Token = ""
+	out := struct {
+		app.Session
+		Token *string `json:"token,omitempty"`
+	}{Session: s}
+	return c.emit(out, func(w io.Writer) { renderSession(w, s) })
 }
 
 // renderSession is the human acknowledgement of a claim.
@@ -241,14 +257,34 @@ func renderSession(w io.Writer, s app.Session) {
 	sayln(w)
 	renderShow(w, s.Task, false, painter{})
 	renderHandoff(w, s.Handoff)
-	say(w, "token=%s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
+	if s.Token != "" {
+		say(w, "token=%s (also stored in the worktree; `atask` commands run there need no token)\n", s.Token)
+	}
 }
 
 func (c *ctxt) claimSub(ctx context.Context, sub string, args []string) error {
 	note := c.fs.String("note", "", "why the task is being released (logged)")
 	failed := c.fs.Bool("failed", false, "record a failed attempt (retry bookkeeping)")
+	runtime := c.fs.Bool("runtime", false, "renew every live rootless claim owned by the registered runtime")
 	if err := c.parse(args); err != nil {
 		return err
+	}
+	if *runtime {
+		if sub != "renew" || len(c.args) != 0 || *failed || *note != "" {
+			return usage("--runtime requires claim renew without a token or release flags")
+		}
+		e, err := c.engine(ctx)
+		if err != nil {
+			return err
+		}
+		count, err := e.RenewRuntime(ctx)
+		if err != nil {
+			return err
+		}
+		out := struct {
+			Renewed int `json:"renewed"`
+		}{count}
+		return c.emit(out, func(w io.Writer) { say(w, "✓ Renewed %d runtime claims\n", count) })
 	}
 	tok, err := c.token(ctx, c.args)
 	if err != nil {

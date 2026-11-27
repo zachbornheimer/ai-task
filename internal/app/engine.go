@@ -59,6 +59,8 @@ type Config struct {
 	// Cwd is the working directory of the process that opened the engine,
 	// stamped onto newly created tasks.
 	Cwd string
+	// Runtime authorizes discovery of rootless claims owned by this runtime.
+	Runtime *workspace.RuntimeIdentity
 	// ProofBudget, when > 0, replaces every run's contract budget (tests).
 	ProofBudget time.Duration
 	// Sandbox confines checks and actions. Nil reads [sandbox] from the
@@ -85,6 +87,7 @@ type Engine struct {
 	swt            workspace.Switcher
 	actor          string
 	cwd            string
+	runtime        *workspace.RuntimeIdentity
 	proofBudget    time.Duration
 	sandbox        proof.SandboxConfig
 
@@ -97,6 +100,14 @@ type Engine struct {
 
 // Open opens the store and applies migrations.
 func Open(ctx context.Context, cfg Config) (*Engine, error) {
+	var owner *workspace.RuntimeIdentity
+	if cfg.Runtime != nil {
+		if !cfg.Runtime.Valid() {
+			return nil, errors.New("invalid runtime identity")
+		}
+		identity := *cfg.Runtime
+		owner = &identity
+	}
 	path := cfg.Path
 	if path == "" {
 		var err error
@@ -150,6 +161,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 		store: st, now: func() time.Time { return now().UTC().Truncate(time.Millisecond) },
 		newID: newID, wsRoot: wsRoot, logRoot: logRoot, poll: poll, heartbeatEvery: hb, lease: lease, changed: make(chan struct{}),
 		swt: cfg.Switch, actor: cfg.Actor, cwd: cfg.Cwd, proofBudget: cfg.ProofBudget, sandbox: sandbox,
+		runtime: owner,
 	}, nil
 }
 

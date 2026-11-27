@@ -3,6 +3,7 @@ package workspace
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 // StoredSession is one token file: the claim directory, the task, the token.
 type StoredSession struct {
 	Cwd, TaskID, Token string
+	Runtime            *RuntimeIdentity
 }
 
 // SessionStore is a directory of StoredSession files.
@@ -33,6 +35,13 @@ func (s SessionStore) Save(v StoredSession) error {
 		return err
 	}
 	body := strings.Join([]string{v.Cwd, v.TaskID, v.Token}, "\n") + "\n"
+	if v.Runtime != nil {
+		binding, err := json.Marshal(v.Runtime)
+		if err != nil {
+			return err
+		}
+		body += string(binding) + "\n"
+	}
 	return os.WriteFile(s.path(v.Cwd, v.TaskID), []byte(body), 0o600)
 }
 
@@ -44,6 +53,31 @@ func (s SessionStore) Find(cwd, taskID string) (StoredSession, bool) {
 // ForCwd lists every stored session claimed from cwd.
 func (s SessionStore) ForCwd(cwd string) []StoredSession {
 	return s.matching(func(v StoredSession) bool { return v.Cwd == cwd })
+}
+
+// AllChecked reports unavailable storage rather than an empty claim set.
+func (s SessionStore) AllChecked() ([]StoredSession, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []StoredSession
+	for _, entry := range entries {
+		body, err := os.ReadFile(filepath.Join(s.Dir, entry.Name()))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if v, ok := parseStoredSession(body); ok {
+			out = append(out, v)
+		}
+	}
+	return out, nil
 }
 
 // Remove deletes the stored session of taskID claimed from cwd.
@@ -75,9 +109,21 @@ func readStoredSession(path string) (StoredSession, bool) {
 	if err != nil {
 		return StoredSession{}, false
 	}
+	return parseStoredSession(b)
+}
+
+func parseStoredSession(b []byte) (StoredSession, bool) {
 	f := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
-	if len(f) != sessionFileFields {
+	if len(f) != sessionFileFields && len(f) != sessionFileFields+1 {
 		return StoredSession{}, false
 	}
-	return StoredSession{Cwd: f[0], TaskID: f[1], Token: f[2]}, true
+	v := StoredSession{Cwd: f[0], TaskID: f[1], Token: f[2]}
+	if len(f) > sessionFileFields {
+		var owner RuntimeIdentity
+		if json.Unmarshal([]byte(f[3]), &owner) != nil || !owner.Valid() {
+			return StoredSession{}, false
+		}
+		v.Runtime = &owner
+	}
+	return v, true
 }
