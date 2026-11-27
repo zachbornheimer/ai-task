@@ -3,6 +3,19 @@
 Verification is separate from implementation. An agent's word never
 completes a task; only `verify complete` can, and only with fresh evidence.
 
+## Git identity test isolation
+
+`TestDoctorGitIdentity` observes missing and repository-local identity with
+ambient Git configuration hidden only for the duration of the test. This
+includes command-scope configuration inherited through `GIT_CONFIG_COUNT`
+and `GIT_CONFIG_PARAMETERS`, as used by headless hosts. Test cleanup restores
+the inherited environment; production doctor checks and the user's identity
+and signing configuration are unchanged.
+
+`TestIsolateGitIdentityInjectedConfig` uses a non-identity Git setting to
+check both injection forms and their restoration after cleanup. Run both with
+`mise exec -- go test ./internal/app -run '^(TestDoctorGitIdentity|TestIsolateGitIdentityInjectedConfig)$' -count=1`.
+
 ## Two required proofs
 
 - **Proof** (`atask add --proof`, `atask update --proof`) proves the task's
