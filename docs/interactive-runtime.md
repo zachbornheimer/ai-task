@@ -16,6 +16,8 @@ The CLI rejects unsafe permissions, symlinks, malformed identities, dead/unrelat
 
 `atask --json claim renew --runtime` renews the runtime's authorized rootless claims without printing tokens. It reports a renewed count, including zero after release/completion. Ordinary `atask log` and `atask verify proof|regression|complete` select one matching runtime claim without positional tokens or an `ATASK_SESSION` prefix. Multiple claims within a runtime remain ambiguous for these ordinary commands. Native subagents and detached owners do not create interactive registrations.
 
+For a validated runtime-bound rootless claim, CLI claim acknowledgements omit the token in JSON and human output. The engine stores the real token privately; explicit/private-worktree/unregistered claim responses remain unchanged.
+
 ## Lifecycle
 
 The profile extension `~/.omp/agent/extensions/atask-lease/index.ts` owns interactive timers. Quiet work/long tools do not suspend renewal. Session switch removes the old registration and creates a fresh capability; switching back does not adopt the previous attempt. Shutdown/hibernation that exits the process stop renewal. A reconnect to the same running process retains authority; reconnect after exit gets a new incarnation and cannot revive the old attempt. Owner death stops renewal, and inherited registrations do not authorize orphaned descendants. Engine expiry/supersession fences remain final. A renewal error revokes registration, stops renewal and emits a safe diagnostic, leaving the claim to expire rather than hiding the error.
