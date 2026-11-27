@@ -12,17 +12,12 @@ import (
 	"github.com/zachbornheimer/ai-task/internal/must"
 )
 
-// isolateGitIdentity hides ambient Git configuration from this test, so
-// the only identity is the one the test gives the repository.
 func isolateGitIdentity(t *testing.T) {
 	t.Helper()
 	empty := filepath.Join(t.TempDir(), "gitconfig")
 	must.OK(t, os.WriteFile(empty, nil, 0o600))
 	t.Setenv("GIT_CONFIG_GLOBAL", empty)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	// Command-scope config can be injected by a host even without config
-	// files. Ignore both forms only for this test; preserve the caller's
-	// values (including signing configuration) when cleanup runs.
 	t.Setenv("GIT_CONFIG_COUNT", "0")
 	t.Setenv("GIT_CONFIG_PARAMETERS", "")
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
