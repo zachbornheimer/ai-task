@@ -16,6 +16,14 @@ and signing configuration are unchanged.
 check both injection forms and their restoration after cleanup. Run both with
 `mise exec -- go test ./internal/app -run '^(TestDoctorGitIdentity|TestIsolateGitIdentityInjectedConfig)$' -count=1`.
 
+Workspace identity tests use the same test-local boundary: both command-scope
+injection forms are hidden and restored on cleanup, while repository-local
+identity remains visible to merge preparation. The regression uses `core.abbrev`
+as a non-identity sentinel. The shared TMPDIR root fixture explicitly applies
+mode `0750` after creation so a restrictive host umask cannot make it private.
+Production identity, signing, and private-root checks are unchanged. Run with
+`mise exec -- go test ./internal/workspace -count=1` under the host environment.
+
 ## Two required proofs
 
 - **Proof** (`atask add --proof`, `atask update --proof`) proves the task's

@@ -357,15 +357,67 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 	}
 }
 
-func TestPrepareMergeWithoutIdentity(t *testing.T) {
+// isolateGitIdentity leaves repository-local identity as the only identity.
+func isolateGitIdentity(t *testing.T) {
+	t.Helper()
 	empty := filepath.Join(t.TempDir(), "gitconfig")
 	must.OK(t, os.WriteFile(empty, nil, 0o600))
 	t.Setenv("GIT_CONFIG_GLOBAL", empty)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	// Headless hosts inject command-scope config independently of files.
+	// t.Setenv restores both injection forms, including signing, on cleanup.
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	t.Setenv("GIT_CONFIG_PARAMETERS", "")
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
 		t.Setenv(k, "")
 		must.OK(t, os.Unsetenv(k))
 	}
+}
+
+func TestIsolateGitIdentityInjectedConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{"count", map[string]string{
+			"GIT_CONFIG_COUNT":      "1",
+			"GIT_CONFIG_KEY_0":      "core.abbrev",
+			"GIT_CONFIG_VALUE_0":    "12",
+			"GIT_CONFIG_PARAMETERS": "",
+		}},
+		{"parameters", map[string]string{
+			"GIT_CONFIG_COUNT":      "0",
+			"GIT_CONFIG_PARAMETERS": "'core.abbrev=12'",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			abbrev := func() (string, error) {
+				out, err := exec.Command("git", "config", "--get", "core.abbrev").CombinedOutput()
+				return strings.TrimSpace(string(out)), err
+			}
+			if got, err := abbrev(); err != nil || got != "12" {
+				t.Fatalf("injected config before isolation = %q, %v; want 12", got, err)
+			}
+			t.Run("isolated", func(t *testing.T) {
+				isolateGitIdentity(t)
+				got, err := abbrev()
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 1 || got != "" {
+					t.Fatalf("injected config leaked through isolation: %q, %v", got, err)
+				}
+			})
+			if got, err := abbrev(); err != nil || got != "12" {
+				t.Fatalf("injected config after cleanup = %q, %v; want 12", got, err)
+			}
+		})
+	}
+}
+
+func TestPrepareMergeWithoutIdentity(t *testing.T) {
+	isolateGitIdentity(t)
 	r := newRepo(t)
 	r.git(r.dir, "config", "user.useConfigOnly", "true")
 	r.git(r.dir, "checkout", "-q", "-b", "side")

@@ -24,6 +24,13 @@ func TestEnsureCheckTmpRefusesSharedRoot(t *testing.T) {
 	if err := os.Mkdir(root, 0o750); err != nil { // group-accessible: not private
 		t.Fatal(err)
 	}
+	// Mkdir applies the caller's umask; establish the shared mode explicitly.
+	if err := os.Chmod(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(root); err != nil || info.Mode().Perm() != 0o750 {
+		t.Fatalf("shared root mode: %v, %v; want 0750", info, err)
+	}
 	t.Setenv(CheckTmpRootEnv, root)
 	if tmp, err := EnsureCheckTmp("/w"); err == nil {
 		t.Fatalf("EnsureCheckTmp accepted shared root %s and returned %s", root, tmp)
