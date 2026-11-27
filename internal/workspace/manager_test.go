@@ -17,11 +17,10 @@ import (
 )
 
 type repo struct {
-	t    *testing.T
-	dir  string
-	mgr  Manager
-	ctx  context.Context
-	next int
+	t   *testing.T
+	dir string
+	mgr Manager
+	ctx context.Context
 }
 
 func newRepo(t *testing.T) *repo {
@@ -80,7 +79,6 @@ func (r *repo) commit(dir, file, content string) string {
 	r.t.Helper()
 	must.OK(r.t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600))
 	r.git(dir, "add", file)
-	r.next++
 	r.git(dir, "commit", "-q", "-m", content)
 	return r.git(dir, "rev-parse", "HEAD")
 }
@@ -99,8 +97,8 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 		t.Fatalf("%+v %v", again, err)
 	}
 	must.OK(t, os.WriteFile(filepath.Join(w1.Path, "wip.txt"), []byte("wip"), 0o600))
-	if again, _ := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0); !again.Dirty {
-		t.Fatal("dirty worktree not reported")
+	if again, err := r.mgr.EnsureTask(r.ctx, "at-aaaaaa", "main", 0); err != nil || !again.Dirty {
+		t.Fatalf("dirty worktree: %+v, %v", again, err)
 	}
 	must.OK(t, os.Remove(filepath.Join(w1.Path, "wip.txt")))
 	rev := r.commit(w1.Path, "g.txt", "work")
@@ -144,13 +142,21 @@ func TestTaskWorktreesAndSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(filepath.Clean(filepath.Join(snap, "g.txt"))); string(b) != "work" {
-		t.Fatal("snapshot content")
+	t.Cleanup(cleanup)
+	snapshot, err := os.OpenRoot(snap)
+	must.OK(t, err)
+	t.Cleanup(func() { must.OK(t, snapshot.Close()) })
+	b, err := snapshot.ReadFile("g.txt")
+	must.OK(t, err)
+	if string(b) != "work" {
+		t.Fatalf("snapshot content: got %q", b)
 	}
 	// Editing the attempt worktree does not affect the snapshot.
 	must.OK(t, os.WriteFile(filepath.Join(w1.Path, "g.txt"), []byte("changed"), 0o600))
-	if b, _ := os.ReadFile(filepath.Clean(filepath.Join(snap, "g.txt"))); string(b) != "work" {
-		t.Fatal("snapshot must be isolated")
+	b, err = snapshot.ReadFile("g.txt")
+	must.OK(t, err)
+	if string(b) != "work" {
+		t.Fatalf("snapshot must be isolated: got %q", b)
 	}
 	cleanup()
 	if _, err := os.Stat(snap); !os.IsNotExist(err) {
@@ -165,7 +171,8 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	r := newRepo(t)
 	r.git(r.dir, "config", "user.name", "t")
 	r.git(r.dir, "config", "user.email", "t@t")
-	w, _ := r.mgr.EnsureTask(r.ctx, "at-bbbbbb", "main", 0)
+	w, err := r.mgr.EnsureTask(r.ctx, "at-bbbbbb", "main", 0)
+	must.OK(t, err)
 	rev := r.commit(w.Path, "b.txt", "b")
 	// Fast-forward candidate: main is checked out in the main worktree and
 	// clean, so promotion fast-forwards it in place.
@@ -173,6 +180,7 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	if err != nil || cand.Revision != rev {
 		t.Fatalf("%+v %v", cand, err)
 	}
+	t.Cleanup(cand.Cleanup)
 	if err := r.mgr.Promote(r.ctx, "main", cand); err != nil {
 		t.Fatal(err)
 	}
@@ -186,12 +194,14 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	// Diverged: main moves on, a second attempt branch merges with a
 	// real merge commit; the candidate is verified before the target moves.
 	mainRev := r.commit(r.dir, "m.txt", "main work")
-	w2, _ := r.mgr.EnsureTask(r.ctx, "at-cccccc", rev, 0)
+	w2, err := r.mgr.EnsureTask(r.ctx, "at-cccccc", rev, 0)
+	must.OK(t, err)
 	rev2 := r.commit(w2.Path, "c.txt", "c")
 	cand2, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev2}, "promote c")
 	if err != nil || cand2.Base != mainRev || cand2.Revision == rev2 || cand2.Revision == mainRev {
 		t.Fatalf("%+v %v", cand2, err)
 	}
+	t.Cleanup(cand2.Cleanup)
 	if r.git(r.dir, "rev-parse", "HEAD") != mainRev {
 		t.Fatal("prepare must not move the target")
 	}
@@ -203,7 +213,8 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatal("main not at merge")
 	}
 	// Conflict: two branches edit the same file.
-	w3, _ := r.mgr.EnsureTask(r.ctx, "at-dddddd", "main", 0)
+	w3, err := r.mgr.EnsureTask(r.ctx, "at-dddddd", "main", 0)
+	must.OK(t, err)
 	r.commit(w3.Path, "m.txt", "conflict A")
 	r.commit(r.dir, "m.txt", "conflict B")
 	rev3 := r.git(w3.Path, "rev-parse", "HEAD")
@@ -212,12 +223,14 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 		t.Fatalf("conflict: %v", err)
 	}
 	// Target moved between prepare and promote: compare-and-swap refuses.
-	w4, _ := r.mgr.EnsureTask(r.ctx, "at-eeeeee", "main", 0)
+	w4, err := r.mgr.EnsureTask(r.ctx, "at-eeeeee", "main", 0)
+	must.OK(t, err)
 	rev4 := r.commit(w4.Path, "e.txt", "e")
 	cand4, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev4}, "x")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(cand4.Cleanup)
 	r.commit(r.dir, "z.txt", "moved")
 	err = r.mgr.Promote(r.ctx, "main", cand4)
 	cand4.Cleanup()
@@ -226,9 +239,12 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	}
 	// A target worktree with a local file where the promotion would write
 	// refuses promotion (unrelated dirt is fine: TestPromoteIntoDirtyCheckoutIsSafe).
-	w5, _ := r.mgr.EnsureTask(r.ctx, "at-ffffff", "main", 0)
+	w5, err := r.mgr.EnsureTask(r.ctx, "at-ffffff", "main", 0)
+	must.OK(t, err)
 	rev5 := r.commit(w5.Path, "f5.txt", "f5")
-	cand5, _ := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
+	cand5, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
+	must.OK(t, err)
+	t.Cleanup(cand5.Cleanup)
 	must.OK(t, os.WriteFile(filepath.Join(r.dir, "f5.txt"), []byte("x"), 0o600))
 	err = r.mgr.Promote(r.ctx, "main", cand5)
 	cand5.Cleanup()
@@ -238,7 +254,9 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	must.OK(t, os.Remove(filepath.Join(r.dir, "f5.txt")))
 	// Target not checked out anywhere: ref update path.
 	r.git(r.dir, "checkout", "-q", "-b", "other")
-	cand6, _ := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
+	cand6, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev5}, "x")
+	must.OK(t, err)
+	t.Cleanup(cand6.Cleanup)
 	if err := r.mgr.Promote(r.ctx, "main", cand6); err != nil {
 		t.Fatal(err)
 	}
@@ -251,8 +269,8 @@ func TestPrepareMergeAndPromote(t *testing.T) {
 	}
 }
 
-// Two promotions into a checked-out target at once: exactly one wins, the
-// other reports a moved target, and the checkout is never left dirty.
+// Competing promotions into a checked-out target: exactly one wins, the
+// others report a moved target, and the checkout is never left dirty.
 func TestConcurrentPromotionsIntoCheckout(t *testing.T) {
 	r := newRepo(t)
 	const n = 6
@@ -311,13 +329,19 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 	r.git(r.dir, "config", "user.name", "t")
 	r.git(r.dir, "config", "user.email", "t@t")
 	promote := func(id, file string) error {
-		w, _ := r.mgr.EnsureTask(r.ctx, id, "main", 0)
+		w, err := r.mgr.EnsureTask(r.ctx, id, "main", 0)
+		must.OK(t, err)
 		rev := r.commit(w.Path, file, "from "+id)
 		cand, err := r.mgr.PrepareMerge(r.ctx, "main", []string{rev}, "x")
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(cand.Cleanup)
 		return r.mgr.Promote(r.ctx, "main", cand)
+	}
+	r.commit(r.dir, "g.txt", "committed content")
+	if got := r.git(r.dir, "ls-files", "--", "g.txt"); got != "g.txt" {
+		t.Fatalf("tracked-file precondition: got %q", got)
 	}
 	// Unrelated untracked file and unrelated tracked edit: promotion proceeds
 	// and both survive.
@@ -326,11 +350,15 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 	if err := promote("at-dirty1", "new1.txt"); err != nil {
 		t.Fatalf("safe promotion refused: %v", err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(r.dir, "notes.txt")); string(b) != "scratch" {
-		t.Fatal("untracked file lost")
+	b, err := os.ReadFile(filepath.Join(r.dir, "notes.txt"))
+	must.OK(t, err)
+	if string(b) != "scratch" {
+		t.Fatalf("untracked file content: got %q", b)
 	}
-	if b, _ := os.ReadFile(filepath.Join(r.dir, "g.txt")); string(b) != "local edit" {
-		t.Fatal("local edit lost")
+	b, err = os.ReadFile(filepath.Join(r.dir, "g.txt"))
+	must.OK(t, err)
+	if string(b) != "local edit" {
+		t.Fatalf("tracked file content: got %q", b)
 	}
 	if _, err := os.Stat(filepath.Join(r.dir, "new1.txt")); err != nil {
 		t.Fatal("promotion did not land")
@@ -341,17 +369,22 @@ func TestPromoteIntoDirtyCheckoutIsSafe(t *testing.T) {
 	if err := promote("at-dirty2", "new2.txt"); err == nil || !strings.Contains(err.Error(), "new2.txt") {
 		t.Fatalf("clashing untracked file not refused: %v", err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(r.dir, "new2.txt")); string(b) != "my draft" || r.git(r.dir, "rev-parse", "main") != before {
-		t.Fatal("refusal was not clean")
+	b, err = os.ReadFile(filepath.Join(r.dir, "new2.txt"))
+	must.OK(t, err)
+	if string(b) != "my draft" || r.git(r.dir, "rev-parse", "main") != before {
+		t.Fatalf("refusal changed content or target: content %q", b)
 	}
 	// Tracked file with local edits that the promotion modifies: refused.
 	if err := promote("at-dirty3", "g.txt"); err == nil || !strings.Contains(err.Error(), "g.txt") {
 		t.Fatalf("clashing local edit not refused: %v", err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(r.dir, "g.txt")); string(b) != "local edit" {
-		t.Fatal("local edit overwritten")
+	b, err = os.ReadFile(filepath.Join(r.dir, "g.txt"))
+	must.OK(t, err)
+	if string(b) != "local edit" {
+		t.Fatalf("local edit overwritten: got %q", b)
 	}
-	st, _ := Inspect(r.ctx, r.dir)
+	st, err := Inspect(r.ctx, r.dir)
+	must.OK(t, err)
 	if len(st.Dirty) != 3 {
 		t.Fatalf("checkout changed by refused promotions: %v", st.Dirty)
 	}
@@ -442,7 +475,7 @@ func TestPrepareMergeWithoutIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cand.Cleanup()
+	t.Cleanup(cand.Cleanup)
 	if who := r.git(r.dir, "log", "-1", "--format=%an <%ae>|%cn <%ce>", cand.Revision); who != "Repo Owner <owner@example.com>|Repo Owner <owner@example.com>" {
 		t.Fatalf("merge recorded as %q", who)
 	}
